@@ -1,0 +1,61 @@
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  font-size: 12.5px;
+}
+.data-table th {
+  text-align: left;
+  padding: 9px 14px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.data-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.data-table tbody tr:last-child td { border-bottom: none; }
+.data-table tbody tr:hover { background: var(--surface-1); }
+.clickable-row { cursor: pointer; }
+.cell-name { font-weight: 600; color: var(--text-primary); }
+
+.status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 7px;
+  background: var(--text-tertiary);
+}
+.status-active { background: var(--status-healthy); }
+.status-planned { background: var(--status-info); }
+.status-on_hold { background: var(--status-warning); }
+.status-completed { background: var(--text-tertiary); }
+.status-cancelled { background: var(--status-critical); }
+
+.priority-badge {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+.priority-critical { background: var(--status-critical-bg); color: var(--status-critical); }
+.priority-high { background: var(--status-warning-bg); color: var(--status-warning); }
+
+.tbd-text { color: var(--text-tertiary); font-style: italic; }
+
+.health-cell { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+.tbd-inline { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; color: var(--text-tertiary); }

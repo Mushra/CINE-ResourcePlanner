@@ -1,0 +1,172 @@
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 0.12s, border-color 0.12s, color 0.12s;
+}
+.btn-md { padding: 6px 12px; }
+.btn-sm { padding: 4px 8px; font-size: 12px; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-color: var(--accent);
+}
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+.btn-secondary {
+  background: var(--surface-0);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+.btn-secondary:hover:not(:disabled) { background: var(--surface-2); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+.btn-ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--text-primary); }
+
+.btn-danger {
+  background: var(--status-critical);
+  color: white;
+  border-color: var(--status-critical);
+}
+.btn-danger:hover:not(:disabled) { opacity: 0.9; }
+
+/* Status pills */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.pill-critical { background: var(--status-critical-bg); color: var(--status-critical); border-color: var(--status-critical-border); }
+.pill-warning { background: var(--status-warning-bg); color: var(--status-warning); border-color: var(--status-warning-border); }
+.pill-info { background: var(--status-info-bg); color: var(--status-info); border-color: var(--status-info-border); }
+.pill-neutral { background: var(--status-healthy-bg); color: var(--status-healthy); border-color: var(--status-healthy-border); }
+
+/* Toaster */
+.toaster {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 500;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  background: var(--surface-0);
+  border: 1px solid var(--border);
+  font-size: 12.5px;
+  min-width: 220px;
+  max-width: 360px;
+  animation: toast-in 0.15s ease-out;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.toast-success { border-color: var(--status-healthy-border); color: var(--text-primary); }
+.toast-success svg { color: var(--status-healthy); }
+.toast-error { border-color: var(--status-critical-border); }
+.toast-error svg { color: var(--status-critical); }
+.toast-info svg { color: var(--status-info); }
+.toast span { flex: 1; }
+.toast-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  display: flex;
+  padding: 2px;
+}
+.toast-dismiss:hover { color: var(--text-primary); }
+
+/* Empty state */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 56px 24px;
+  color: var(--text-secondary);
+  gap: 6px;
+  margin: auto;
+  max-width: 380px;
+}
+.empty-state-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+}
+.empty-state h3 { margin: 0; font-size: 14px; color: var(--text-primary); }
+.empty-state p { margin: 0 0 6px; font-size: 12.5px; }
+
+/* Cards / sections */
+.card {
+  background: var(--surface-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.section-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+/* Inputs used across forms */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.field label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.field input, .field select, .field textarea {
+  width: 100%;
+}
+.field-row {
+  display: flex;
+  gap: 10px;
+}
+.field-row > .field { flex: 1; }
+
+.num-input {
+  width: 56px;
+  text-align: right;
+  padding: 4px 6px;
+  font-variant-numeric: tabular-nums;
+}

@@ -1,0 +1,18 @@
+appId: com.mushra.cine-resource-planner
+productName: Cinematic Resource Planner
+directories:
+  output: release
+files:
+  - dist/**
+  - electron/**
+  - package.json
+win:
+  target: nsis
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+publish:
+  provider: github
+  owner: Mushra
+  repo: CINE-ResourcePlanner
