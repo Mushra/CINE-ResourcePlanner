@@ -16,3 +16,4 @@ publish:
   provider: github
   owner: Mushra
   repo: CINE-ResourcePlanner
+  releaseType: release
