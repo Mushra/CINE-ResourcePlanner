@@ -4,6 +4,8 @@
   align-self: flex-start;
 }
 
+.view-header-actions { display: flex; align-items: center; gap: 10px; }
+
 .capacity-pools { display: flex; flex-direction: column; gap: 14px; }
 .capacity-pool-card { padding: 16px 18px; }
 .capacity-pool-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }

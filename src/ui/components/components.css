@@ -170,3 +170,9 @@
   padding: 4px 6px;
   font-variant-numeric: tabular-nums;
 }
+
+.field input[type="color"] {
+  height: 34px;
+  padding: 2px;
+  cursor: pointer;
+}
