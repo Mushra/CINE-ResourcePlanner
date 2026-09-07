@@ -16,12 +16,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const project = useStore((s) => s.data.projects.find((p) => p.id === projectId));
   const engine = useStore((s) => s.engine);
   const pools = useStore((s) => s.data.pools);
+  const people = useStore((s) => s.data.people);
   const updateProject = useStore((s) => s.updateProject);
   const deleteProject = useStore((s) => s.deleteProject);
   const setRequirement = useStore((s) => s.setRequirement);
-  const setAssignment = useStore((s) => s.setAssignment);
+  const setPersonAssignment = useStore((s) => s.setPersonAssignment);
   const clearRequirementPool = useStore((s) => s.clearRequirementPool);
-  const clearAssignmentPool = useStore((s) => s.clearAssignmentPool);
+  const clearPersonAssignment = useStore((s) => s.clearPersonAssignment);
   const backToProjects = useUiStore((s) => s.backToProjects);
   const [editing, setEditing] = useState(false);
   const [addingPool, setAddingPool] = useState(false);
@@ -127,10 +128,19 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               <tbody>
                 {usedPools.map((pool) => {
                   const staffingByMonth = months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === pool.id));
+                  const personLinesByMonth = months.map((m) => engine.getProjectPersonStaffing(project.id, m).lines.filter((l) => l.poolId === pool.id));
+
+                  const assignedPeople = new Map<string, string>();
+                  personLinesByMonth.forEach((lines) => lines.forEach((l) => assignedPeople.set(l.personId, l.personName)));
+                  const assignedPersonIds = [...assignedPeople.keys()].sort((a, b) => assignedPeople.get(a)!.localeCompare(assignedPeople.get(b)!));
+
+                  const addablePeople = people.filter((p) => p.poolId === pool.id && !assignedPeople.has(p.id));
+                  const rowSpan = 1 + assignedPersonIds.length + (addablePeople.length > 0 ? 1 : 0);
+
                   return (
                     <Fragment key={pool.id}>
                       <tr className="pool-group-row">
-                        <td className="alloc-row-label" rowSpan={2}>
+                        <td className="alloc-row-label" rowSpan={rowSpan}>
                           <span className="pool-dot" style={{ background: pool.color }} />
                           {pool.name}
                         </td>
@@ -140,23 +150,55 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                             <NumberField value={staffingByMonth[i]?.required ?? 0} onCommit={(v) => setRequirement(project.id, pool.id, m, v)} className="num-input" />
                           </td>
                         ))}
-                        <td rowSpan={2} className="alloc-actions-col">
-                          <ConfirmButton label="Remove" onConfirm={() => { clearRequirementPool(project.id, pool.id); clearAssignmentPool(project.id, pool.id); }} />
+                        <td rowSpan={rowSpan} className="alloc-actions-col">
+                          <ConfirmButton
+                            label="Remove"
+                            onConfirm={() => {
+                              clearRequirementPool(project.id, pool.id);
+                              assignedPersonIds.forEach((personId) => clearPersonAssignment(personId, project.id));
+                            }}
+                          />
                         </td>
                       </tr>
-                      <tr>
-                        <td className="alloc-kind-label">Assigned</td>
-                        {months.map((m, i) => {
-                          const required = staffingByMonth[i]?.required ?? 0;
-                          const assigned = staffingByMonth[i]?.assigned ?? 0;
-                          const short = required > 0 && assigned < required - 0.001;
-                          return (
-                            <td key={m} className={`alloc-cell ${short ? 'alloc-cell-short' : ''}`}>
-                              <NumberField value={assigned} onCommit={(v) => setAssignment(project.id, pool.id, m, v)} className="num-input" />
-                            </td>
-                          );
-                        })}
-                      </tr>
+                      {assignedPersonIds.map((personId) => (
+                        <tr key={personId}>
+                          <td className="alloc-kind-label person-row-label">
+                            {assignedPeople.get(personId)}
+                            <button type="button" className="person-row-remove" title="Unassign" onClick={() => clearPersonAssignment(personId, project.id)}>
+                              <Icon name="close" size={11} />
+                            </button>
+                          </td>
+                          {months.map((m, i) => {
+                            const required = staffingByMonth[i]?.required ?? 0;
+                            const assigned = staffingByMonth[i]?.assigned ?? 0;
+                            const short = required > 0 && assigned < required - 0.001;
+                            const fte = personLinesByMonth[i].find((l) => l.personId === personId)?.fte ?? 0;
+                            return (
+                              <td key={m} className={`alloc-cell ${short ? 'alloc-cell-short' : ''}`}>
+                                <NumberField value={fte} onCommit={(v) => setPersonAssignment(personId, project.id, m, v)} className="num-input" />
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                      {addablePeople.length > 0 && (
+                        <tr>
+                          <td className="alloc-kind-label">
+                            <select
+                              className="person-add-select"
+                              defaultValue=""
+                              onChange={(e) => {
+                                if (e.target.value) setPersonAssignment(e.target.value, project.id, months[0] ?? todayPeriod(), 1);
+                                e.target.value = '';
+                              }}
+                            >
+                              <option value="" disabled>+ Add person…</option>
+                              {addablePeople.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                          </td>
+                          {months.map((m) => <td key={m} className="alloc-cell" />)}
+                        </tr>
+                      )}
                     </Fragment>
                   );
                 })}

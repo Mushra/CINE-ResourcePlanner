@@ -92,3 +92,47 @@ export function downloadBytes(bytes: Uint8Array, filename: string, mimeType = 'a
 export function supportsFileSystemAccess(): boolean {
   return hasFileSystemAccess();
 }
+
+export interface OpenedXlsx {
+  buffer: ArrayBuffer;
+  name: string;
+}
+
+const XLSX_TYPES = {
+  description: 'Excel workbook',
+  accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] },
+};
+
+export async function openXlsxFile(): Promise<OpenedXlsx | null> {
+  if (hasFileSystemAccess()) {
+    try {
+      const win = window as unknown as { showOpenFilePicker: (opts: unknown) => Promise<FileSystemFileHandleLike[]> };
+      const [handle] = await win.showOpenFilePicker({ types: [XLSX_TYPES], multiple: false });
+      const file = await handle.getFile();
+      const buffer = await file.arrayBuffer();
+      return { buffer, name: file.name };
+    } catch (err) {
+      if ((err as DOMException)?.name === 'AbortError') return null;
+      throw err;
+    }
+  }
+  return openXlsxFileFallback();
+}
+
+function openXlsxFileFallback(): Promise<OpenedXlsx | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) {
+        resolve(null);
+        return;
+      }
+      const buffer = await file.arrayBuffer();
+      resolve({ buffer, name: file.name });
+    };
+    input.click();
+  });
+}

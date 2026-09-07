@@ -20,7 +20,6 @@ export function Timeline() {
   const updateProject = useStore((s) => s.updateProject);
   const createProject = useStore((s) => s.createProject);
   const setRequirement = useStore((s) => s.setRequirement);
-  const setAssignment = useStore((s) => s.setAssignment);
   const openProject = useUiStore((s) => s.openProject);
 
   const [zoom, setZoom] = useState<Zoom>('comfortable');
@@ -58,7 +57,7 @@ export function Timeline() {
       <div className="view-header">
         <div>
           <h1>Timeline</h1>
-          <p className="view-sub">Drag a project bar to move it, drag its edges to resize, click a cell to edit allocation</p>
+          <p className="view-sub">Drag a project bar to move it, drag its edges to resize, click a cell to edit required staffing. Assigned people are managed from the project page.</p>
         </div>
         <Button variant="primary" icon="plus" onClick={() => setShowNew(true)}>New project</Button>
       </div>
@@ -172,7 +171,6 @@ export function Timeline() {
                                   poolColor={pool.color}
                                   overCapacity={engine.isOverCapacity(poolId, period)}
                                   onSetRequired={(v) => setRequirement(project.id, poolId, period, v)}
-                                  onSetAssigned={(v) => setAssignment(project.id, poolId, period, v)}
                                 />
                               );
                             })}

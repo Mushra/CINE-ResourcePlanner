@@ -1,12 +1,23 @@
 import { create } from 'zustand';
 import { PlannerDatabase } from '../db/database';
-import { loadPlanningData, BASE_SCENARIO_ID, createProject as repoCreateProject, updateProject as repoUpdateProject, deleteProject as repoDeleteProject, createPool as repoCreatePool, updatePool as repoUpdatePool, deletePool as repoDeletePool, setPoolCapacityOverride as repoSetPoolCapacityOverride, getOrCreateRequirement, setRequirementAllocation as repoSetRequirementAllocation, deleteRequirement as repoDeleteRequirement, getOrCreateAssignment, setAssignmentAllocation as repoSetAssignmentAllocation, deleteAssignment as repoDeleteAssignment } from '../db/repository';
+import {
+  loadPlanningData, BASE_SCENARIO_ID,
+  createProject as repoCreateProject, updateProject as repoUpdateProject, deleteProject as repoDeleteProject,
+  createPool as repoCreatePool, updatePool as repoUpdatePool, deletePool as repoDeletePool,
+  setPoolCapacityOverride as repoSetPoolCapacityOverride,
+  getOrCreateRequirement, setRequirementAllocation as repoSetRequirementAllocation, deleteRequirement as repoDeleteRequirement,
+  createDiscipline as repoCreateDiscipline, updateDiscipline as repoUpdateDiscipline, deleteDiscipline as repoDeleteDiscipline,
+  createPerson as repoCreatePerson, updatePerson as repoUpdatePerson, deletePerson as repoDeletePerson,
+  getOrCreatePersonAssignment, setPersonAssignmentAllocation as repoSetPersonAssignmentAllocation, deletePersonAssignment as repoDeletePersonAssignment,
+} from '../db/repository';
+import { applyRpmImport, type ImportMode } from '../db/applyImport';
 import { seedDemoData } from '../db/seed';
 import { getStoredFileName, loadAutosave, saveAutosave, setStoredFileName } from '../persistence/indexeddb';
 import * as files from '../persistence/files';
 import { exportWorkbookToBytes } from '../export/xlsx';
+import { parseRpmWorkbook, type ImportReport } from '../import/rpmImport';
 import { PlanningEngine } from '../engine/planning';
-import type { PlanningData, Period, Project, ResourcePool } from '../domain/types';
+import type { Discipline, PlanningData, Period, Person, Project, ResourcePool } from '../domain/types';
 import { emptyPlanningData } from '../domain/types';
 
 export type ToastKind = 'success' | 'error' | 'info';
@@ -33,6 +44,7 @@ interface StoreState {
 
   theme: Theme;
   toasts: Toast[];
+  lastImportReport: ImportReport | null;
 
   init: () => Promise<void>;
   toast: (kind: ToastKind, message: string) => void;
@@ -44,6 +56,7 @@ interface StoreState {
   saveDatabase: () => Promise<void>;
   saveDatabaseAs: () => Promise<void>;
   exportXlsx: () => Promise<void>;
+  importRpm: (mode: ImportMode) => Promise<ImportReport | null>;
 
   createProject: (input: Omit<Project, 'id' | 'sortOrder'>) => Project;
   updateProject: (project: Project) => void;
@@ -54,10 +67,18 @@ interface StoreState {
   deletePool: (poolId: string) => void;
   setPoolCapacityOverride: (poolId: string, period: Period, capacityFte: number | null) => void;
 
+  createDiscipline: (input: Omit<Discipline, 'id' | 'sortOrder'>) => Discipline;
+  updateDiscipline: (discipline: Discipline) => void;
+  deleteDiscipline: (disciplineId: string) => void;
+
+  createPerson: (input: Omit<Person, 'id' | 'sortOrder'>) => Person;
+  updatePerson: (person: Person) => void;
+  deletePerson: (personId: string) => void;
+
   setRequirement: (projectId: string, poolId: string, period: Period, fte: number) => void;
-  setAssignment: (projectId: string, poolId: string, period: Period, fte: number) => void;
+  setPersonAssignment: (personId: string, projectId: string, period: Period, fte: number) => void;
   clearRequirementPool: (projectId: string, poolId: string) => void;
-  clearAssignmentPool: (projectId: string, poolId: string) => void;
+  clearPersonAssignment: (personId: string, projectId: string) => void;
 }
 
 function nextToastId(): string {
@@ -91,6 +112,7 @@ export const useStore = create<StoreState>((set, get) => {
     dirty: false,
     theme: (localStorage.getItem('cine-planner-theme') as Theme | null) ?? 'light',
     toasts: [],
+    lastImportReport: null,
 
     init: async () => {
       try {
@@ -198,6 +220,39 @@ export const useStore = create<StoreState>((set, get) => {
       }
     },
 
+    importRpm: async (mode) => {
+      try {
+        const opened = await files.openXlsxFile();
+        if (!opened) return null;
+        const normalized = await parseRpmWorkbook(opened.buffer, opened.name);
+
+        const currentDb = get().db;
+        const effectiveMode: ImportMode = mode === 'replace' || !currentDb ? 'replace' : 'merge';
+        const db = effectiveMode === 'replace' ? await PlannerDatabase.createNew() : currentDb!;
+        applyRpmImport(db, normalized, effectiveMode);
+
+        const fileName = effectiveMode === 'replace' ? opened.name.replace(/\.xlsx$/i, '') || 'Imported plan' : get().fileName;
+        set({
+          db,
+          fileName,
+          fileHandle: effectiveMode === 'replace' ? null : get().fileHandle,
+          dirty: true,
+          lastImportReport: normalized.report,
+        });
+        setStoredFileName(fileName);
+        reload(db);
+        void saveAutosave(db.export());
+        get().toast(
+          'success',
+          `Imported ${normalized.report.importedRows} rows into ${normalized.report.projectCount} projects / ${normalized.report.personCount} people`,
+        );
+        return normalized.report;
+      } catch (err) {
+        get().toast('error', `Import failed: ${err instanceof Error ? err.message : String(err)}`);
+        return null;
+      }
+    },
+
     createProject: (input) => {
       const db = get().db!;
       const project = repoCreateProject(db, input);
@@ -243,6 +298,46 @@ export const useStore = create<StoreState>((set, get) => {
       persist();
     },
 
+    createDiscipline: (input) => {
+      const db = get().db!;
+      const discipline = repoCreateDiscipline(db, input);
+      persist();
+      get().toast('success', `${discipline.name} discipline created`);
+      return discipline;
+    },
+    updateDiscipline: (discipline) => {
+      const db = get().db!;
+      repoUpdateDiscipline(db, discipline);
+      persist();
+    },
+    deleteDiscipline: (disciplineId) => {
+      const db = get().db!;
+      const name = get().data.disciplines.find((d) => d.id === disciplineId)?.name ?? 'Discipline';
+      repoDeleteDiscipline(db, disciplineId);
+      persist();
+      get().toast('info', `${name} discipline deleted`);
+    },
+
+    createPerson: (input) => {
+      const db = get().db!;
+      const person = repoCreatePerson(db, input);
+      persist();
+      get().toast('success', `${person.name} added`);
+      return person;
+    },
+    updatePerson: (person) => {
+      const db = get().db!;
+      repoUpdatePerson(db, person);
+      persist();
+    },
+    deletePerson: (personId) => {
+      const db = get().db!;
+      const name = get().data.people.find((p) => p.id === personId)?.name ?? 'Person';
+      repoDeletePerson(db, personId);
+      persist();
+      get().toast('info', `${name} removed`);
+    },
+
     setRequirement: (projectId, poolId, period, fte) => {
       const db = get().db!;
       const clamped = Math.max(0, fte);
@@ -250,11 +345,11 @@ export const useStore = create<StoreState>((set, get) => {
       repoSetRequirementAllocation(db, req.id, period, clamped);
       persist();
     },
-    setAssignment: (projectId, poolId, period, fte) => {
+    setPersonAssignment: (personId, projectId, period, fte) => {
       const db = get().db!;
       const clamped = Math.max(0, fte);
-      const asn = getOrCreateAssignment(db, projectId, poolId, BASE_SCENARIO_ID);
-      repoSetAssignmentAllocation(db, asn.id, period, clamped);
+      const asn = getOrCreatePersonAssignment(db, personId, projectId, BASE_SCENARIO_ID);
+      repoSetPersonAssignmentAllocation(db, asn.id, period, clamped);
       persist();
     },
     clearRequirementPool: (projectId, poolId) => {
@@ -263,10 +358,10 @@ export const useStore = create<StoreState>((set, get) => {
       if (req) repoDeleteRequirement(db, req.id);
       persist();
     },
-    clearAssignmentPool: (projectId, poolId) => {
+    clearPersonAssignment: (personId, projectId) => {
       const db = get().db!;
-      const asn = get().data.assignments.find((a) => a.projectId === projectId && a.poolId === poolId);
-      if (asn) repoDeleteAssignment(db, asn.id);
+      const asn = get().data.personAssignments.find((a) => a.personId === personId && a.projectId === projectId);
+      if (asn) repoDeletePersonAssignment(db, asn.id);
       persist();
     },
   };

@@ -1,4 +1,5 @@
-// Core domain model. Resources are pools (disciplines), never individual people.
+// Core domain model. Hierarchy: Discipline -> ResourcePool (role) -> Person.
+// Requirements (demand) stay pool-level; assignments (supply) are person-level.
 // Time resolution is monthly today; every allocation is keyed by a Period string
 // ("YYYY-MM") so weekly resolution can be introduced later without changing shapes.
 
@@ -30,9 +31,27 @@ export interface Project {
 export interface ResourcePool {
   id: string;
   name: string;
-  /** Flat monthly capacity in FTE, used when no override exists for a period. */
+  /** Flat monthly capacity in FTE. Dormant since v2 — capacity now derives from headcount. */
   capacityFte: number;
   color: string;
+  sortOrder: number;
+  disciplineId: string | null;
+}
+
+export interface Discipline {
+  id: string;
+  name: string;
+  color: string;
+  sortOrder: number;
+}
+
+export interface Person {
+  id: string;
+  name: string;
+  poolId: string | null;
+  capacityFte: number;
+  active: boolean;
+  notes: string;
   sortOrder: number;
 }
 
@@ -63,15 +82,15 @@ export interface RequirementAllocation {
   fte: number;
 }
 
-export interface Assignment {
+export interface PersonAssignment {
   id: string;
+  personId: string;
   projectId: string;
-  poolId: string;
   scenarioId: string;
 }
 
-export interface AssignmentAllocation {
-  assignmentId: string;
+export interface PersonAssignmentAllocation {
+  personAssignmentId: string;
   period: Period;
   fte: number;
 }
@@ -81,11 +100,13 @@ export interface PlanningData {
   projects: Project[];
   pools: ResourcePool[];
   poolCapacityOverrides: PoolCapacityOverride[];
+  disciplines: Discipline[];
+  people: Person[];
   scenarios: Scenario[];
   requirements: Requirement[];
   requirementAllocations: RequirementAllocation[];
-  assignments: Assignment[];
-  assignmentAllocations: AssignmentAllocation[];
+  personAssignments: PersonAssignment[];
+  personAssignmentAllocations: PersonAssignmentAllocation[];
 }
 
 export function emptyPlanningData(): PlanningData {
@@ -93,10 +114,12 @@ export function emptyPlanningData(): PlanningData {
     projects: [],
     pools: [],
     poolCapacityOverrides: [],
+    disciplines: [],
+    people: [],
     scenarios: [],
     requirements: [],
     requirementAllocations: [],
-    assignments: [],
-    assignmentAllocations: [],
+    personAssignments: [],
+    personAssignmentAllocations: [],
   };
 }

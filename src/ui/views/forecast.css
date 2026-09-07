@@ -6,21 +6,12 @@
 
 .view-header-actions { display: flex; align-items: center; gap: 10px; }
 
-.capacity-pools { display: flex; flex-direction: column; gap: 14px; }
-.capacity-pool-card { padding: 16px 18px; }
-.capacity-pool-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.capacity-pool-header h2 { margin: 0; font-size: 13.5px; font-weight: 600; }
-.capacity-flat { margin-left: auto; font-size: 11.5px; color: var(--text-tertiary); }
-.capacity-table td, .capacity-table th { text-align: left; }
-.capacity-table td:not(:first-child), .capacity-table th:not(:first-child) { text-align: right; }
-.value-negative { color: var(--status-critical); font-weight: 700; }
-
-/* Forecast */
+/* Forecast — heatmap */
 .forecast-problems { padding: 14px 18px; margin-bottom: 14px; border-color: var(--status-warning-border); background: var(--status-warning-bg); }
 .forecast-problems h2 { display: flex; align-items: center; gap: 7px; margin: 0 0 8px; font-size: 13px; color: var(--status-warning); }
 .forecast-problems ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--text-primary); }
 
-.forecast-matrix-card { padding: 16px 18px; }
+.forecast-matrix-card { padding: 16px 18px; margin-bottom: 18px; }
 .forecast-matrix { border-collapse: collapse; font-size: 12px; min-width: 100%; }
 .forecast-matrix th, .forecast-matrix td { padding: 8px 12px; text-align: center; border-bottom: 1px solid var(--border); }
 .forecast-matrix thead th { font-size: 10.5px; text-transform: uppercase; color: var(--text-tertiary); letter-spacing: 0.03em; }
@@ -38,3 +29,32 @@
 .matrix-legend { display: flex; gap: 16px; margin-top: 12px; font-size: 11.5px; color: var(--text-secondary); }
 .matrix-legend span { display: flex; align-items: center; gap: 6px; }
 .legend-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+
+/* Forecast — per-discipline capacity detail */
+.forecast-detail-heading { font-size: 13.5px; font-weight: 650; margin: 0 0 10px; }
+.capacity-disciplines { display: flex; flex-direction: column; gap: 10px; }
+.discipline-detail-card { padding: 0; overflow: hidden; }
+.discipline-detail-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  cursor: pointer;
+  list-style: none;
+  font-weight: 600;
+  font-size: 13px;
+}
+.discipline-detail-summary::-webkit-details-marker { display: none; }
+.discipline-detail-summary svg { transition: transform 0.15s ease; }
+.discipline-detail-card[open] .discipline-detail-summary svg { transform: rotate(90deg); }
+.discipline-detail-name { flex: 1; }
+.discipline-detail-count { font-size: 11px; font-weight: 500; color: var(--text-tertiary); }
+.discipline-detail-card .capacity-pools { padding: 0 16px 16px; }
+
+.capacity-pools { display: flex; flex-direction: column; gap: 14px; }
+.capacity-pool-card { padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-1); }
+.capacity-pool-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.capacity-pool-header h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.capacity-table td, .capacity-table th { text-align: left; }
+.capacity-table td:not(:first-child), .capacity-table th:not(:first-child) { text-align: right; }
+.value-negative { color: var(--status-critical); font-weight: 700; }

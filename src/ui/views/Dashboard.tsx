@@ -44,7 +44,7 @@ export function Dashboard() {
     <div className="dashboard">
       <div className="kpi-row">
         <KpiTile label="Active projects" value={String(activeProjects.length)} icon="projects" />
-        <KpiTile label="Total capacity" value={`${round2(totalCapacity)} FTE`} icon="capacity" sub={formatPeriodLabel(period)} />
+        <KpiTile label="Total capacity" value={`${round2(totalCapacity)} FTE`} icon="team" sub={formatPeriodLabel(period)} />
         <KpiTile
           label="Capacity conflicts"
           value={String(overCapacityNow.length)}
@@ -108,7 +108,7 @@ export function Dashboard() {
                     <button
                       type="button"
                       className="issue-message"
-                      onClick={() => (check.projectId ? openProject(check.projectId) : navigate('capacity'))}
+                      onClick={() => (check.projectId ? openProject(check.projectId) : navigate('forecast'))}
                     >
                       {check.message}
                     </button>
@@ -119,8 +119,8 @@ export function Dashboard() {
             </ul>
           )}
           {checks.length > 8 && (
-            <button type="button" className="panel-more" onClick={() => navigate('capacity')}>
-              <Icon name="chevron-right" size={13} /> View all {checks.length} issues in Capacity &amp; Forecast
+            <button type="button" className="panel-more" onClick={() => navigate('forecast')}>
+              <Icon name="chevron-right" size={13} /> View all {checks.length} issues in Forecast
             </button>
           )}
         </section>
@@ -129,7 +129,7 @@ export function Dashboard() {
   );
 }
 
-function KpiTile({ label, value, icon, sub, tone = 'neutral' }: { label: string; value: string; icon: 'projects' | 'capacity' | 'critical' | 'warning'; sub?: string; tone?: 'critical' | 'warning' | 'neutral' }) {
+function KpiTile({ label, value, icon, sub, tone = 'neutral' }: { label: string; value: string; icon: 'projects' | 'team' | 'critical' | 'warning'; sub?: string; tone?: 'critical' | 'warning' | 'neutral' }) {
   return (
     <div className={`card kpi-tile tone-${tone}`}>
       <div className="kpi-icon"><Icon name={icon} size={16} /></div>

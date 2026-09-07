@@ -3,7 +3,7 @@ import { NumberField } from '../components/NumberField';
 import { round2 } from '../../engine/planning';
 
 export function AllocationCell({
-  width, required, assigned, capacity, poolColor, overCapacity, onSetRequired, onSetAssigned,
+  width, required, assigned, capacity, poolColor, overCapacity, onSetRequired,
 }: {
   width: number;
   required: number;
@@ -12,7 +12,6 @@ export function AllocationCell({
   poolColor: string;
   overCapacity: boolean;
   onSetRequired: (v: number) => void;
-  onSetAssigned: (v: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const short = required > 0.001 && assigned < required - 0.001;
@@ -25,9 +24,7 @@ export function AllocationCell({
         <label>Req
           <NumberField value={required} onCommit={onSetRequired} className="num-input num-input-xs" autoFocus />
         </label>
-        <label>Asn
-          <NumberField value={assigned} onCommit={onSetAssigned} className="num-input num-input-xs" />
-        </label>
+        <span className="alloc-cell-readonly">Asn <strong>{formatNum(assigned)}</strong></span>
         <button type="button" className="alloc-cell-done" onClick={() => setEditing(false)}>done</button>
       </div>
     );

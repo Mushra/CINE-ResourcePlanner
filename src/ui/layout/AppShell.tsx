@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon, type IconName } from '../components/Icon';
 import { Button } from '../components/Button';
+import { ImportDrawer } from '../components/ImportDrawer';
 import { useStore } from '../../store/useStore';
 import { useUiStore, type ViewName } from '../../store/useUiStore';
 
@@ -8,7 +9,7 @@ const NAV: { view: ViewName; label: string; icon: IconName }[] = [
   { view: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
   { view: 'timeline', label: 'Timeline', icon: 'timeline' },
   { view: 'projects', label: 'Projects', icon: 'projects' },
-  { view: 'capacity', label: 'Capacity', icon: 'capacity' },
+  { view: 'team', label: 'Team', icon: 'team' },
   { view: 'forecast', label: 'Forecast', icon: 'forecast' },
 ];
 
@@ -53,6 +54,7 @@ function TopBar() {
   const saveDatabase = useStore((s) => s.saveDatabase);
   const exportXlsx = useStore((s) => s.exportXlsx);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -77,7 +79,7 @@ function TopBar() {
         </Button>
         <div className="menu-wrap" ref={menuRef}>
           <Button icon="more" size="sm" variant="ghost" onClick={() => setMenuOpen((v) => !v)} aria-label="More file actions" />
-          {menuOpen && <FileMenu onClose={() => setMenuOpen(false)} />}
+          {menuOpen && <FileMenu onClose={() => setMenuOpen(false)} onImport={() => setImportOpen(true)} />}
         </div>
         <Button icon="download" size="sm" variant="secondary" onClick={() => void exportXlsx()}>
           Export
@@ -86,11 +88,12 @@ function TopBar() {
           <Icon name={theme === 'light' ? 'moon' : 'sun'} size={15} />
         </button>
       </div>
+      {importOpen && <ImportDrawer onClose={() => setImportOpen(false)} />}
     </header>
   );
 }
 
-function FileMenu({ onClose }: { onClose: () => void }) {
+function FileMenu({ onClose, onImport }: { onClose: () => void; onImport: () => void }) {
   const newDatabase = useStore((s) => s.newDatabase);
   const openDatabase = useStore((s) => s.openDatabase);
   const saveDatabaseAs = useStore((s) => s.saveDatabaseAs);
@@ -114,6 +117,10 @@ function FileMenu({ onClose }: { onClose: () => void }) {
       </button>
       <button type="button" onClick={() => run(() => void saveDatabaseAs())}>
         <Icon name="save" size={14} /> Save as / backup…
+      </button>
+      <div className="dropdown-sep" />
+      <button type="button" onClick={() => run(onImport)}>
+        <Icon name="download" size={14} /> Import RPM export…
       </button>
     </div>
   );

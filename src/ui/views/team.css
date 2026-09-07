@@ -1,0 +1,25 @@
+.team-disciplines { display: flex; flex-direction: column; gap: 14px; }
+.discipline-card { padding: 16px 18px; }
+
+.discipline-header { display: flex; align-items: center; gap: 9px; }
+.discipline-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.discipline-header h2 { margin: 0; font-size: 14.5px; font-weight: 650; }
+.discipline-role-count { font-size: 11px; color: var(--text-tertiary); font-weight: 500; }
+.discipline-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+
+.team-roles { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.team-role { padding-top: 12px; border-top: 1px solid var(--border); }
+.team-role:first-child { padding-top: 0; border-top: none; }
+
+.team-role-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.team-role-header h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.team-role-capacity { font-size: 11px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.team-role-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+
+.team-people-table td:nth-child(2), .team-people-table th:nth-child(2),
+.team-people-table td:nth-child(3), .team-people-table th:nth-child(3) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.team-people-actions { display: flex; justify-content: flex-end; gap: 2px; white-space: nowrap; }
+.person-inactive td { color: var(--text-tertiary); }

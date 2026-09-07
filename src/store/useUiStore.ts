@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'capacity' | 'forecast' | 'project-detail';
+export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'forecast' | 'project-detail';
 
 interface UiState {
   view: ViewName;

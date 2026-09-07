@@ -12,7 +12,7 @@ async function getSqlJs(): Promise<SqlJsStatic> {
   return sqlJsModule;
 }
 
-export const SCHEMA_VERSION = '1';
+export const SCHEMA_VERSION = '2';
 
 /** Thin wrapper around a sql.js Database: schema bootstrap, typed helpers, byte export. */
 export class PlannerDatabase {
@@ -40,10 +40,50 @@ export class PlannerDatabase {
 
   private applySchema(): void {
     this.db.exec(schemaSql);
-    this.exec(
-      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-      ['schema_version', SCHEMA_VERSION],
-    );
+    const from = this.getSetting('schema_version');
+    this.migrate(from);
+    this.setSetting('schema_version', SCHEMA_VERSION);
+  }
+
+  /** Fresh DBs (from === null) never had the legacy tables — nothing to migrate. */
+  private migrate(from: string | null): void {
+    if (from === null) return;
+    if (Number(from) < 2) this.migrateV1toV2();
+  }
+
+  /**
+   * v1 had pool-level assignments only. v2 introduces people; each pool's assignment history
+   * is preserved by synthesizing one person per pool that inherits its capacity and assignments,
+   * so getCapacity/getAssignedCapacity return identical numbers pre/post migration.
+   */
+  private migrateV1toV2(): void {
+    const hasLegacyAssignments = this.query<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='assignments'",
+    ).length > 0;
+    if (!hasLegacyAssignments) return;
+
+    const poolColumns = this.query<{ name: string }>("PRAGMA table_info(resource_pools)");
+    const hasDisciplineColumn = poolColumns.some((c) => c.name === 'discipline_id');
+    if (!hasDisciplineColumn) {
+      this.db.exec('ALTER TABLE resource_pools ADD COLUMN discipline_id TEXT REFERENCES disciplines(id)');
+    }
+
+    this.db.exec(`
+      INSERT INTO people (id, name, pool_id, capacity_fte, active, sort_order)
+      SELECT 'person_mig_' || rp.id, rp.name || ' (imported)', rp.id, rp.capacity_fte, 1, rp.sort_order
+      FROM resource_pools rp
+      WHERE rp.capacity_fte > 0 OR rp.id IN (SELECT DISTINCT pool_id FROM assignments);
+
+      INSERT INTO person_assignments (id, person_id, project_id, scenario_id)
+      SELECT a.id, 'person_mig_' || a.pool_id, a.project_id, a.scenario_id
+      FROM assignments a;
+
+      INSERT INTO person_assignment_allocations (person_assignment_id, period, fte)
+      SELECT assignment_id, period, fte FROM assignment_allocations;
+
+      DROP TABLE IF EXISTS assignment_allocations;
+      DROP TABLE IF EXISTS assignments;
+    `);
   }
 
   exec(sql: string, params: unknown[] = []): void {

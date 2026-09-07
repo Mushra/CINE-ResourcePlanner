@@ -1,46 +1,66 @@
 import { describe, expect, it } from 'vitest';
-import { PlanningEngine } from '../src/engine/planning';
-import { assignment, planningData, pool, project, requirement } from './fixtures';
+import { PlanningEngine, UNASSIGNED_DISCIPLINE_ID } from '../src/engine/planning';
+import { discipline, person, personAssignment, planningData, pool, project, requirement } from './fixtures';
 
-describe('PlanningEngine — capacity', () => {
-  it('returns flat pool capacity when no override exists', () => {
+describe('PlanningEngine — capacity (headcount-derived)', () => {
+  it('sums active people capacityFte for a pool', () => {
+    const animation = pool({ name: 'Animation', capacityFte: 8 });
+    const alice = person({ poolId: animation.id, capacityFte: 1 });
+    const bob = person({ poolId: animation.id, capacityFte: 1 });
+    const engine = new PlanningEngine(planningData({ pools: [animation], people: [alice, bob] }));
+    expect(engine.getCapacity(animation.id, '2026-09')).toBe(2);
+  });
+
+  it('falls back to the pool flat capacityFte when it has no active people', () => {
     const animation = pool({ name: 'Animation', capacityFte: 8 });
     const engine = new PlanningEngine(planningData({ pools: [animation] }));
     expect(engine.getCapacity(animation.id, '2026-09')).toBe(8);
   });
 
-  it('uses a per-period override when present', () => {
+  it('excludes inactive people from the capacity sum', () => {
     const animation = pool({ name: 'Animation', capacityFte: 8 });
+    const alice = person({ poolId: animation.id, capacityFte: 1, active: true });
+    const bob = person({ poolId: animation.id, capacityFte: 1, active: false });
+    const engine = new PlanningEngine(planningData({ pools: [animation], people: [alice, bob] }));
+    expect(engine.getCapacity(animation.id, '2026-09')).toBe(1);
+  });
+
+  it('ignores pool capacity overrides — dormant since v2', () => {
+    const animation = pool({ name: 'Animation', capacityFte: 8 });
+    const alice = person({ poolId: animation.id, capacityFte: 1 });
     const engine = new PlanningEngine(
       planningData({
         pools: [animation],
+        people: [alice],
         poolCapacityOverrides: [{ poolId: animation.id, period: '2026-11', capacityFte: 10 }],
       }),
     );
-    expect(engine.getCapacity(animation.id, '2026-10')).toBe(8);
-    expect(engine.getCapacity(animation.id, '2026-11')).toBe(10);
+    expect(engine.getCapacity(animation.id, '2026-11')).toBe(1);
   });
 });
 
 describe('PlanningEngine — required / assigned / available', () => {
-  it('sums requirements and assignments per pool per period across projects', () => {
+  it('sums requirements and person-assignments per pool per period across projects', () => {
     const animation = pool({ name: 'Animation', capacityFte: 8 });
+    const alice = person({ name: 'Alice', poolId: animation.id, capacityFte: 5 });
+    const bob = person({ name: 'Bob', poolId: animation.id, capacityFte: 3 });
     const p1 = project({ name: 'Alpha' });
     const p2 = project({ name: 'Bravo' });
 
     const r1 = requirement(p1.id, animation.id, { '2026-09': 2, '2026-10': 3 });
     const r2 = requirement(p2.id, animation.id, { '2026-09': 1, '2026-10': 1 });
-    const a1 = assignment(p1.id, animation.id, { '2026-09': 2, '2026-10': 2 });
-    const a2 = assignment(p2.id, animation.id, { '2026-09': 1, '2026-10': 1 });
+    const a1 = personAssignment(alice.id, p1.id, { '2026-09': 2, '2026-10': 2 });
+    const a2 = personAssignment(bob.id, p2.id, { '2026-09': 1, '2026-10': 1 });
 
     const engine = new PlanningEngine(
       planningData({
         pools: [animation],
+        people: [alice, bob],
         projects: [p1, p2],
         requirements: [r1.requirement, r2.requirement],
         requirementAllocations: [...r1.allocations, ...r2.allocations],
-        assignments: [a1.assignment, a2.assignment],
-        assignmentAllocations: [...a1.allocations, ...a2.allocations],
+        personAssignments: [a1.personAssignment, a2.personAssignment],
+        personAssignmentAllocations: [...a1.allocations, ...a2.allocations],
       }),
     );
 
@@ -103,21 +123,24 @@ describe('PlanningEngine — project staffing', () => {
   it('reports required, assigned and gap per pool for a project/period', () => {
     const animation = pool({ name: 'Animation' });
     const vfx = pool({ name: 'VFX' });
+    const alice = person({ name: 'Alice', poolId: animation.id });
+    const elena = person({ name: 'Elena', poolId: vfx.id });
     const p1 = project({ name: 'Alpha' });
 
     const r1 = requirement(p1.id, animation.id, { '2026-09': 3 });
     const r2 = requirement(p1.id, vfx.id, { '2026-09': 1 });
-    const a1 = assignment(p1.id, animation.id, { '2026-09': 2 });
-    const a2 = assignment(p1.id, vfx.id, { '2026-09': 0.5 });
+    const a1 = personAssignment(alice.id, p1.id, { '2026-09': 2 });
+    const a2 = personAssignment(elena.id, p1.id, { '2026-09': 0.5 });
 
     const engine = new PlanningEngine(
       planningData({
         pools: [animation, vfx],
+        people: [alice, elena],
         projects: [p1],
         requirements: [r1.requirement, r2.requirement],
         requirementAllocations: [...r1.allocations, ...r2.allocations],
-        assignments: [a1.assignment, a2.assignment],
-        assignmentAllocations: [...a1.allocations, ...a2.allocations],
+        personAssignments: [a1.personAssignment, a2.personAssignment],
+        personAssignmentAllocations: [...a1.allocations, ...a2.allocations],
       }),
     );
 
@@ -147,6 +170,32 @@ describe('PlanningEngine — project staffing', () => {
     expect(engine.getRequiredCapacity(animation.id, '2026-10')).toBe(2);
     expect(engine.getRequiredCapacity(animation.id, '2026-11')).toBe(3);
     expect(engine.getRequiredCapacity(animation.id, '2026-12')).toBe(1);
+  });
+
+  it('reports per-person assigned FTE for a project/period', () => {
+    const animation = pool({ name: 'Animation' });
+    const alice = person({ name: 'Alice', poolId: animation.id });
+    const bob = person({ name: 'Bob', poolId: animation.id });
+    const p1 = project({ name: 'Alpha' });
+
+    const a1 = personAssignment(alice.id, p1.id, { '2026-09': 1 });
+    const a2 = personAssignment(bob.id, p1.id, { '2026-09': 0.5 });
+
+    const engine = new PlanningEngine(
+      planningData({
+        pools: [animation],
+        people: [alice, bob],
+        projects: [p1],
+        personAssignments: [a1.personAssignment, a2.personAssignment],
+        personAssignmentAllocations: [...a1.allocations, ...a2.allocations],
+      }),
+    );
+
+    const staffing = engine.getProjectPersonStaffing(p1.id, '2026-09');
+    expect(staffing.lines).toEqual([
+      { personAssignmentId: a1.personAssignment.id, personId: alice.id, personName: 'Alice', poolId: animation.id, fte: 1 },
+      { personAssignmentId: a2.personAssignment.id, personId: bob.id, personName: 'Bob', poolId: animation.id, fte: 0.5 },
+    ]);
   });
 });
 
@@ -191,5 +240,63 @@ describe('PlanningEngine — scenario scoping', () => {
     );
 
     expect(engine.getRequiredCapacity(animation.id, '2026-09')).toBe(0);
+  });
+});
+
+describe('PlanningEngine — disciplines & people', () => {
+  it('rolls capacity/required/assigned up from pools to their discipline', () => {
+    const animDisc = discipline({ name: 'Animation' });
+    const animation = pool({ name: 'Animation', disciplineId: animDisc.id });
+    const lighting = pool({ name: 'Lighting', disciplineId: animDisc.id });
+    const alice = person({ poolId: animation.id, capacityFte: 1 });
+    const bob = person({ poolId: lighting.id, capacityFte: 1 });
+    const p1 = project();
+    const r1 = requirement(p1.id, animation.id, { '2026-09': 1 });
+    const a1 = personAssignment(alice.id, p1.id, { '2026-09': 0.5 });
+
+    const engine = new PlanningEngine(
+      planningData({
+        disciplines: [animDisc],
+        pools: [animation, lighting],
+        people: [alice, bob],
+        projects: [p1],
+        requirements: [r1.requirement],
+        requirementAllocations: r1.allocations,
+        personAssignments: [a1.personAssignment],
+        personAssignmentAllocations: a1.allocations,
+      }),
+    );
+
+    expect(engine.getDisciplineCapacity(animDisc.id, '2026-09')).toBe(2);
+    expect(engine.getDisciplineRequiredCapacity(animDisc.id, '2026-09')).toBe(1);
+    expect(engine.getDisciplineAssignedCapacity(animDisc.id, '2026-09')).toBe(0.5);
+  });
+
+  it('groups pools with no discipline under the unassigned bucket', () => {
+    const animation = pool({ name: 'Animation', disciplineId: null, capacityFte: 8 });
+    const engine = new PlanningEngine(planningData({ pools: [animation] }));
+    expect(engine.poolsInDiscipline(UNASSIGNED_DISCIPLINE_ID)).toEqual([animation]);
+    expect(engine.getDisciplineCapacity(UNASSIGNED_DISCIPLINE_ID, '2026-09')).toBe(8);
+  });
+
+  it('sums a person\'s assigned FTE across every project they are staffed on', () => {
+    const animation = pool();
+    const alice = person({ poolId: animation.id });
+    const p1 = project({ name: 'Alpha' });
+    const p2 = project({ name: 'Bravo' });
+    const a1 = personAssignment(alice.id, p1.id, { '2026-09': 0.5 });
+    const a2 = personAssignment(alice.id, p2.id, { '2026-09': 0.3 });
+
+    const engine = new PlanningEngine(
+      planningData({
+        pools: [animation],
+        people: [alice],
+        projects: [p1, p2],
+        personAssignments: [a1.personAssignment, a2.personAssignment],
+        personAssignmentAllocations: [...a1.allocations, ...a2.allocations],
+      }),
+    );
+
+    expect(engine.getPersonAssigned(alice.id, '2026-09')).toBe(0.8);
   });
 });

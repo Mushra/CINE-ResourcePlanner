@@ -8,7 +8,8 @@ import './ui/layout/layout.css';
 import './ui/views/views.css';
 import './ui/views/dashboard.css';
 import './ui/views/project-detail.css';
-import './ui/views/capacity.css';
+import './ui/views/forecast.css';
+import './ui/views/team.css';
 import './ui/timeline/timeline.css';
 import App from './App.tsx';
 
