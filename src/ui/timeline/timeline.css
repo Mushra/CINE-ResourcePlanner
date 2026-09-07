@@ -222,6 +222,17 @@
 .tl-pool-label { font-size: 11.5px; color: var(--text-secondary); padding-left: 24px; }
 .tl-pool-row-empty { min-height: 30px; }
 
+.tl-disc-group { border-top: 1px solid var(--border-subtle, var(--border)); }
+.tl-disc-group:first-child { border-top: none; }
+.tl-disc-row { background: var(--surface-1); }
+.tl-disc-label { font-size: 12px; font-weight: 600; color: var(--text-primary); padding-left: 12px; }
+.tl-pool-row-nested .tl-pool-label { padding-left: 40px; }
+.tl-person-row { min-height: 26px; }
+.tl-person-label { padding-left: 56px; font-size: 11px; color: var(--text-tertiary); }
+
+.tl-cell-readonly { cursor: default; }
+.tl-cell-readonly:hover { outline: none; }
+
 .tl-cells-row { display: flex; }
 .tl-cell {
   flex-shrink: 0;

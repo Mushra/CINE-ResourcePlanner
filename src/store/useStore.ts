@@ -21,7 +21,7 @@ import { PlanningEngine } from '../engine/planning';
 import type { Discipline, PlanningData, Period, Person, Project, ResourcePool } from '../domain/types';
 import { emptyPlanningData } from '../domain/types';
 import { applyStructureOverrides } from '../domain/overrides';
-import { normalizeKey } from '../domain/identity';
+import { normalizeKey, genericPoolName } from '../domain/identity';
 
 export type ToastKind = 'success' | 'error' | 'info';
 
@@ -80,6 +80,8 @@ interface StoreState {
 
   setRequirement: (projectId: string, poolId: string, period: Period, fte: number) => void;
   setRequirementRange: (projectId: string, poolId: string, periods: Period[], fte: number) => void;
+  setDisciplineRequirement: (projectId: string, disciplineId: string, period: Period, fte: number) => void;
+  setDisciplineRequirementRange: (projectId: string, disciplineId: string, periods: Period[], fte: number) => void;
   setPersonAssignment: (personId: string, projectId: string, period: Period, fte: number) => void;
   setPersonAssignmentRange: (personId: string, projectId: string, periods: Period[], fte: number) => void;
   clearRequirementPool: (projectId: string, poolId: string) => void;
@@ -110,6 +112,17 @@ export const useStore = create<StoreState>((set, get) => {
     void saveAutosave(bytes);
     set({ dirty: true });
     reload(db);
+  }
+
+  /** Finds (or lazily creates) the hidden pool that carries a discipline's "N people, no role picked" requirement. */
+  function resolveGenericPoolId(db: PlannerDatabase, disciplineId: string): string | null {
+    const discipline = get().data.disciplines.find((d) => d.id === disciplineId);
+    if (!discipline) return null;
+    const name = genericPoolName(discipline.name);
+    const existing = get().data.pools.find((p) => p.disciplineId === disciplineId && normalizeKey(p.name) === normalizeKey(name));
+    if (existing) return existing.id;
+    const pool = repoCreatePool(db, { name, disciplineId, color: discipline.color, capacityFte: 0 });
+    return pool.id;
   }
 
   return {
@@ -358,6 +371,24 @@ export const useStore = create<StoreState>((set, get) => {
     },
     setRequirementRange: (projectId, poolId, periods, fte) => {
       const db = get().db!;
+      const clamped = Math.max(0, fte);
+      const req = getOrCreateRequirement(db, projectId, poolId, BASE_SCENARIO_ID);
+      repoSetRequirementAllocations(db, req.id, periods, clamped);
+      persist();
+    },
+    setDisciplineRequirement: (projectId, disciplineId, period, fte) => {
+      const db = get().db!;
+      const poolId = resolveGenericPoolId(db, disciplineId);
+      if (!poolId) return;
+      const clamped = Math.max(0, fte);
+      const req = getOrCreateRequirement(db, projectId, poolId, BASE_SCENARIO_ID);
+      repoSetRequirementAllocation(db, req.id, period, clamped);
+      persist();
+    },
+    setDisciplineRequirementRange: (projectId, disciplineId, periods, fte) => {
+      const db = get().db!;
+      const poolId = resolveGenericPoolId(db, disciplineId);
+      if (!poolId) return;
       const clamped = Math.max(0, fte);
       const req = getOrCreateRequirement(db, projectId, poolId, BASE_SCENARIO_ID);
       repoSetRequirementAllocations(db, req.id, periods, clamped);

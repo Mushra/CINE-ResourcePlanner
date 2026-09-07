@@ -7,8 +7,8 @@
 
 .structure-card { padding: 16px; }
 .structure-card + .structure-card { margin-top: 0; }
-.structure-card-header { margin-bottom: 10px; }
-.structure-card-header h2 { margin: 0; font-size: 14px; font-weight: 650; }
+.structure-card .collapsible-summary-content h2 { margin: 0; font-size: 14px; font-weight: 650; }
+.structure-card-sub { color: var(--text-tertiary); font-size: 12px; font-weight: 400; }
 
 .structure-card .pool-dot { margin-right: 6px; }
 

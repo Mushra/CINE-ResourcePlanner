@@ -16,8 +16,7 @@
 .team-role-capacity { font-size: 11px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 .team-role-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 
-.team-people-table td:nth-child(2), .team-people-table th:nth-child(2),
-.team-people-table td:nth-child(3), .team-people-table th:nth-child(3) {
+.team-people-table td:nth-child(2), .team-people-table th:nth-child(2) {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }

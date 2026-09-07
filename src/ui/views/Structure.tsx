@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useStore } from '../../store/useStore';
-import { normalizeKey } from '../../domain/identity';
+import { normalizeKey, isGenericPoolName } from '../../domain/identity';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
 import { EmptyState } from '../components/EmptyState';
+import { Collapsible } from '../components/Collapsible';
 import { DisciplineFormDrawer, type DisciplineFormValue } from '../components/DisciplineFormDrawer';
 import { PoolFormDrawer, type PoolFormValue } from '../components/PoolFormDrawer';
 import type { StructureOverride } from '../../domain/types';
@@ -26,6 +27,8 @@ export function Structure() {
   const [newPool, setNewPool] = useState(false);
   const [ruleSourcePoolId, setRuleSourcePoolId] = useState('');
   const [ruleTargetPoolId, setRuleTargetPoolId] = useState('');
+
+  const visiblePools = pools.filter((p) => !isGenericPoolName(p.name));
 
   const disciplineById = new Map(disciplines.map((d) => [d.id, d] as const));
   const poolById = new Map(pools.map((p) => [p.id, p] as const));
@@ -64,12 +67,17 @@ export function Structure() {
         </div>
       </div>
 
-      <div className="card structure-card">
-        <div className="structure-card-header">
-          <h2>Emplois repères</h2>
-          <p className="view-sub">Move a role to a different discipline for display — the imported binding is kept in the background.</p>
-        </div>
-        {pools.length === 0 ? (
+      <Collapsible
+        scopeKey="structure:pools"
+        className="card structure-card"
+        summary={
+          <>
+            <h2>Emplois repères</h2>
+            <span className="structure-card-sub">Move a role to a different discipline for display — the imported binding is kept in the background.</span>
+          </>
+        }
+      >
+        {visiblePools.length === 0 ? (
           <p className="empty-inline">No roles yet.</p>
         ) : (
           <table className="data-table">
@@ -82,7 +90,7 @@ export function Structure() {
               </tr>
             </thead>
             <tbody>
-              {pools.map((pool) => {
+              {visiblePools.map((pool) => {
                 const override = poolOverrideByKey.get(normalizeKey(pool.name));
                 const targetDiscipline = override ? disciplines.find((d) => normalizeKey(d.name) === override.targetKey) : undefined;
                 const dangling = Boolean(override) && !targetDiscipline;
@@ -121,22 +129,27 @@ export function Structure() {
             </tbody>
           </table>
         )}
-      </div>
+      </Collapsible>
 
-      <div className="card structure-card">
-        <div className="structure-card-header">
-          <h2>Remap a whole role</h2>
-          <p className="view-sub">Move everyone currently in one role to another, as a rule. A person-level override above still wins over this rule.</p>
-        </div>
+      <Collapsible
+        scopeKey="structure:rule"
+        className="card structure-card"
+        summary={
+          <>
+            <h2>Remap a whole role</h2>
+            <span className="structure-card-sub">Move everyone currently in one role to another, as a rule. A person-level override above still wins over this rule.</span>
+          </>
+        }
+      >
         <div className="structure-rule-form">
           <select value={ruleSourcePoolId} onChange={(e) => setRuleSourcePoolId(e.target.value)}>
             <option value="">Source role…</option>
-            {pools.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {visiblePools.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
           <Icon name="chevron-right" size={14} className="structure-rule-arrow" />
           <select value={ruleTargetPoolId} onChange={(e) => setRuleTargetPoolId(e.target.value)}>
             <option value="">Target role…</option>
-            {pools.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {visiblePools.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
           <Button
             variant="primary"
@@ -171,13 +184,18 @@ export function Structure() {
             })}
           </ul>
         )}
-      </div>
+      </Collapsible>
 
-      <div className="card structure-card">
-        <div className="structure-card-header">
-          <h2>Personnes</h2>
-          <p className="view-sub">Override the role shown for one person, without changing their record in Team.</p>
-        </div>
+      <Collapsible
+        scopeKey="structure:people"
+        className="card structure-card"
+        summary={
+          <>
+            <h2>Personnes</h2>
+            <span className="structure-card-sub">Override the role shown for one person, without changing their record in Team.</span>
+          </>
+        }
+      >
         {people.length === 0 ? (
           <p className="empty-inline">No people yet.</p>
         ) : (
@@ -196,12 +214,15 @@ export function Structure() {
                 const targetPool = override ? pools.find((p) => normalizeKey(p.name) === override.targetKey) : undefined;
                 const dangling = Boolean(override) && !targetPool;
                 const originPool = person.importPoolId ? poolById.get(person.importPoolId) : undefined;
+                // No direct override: fall back to the person's effective poolId, which already
+                // reflects a "Remap a whole role" rule if one applies (see applyStructureOverrides).
+                const selectValue = override ? (targetPool?.id ?? USE_BASELINE) : (person.poolId ?? USE_BASELINE);
                 return (
                   <tr key={person.id}>
                     <td className="cell-name">{person.name}</td>
                     <td>
                       <select
-                        value={override ? (targetPool?.id ?? USE_BASELINE) : USE_BASELINE}
+                        value={selectValue}
                         onChange={(e) => {
                           const value = e.target.value;
                           if (value === USE_BASELINE) {
@@ -213,7 +234,7 @@ export function Structure() {
                         }}
                       >
                         <option value={USE_BASELINE}>— Use origin —</option>
-                        {pools.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        {visiblePools.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                       </select>
                       {dangling && <span className="pill pill-warning structure-dangling">target missing</span>}
                     </td>
@@ -227,7 +248,7 @@ export function Structure() {
             </tbody>
           </table>
         )}
-      </div>
+      </Collapsible>
 
       {newDiscipline && (
         <DisciplineFormDrawer onClose={() => setNewDiscipline(false)} onSave={(v: DisciplineFormValue) => { createDiscipline(v); setNewDiscipline(false); }} />

@@ -7,16 +7,23 @@ import { EmptyState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
 import { StatusPill } from '../components/StatusPill';
 import { Collapsible } from '../components/Collapsible';
+import { isGenericPoolName } from '../../domain/identity';
 
 export function Forecast() {
   const engine = useStore((s) => s.engine);
   const [monthsAhead, setMonthsAhead] = useState(6);
-  const forecast = useMemo(() => getForecast(engine, monthsAhead), [engine, monthsAhead]);
+  const rawForecast = useMemo(() => getForecast(engine, monthsAhead), [engine, monthsAhead]);
+  const forecast = useMemo(() => ({
+    ...rawForecast,
+    rows: rawForecast.rows.filter((r) => !isGenericPoolName(r.poolName)),
+    problems: rawForecast.problems.filter((p) => !isGenericPoolName(p.poolName)),
+  }), [rawForecast]);
   const periods = useMemo(() => getForecastWindowPeriods(engine, monthsAhead), [engine, monthsAhead]);
 
   const disciplineGroups = useMemo(() => {
-    const groups = engine.disciplines().map((d) => ({ id: d.id, name: d.name, pools: engine.poolsInDiscipline(d.id) }));
-    const unassigned = engine.poolsInDiscipline(UNASSIGNED_DISCIPLINE_ID);
+    const visible = (pools: ReturnType<typeof engine.poolsInDiscipline>) => pools.filter((p) => !isGenericPoolName(p.name));
+    const groups = engine.disciplines().map((d) => ({ id: d.id, name: d.name, pools: visible(engine.poolsInDiscipline(d.id)) }));
+    const unassigned = visible(engine.poolsInDiscipline(UNASSIGNED_DISCIPLINE_ID));
     if (unassigned.length > 0) groups.push({ id: UNASSIGNED_DISCIPLINE_ID, name: 'Unassigned', pools: unassigned });
     return groups.filter((g) => g.pools.length > 0);
   }, [engine]);

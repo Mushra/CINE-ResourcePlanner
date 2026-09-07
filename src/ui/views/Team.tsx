@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { UNASSIGNED_DISCIPLINE_ID } from '../../engine/planning';
+import { isGenericPoolName } from '../../domain/identity';
 import { todayPeriod } from '../../domain/periods';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
@@ -36,12 +37,14 @@ export function Team() {
 
   const period = todayPeriod();
 
+  const visiblePools = pools.filter((p) => !isGenericPoolName(p.name));
+
   const groups: { id: string; discipline: Discipline | null; poolsInGroup: ResourcePool[] }[] = engine.disciplines().map((d) => ({
     id: d.id,
     discipline: d,
-    poolsInGroup: engine.poolsInDiscipline(d.id),
+    poolsInGroup: engine.poolsInDiscipline(d.id).filter((p) => !isGenericPoolName(p.name)),
   }));
-  const unassignedPools = engine.poolsInDiscipline(UNASSIGNED_DISCIPLINE_ID);
+  const unassignedPools = engine.poolsInDiscipline(UNASSIGNED_DISCIPLINE_ID).filter((p) => !isGenericPoolName(p.name));
   if (unassignedPools.length > 0) groups.push({ id: UNASSIGNED_DISCIPLINE_ID, discipline: null, poolsInGroup: unassignedPools });
 
   if (disciplines.length === 0 && pools.length === 0 && people.length === 0) {
@@ -134,7 +137,6 @@ export function Team() {
                           <thead>
                             <tr>
                               <th>Name</th>
-                              <th>Capacity</th>
                               <th>Assigned now</th>
                               <th>Status</th>
                               <th />
@@ -144,7 +146,6 @@ export function Team() {
                             {rolePeople.map((person) => (
                               <tr key={person.id} className={person.active ? '' : 'person-inactive'}>
                                 <td>{person.name}</td>
-                                <td>{person.capacityFte}</td>
                                 <td>{engine.getPersonAssigned(person.id, period)}</td>
                                 <td>{person.active ? 'Active' : 'Inactive'}</td>
                                 <td className="team-people-actions">
@@ -196,7 +197,7 @@ export function Team() {
       )}
       {newPersonForPool && (
         <PersonFormDrawer
-          pools={pools}
+          pools={visiblePools}
           defaultPoolId={newPersonForPool}
           onClose={() => setNewPersonForPool(null)}
           onSave={(v: PersonFormValue) => { createPerson(v); setNewPersonForPool(null); }}
@@ -205,7 +206,7 @@ export function Team() {
       {editingPerson && (
         <PersonFormDrawer
           person={editingPerson}
-          pools={pools}
+          pools={visiblePools}
           onClose={() => setEditingPerson(null)}
           onSave={(v: PersonFormValue) => { updatePerson({ ...editingPerson, ...v }); setEditingPerson(null); }}
         />

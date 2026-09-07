@@ -95,6 +95,24 @@
 .alloc-cell-short .num-input { border-color: var(--status-critical); color: var(--status-critical); font-weight: 700; }
 .pool-group-row td { border-bottom: none; }
 
+.alloc-row-collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  margin-right: 4px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.alloc-row-collapse svg { transition: transform 0.15s ease; }
+.alloc-row-collapse-open { transform: rotate(90deg); }
+.alloc-row-label-indent { padding-left: 24px; font-weight: 400; }
+.requirement-discipline-row td { background: var(--surface-1); }
+.requirement-pool-row .alloc-row-label { font-weight: 400; color: var(--text-secondary); }
+
 .pool-subheader-row td { border-bottom: 1px solid var(--border-strong); background: var(--surface-1); }
 .pool-subheader {
   display: flex;

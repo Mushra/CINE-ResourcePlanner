@@ -30,6 +30,7 @@ export function Collapsible({
       className={`collapsible ${className ?? ''}`}
       open={!isCollapsed}
       onToggle={(e) => {
+        if (e.target !== e.currentTarget) return; // ignore toggle events bubbling up from a nested Collapsible
         const open = (e.target as HTMLDetailsElement).open;
         if (open === isCollapsed) toggleCollapse(scopeKey);
       }}

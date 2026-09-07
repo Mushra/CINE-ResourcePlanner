@@ -3,6 +3,7 @@ import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
 import { addMonths, formatPeriodLabel, periodFromISODate, periodRange, todayPeriod } from '../../domain/periods';
 import { getSanityChecks } from '../../engine/validation';
+import { isGenericPoolName } from '../../domain/identity';
 import type { Period } from '../../domain/types';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
@@ -16,6 +17,7 @@ const CERTAINTY_LABEL: Record<string, string> = { confirmed: 'Confirmed', estima
 export function ProjectDetail({ projectId }: { projectId: string }) {
   const project = useStore((s) => s.data.projects.find((p) => p.id === projectId));
   const engine = useStore((s) => s.engine);
+  const disciplines = useStore((s) => s.data.disciplines);
   const pools = useStore((s) => s.data.pools);
   const people = useStore((s) => s.data.people);
   const requirements = useStore((s) => s.data.requirements);
@@ -23,11 +25,15 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const deleteProject = useStore((s) => s.deleteProject);
   const setRequirement = useStore((s) => s.setRequirement);
   const setRequirementRange = useStore((s) => s.setRequirementRange);
+  const setDisciplineRequirement = useStore((s) => s.setDisciplineRequirement);
+  const setDisciplineRequirementRange = useStore((s) => s.setDisciplineRequirementRange);
   const setPersonAssignment = useStore((s) => s.setPersonAssignment);
   const setPersonAssignmentRange = useStore((s) => s.setPersonAssignmentRange);
   const clearRequirementPool = useStore((s) => s.clearRequirementPool);
   const clearPersonAssignment = useStore((s) => s.clearPersonAssignment);
   const backToProjects = useUiStore((s) => s.backToProjects);
+  const collapsed = useUiStore((s) => s.collapsed);
+  const toggleCollapse = useUiStore((s) => s.toggleCollapse);
   const [editing, setEditing] = useState(false);
 
   const checks = project ? getSanityChecks(engine).filter((c) => c.projectId === project.id) : [];
@@ -49,9 +55,24 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
   const requirementPoolIds = new Set(requirements.filter((r) => r.projectId === project.id).map((r) => r.poolId));
   const requirementPools = pools.filter((p) => requirementPoolIds.has(p.id));
+  const genericRequirementPools = requirementPools.filter((p) => isGenericPoolName(p.name));
+  const specificRequirementPools = requirementPools.filter((p) => !isGenericPoolName(p.name));
+
+  const requirementDisciplineIds = new Set(
+    [...genericRequirementPools, ...specificRequirementPools]
+      .map((p) => p.disciplineId)
+      .filter((id): id is string => id !== null),
+  );
+  const requirementDisciplines = disciplines.filter((d) => requirementDisciplineIds.has(d.id));
+  const unassignedSpecificPools = specificRequirementPools.filter((p) => p.disciplineId === null);
+
+  const requirementTargetOptions = [
+    ...disciplines.map((d) => ({ id: `disc:${d.id}`, label: `${d.name} (whole discipline)` })),
+    ...pools.filter((p) => !isGenericPoolName(p.name)).map((p) => ({ id: p.id, label: p.name })),
+  ];
 
   const usedPoolIds = new Set(engine.projectPoolIds(project.id));
-  const usedPools = pools.filter((p) => usedPoolIds.has(p.id));
+  const usedPools = pools.filter((p) => usedPoolIds.has(p.id) && !isGenericPoolName(p.name));
 
   return (
     <div className="project-detail-view">
@@ -100,25 +121,100 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         </div>
 
         <RangePanel
-          options={pools.map((p) => ({ id: p.id, label: p.name }))}
+          options={requirementTargetOptions}
           months={months}
-          onApply={(poolId, periods, fte) => setRequirementRange(project.id, poolId, periods, fte)}
+          onApply={(targetId, periods, fte) => (
+            targetId.startsWith('disc:')
+              ? setDisciplineRequirementRange(project.id, targetId.slice(5), periods, fte)
+              : setRequirementRange(project.id, targetId, periods, fte)
+          )}
         />
 
-        {requirementPools.length === 0 ? (
-          <p className="empty-inline">No resource requirements yet. Use the panel above to set a need.</p>
+        {requirementDisciplines.length === 0 && unassignedSpecificPools.length === 0 ? (
+          <p className="empty-inline">No resource requirements yet. Use the panel above to set a need — pick a whole discipline for a headcount minimum, or a specific role.</p>
         ) : (
           <div className="table-scroll">
             <table className="alloc-table">
               <thead>
                 <tr>
-                  <th className="alloc-row-label">Emploi repère</th>
+                  <th className="alloc-row-label">Discipline / Emploi repère</th>
                   {months.map((m) => <th key={m}>{formatPeriodLabel(m, { withYear: false })}</th>)}
                   <th className="alloc-actions-col" />
                 </tr>
               </thead>
               <tbody>
-                {requirementPools.map((pool) => {
+                {requirementDisciplines.map((discipline) => {
+                  const genericPool = genericRequirementPools.find((p) => p.disciplineId === discipline.id);
+                  const specificPools = specificRequirementPools.filter((p) => p.disciplineId === discipline.id);
+                  const collapseKey = `projdetail:req-disc:${project.id}:${discipline.id}`;
+                  const rowsCollapsed = specificPools.length > 0 && collapsed[collapseKey] === true;
+                  const staffingByMonth = months.map((m) => genericPool && engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === genericPool.id));
+                  return (
+                    <Fragment key={discipline.id}>
+                      <tr className="requirement-discipline-row">
+                        <td className="alloc-row-label">
+                          {specificPools.length > 0 && (
+                            <button
+                              type="button"
+                              className="alloc-row-collapse"
+                              onClick={() => toggleCollapse(collapseKey)}
+                              aria-label={rowsCollapsed ? 'Expand' : 'Collapse'}
+                            >
+                              <Icon name="chevron-right" size={11} className={rowsCollapsed ? '' : 'alloc-row-collapse-open'} />
+                            </button>
+                          )}
+                          <span className="discipline-dot" style={{ background: discipline.color }} />
+                          {discipline.name}
+                        </td>
+                        {months.map((m, i) => (
+                          <AllocCell
+                            key={m}
+                            value={staffingByMonth[i]?.required ?? 0}
+                            onCommit={(v) => setDisciplineRequirement(project.id, discipline.id, m, v)}
+                            onFillRight={i < months.length - 1 ? () => setDisciplineRequirementRange(project.id, discipline.id, months.slice(i + 1), staffingByMonth[i]?.required ?? 0) : undefined}
+                          />
+                        ))}
+                        <td className="alloc-actions-col">
+                          {genericPool && (
+                            <ConfirmButton
+                              label="Remove"
+                              onConfirm={() => clearRequirementPool(project.id, genericPool.id)}
+                            />
+                          )}
+                        </td>
+                      </tr>
+                      {!rowsCollapsed && specificPools.map((pool) => {
+                        const poolStaffingByMonth = months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === pool.id));
+                        return (
+                          <tr key={pool.id} className="requirement-pool-row">
+                            <td className="alloc-row-label alloc-row-label-indent">
+                              <span className="pool-dot" style={{ background: pool.color }} />
+                              {pool.name}
+                            </td>
+                            {months.map((m, i) => (
+                              <AllocCell
+                                key={m}
+                                value={poolStaffingByMonth[i]?.required ?? 0}
+                                onCommit={(v) => setRequirement(project.id, pool.id, m, v)}
+                                onFillRight={i < months.length - 1 ? () => setRequirementRange(project.id, pool.id, months.slice(i + 1), poolStaffingByMonth[i]?.required ?? 0) : undefined}
+                              />
+                            ))}
+                            <td className="alloc-actions-col">
+                              <ConfirmButton
+                                label="Remove"
+                                onConfirm={() => {
+                                  clearRequirementPool(project.id, pool.id);
+                                  engine.peopleInPool(pool.id).forEach((person) => clearPersonAssignment(person.id, project.id));
+                                }}
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </Fragment>
+                  );
+                })}
+                {unassignedSpecificPools.map((pool) => {
                   const staffingByMonth = months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === pool.id));
                   return (
                     <tr key={pool.id}>
