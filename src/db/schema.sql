@@ -89,6 +89,17 @@ CREATE TABLE IF NOT EXISTS person_assignment_allocations (
   PRIMARY KEY (person_assignment_id, period)
 );
 
+-- Persistent, name-keyed overrides layer for the Structure view. Never overwritten by import —
+-- the RPM importer merges disciplines/pools/people by name, so an override keyed by the same
+-- normalized name re-applies automatically after a re-import.
+CREATE TABLE IF NOT EXISTS structure_overrides (
+  id         TEXT PRIMARY KEY,
+  kind       TEXT NOT NULL, -- 'person_pool' | 'pool_discipline' | 'pool_person_pool'
+  source_key TEXT NOT NULL,
+  target_key TEXT NOT NULL,
+  UNIQUE (kind, source_key)
+);
+
 CREATE INDEX IF NOT EXISTS idx_requirements_project ON requirements(project_id);
 CREATE INDEX IF NOT EXISTS idx_requirements_pool ON requirements(pool_id);
 CREATE INDEX IF NOT EXISTS idx_req_alloc_req ON requirement_allocations(requirement_id);

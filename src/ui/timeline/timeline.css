@@ -194,6 +194,19 @@
   min-height: 34px;
 }
 .tl-project-label { font-weight: 600; gap: 8px; }
+.tl-project-collapse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.tl-project-collapse svg { transition: transform 0.15s ease; }
+.tl-project-collapse-open { transform: rotate(90deg); }
 .tl-project-name {
   border: none; background: none; padding: 0; font-size: 12.5px; font-weight: 600;
   color: var(--text-primary); cursor: pointer; text-align: left;

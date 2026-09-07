@@ -78,7 +78,7 @@ describe('v1 -> v2 migration', () => {
 
     const db = await PlannerDatabase.openFromBytes(bytes);
 
-    expect(db.getSetting('schema_version')).toBe('2');
+    expect(db.getSetting('schema_version')).toBe('3');
     expect(db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('assignments','assignment_allocations')")).toHaveLength(0);
 
     const poolColumns = db.query<{ name: string }>('PRAGMA table_info(resource_pools)');
@@ -102,7 +102,7 @@ describe('v1 -> v2 migration', () => {
 
   it('leaves a fresh v2 database untouched (no legacy tables were ever created)', async () => {
     const db = await PlannerDatabase.createNew();
-    expect(db.getSetting('schema_version')).toBe('2');
+    expect(db.getSetting('schema_version')).toBe('3');
     expect(db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='assignments'")).toHaveLength(0);
     expect(db.query('SELECT * FROM people')).toHaveLength(0);
   });
@@ -112,7 +112,7 @@ describe('v1 -> v2 migration', () => {
     const migrated = await PlannerDatabase.openFromBytes(bytes);
     const reopened = await PlannerDatabase.openFromBytes(migrated.export());
 
-    expect(reopened.getSetting('schema_version')).toBe('2');
+    expect(reopened.getSetting('schema_version')).toBe('3');
     const people = reopened.query('SELECT * FROM people');
     expect(people).toHaveLength(1);
 

@@ -7,7 +7,7 @@
 
 .kpi-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 12px;
 }
 .kpi-tile {
@@ -73,7 +73,14 @@
 .fill-critical { background: var(--status-critical); }
 .utilization-pct { font-size: 12px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
 
-.issue-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 420px; overflow: auto; }
+.issue-groups { display: flex; flex-direction: column; gap: 4px; max-height: 460px; overflow: auto; }
+.issue-group { padding: 0; }
+.issue-group + .issue-group { border-top: 1px solid var(--border); }
+.issue-group .collapsible-summary { padding: 6px 4px; font-size: 12.5px; }
+.issue-group .collapsible-body { margin-top: 0; }
+.issue-group-name { flex: 1; font-weight: 600; }
+
+.issue-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .issue-row {
   display: flex;
   align-items: flex-start;

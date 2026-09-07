@@ -144,6 +144,21 @@
   color: var(--text-tertiary);
 }
 
+/* Collapsible (controlled <details>/<summary>) */
+.collapsible-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+.collapsible-summary::-webkit-details-marker { display: none; }
+.collapsible-chevron { transition: transform 0.15s ease; flex-shrink: 0; }
+.collapsible[open] > .collapsible-summary .collapsible-chevron { transform: rotate(90deg); }
+.collapsible-summary-content { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.collapsible-count { font-size: 11px; font-weight: 500; color: var(--text-tertiary); flex-shrink: 0; }
+.collapsible-body { margin-top: 8px; }
+
 /* Inputs used across forms */
 .field {
   display: flex;

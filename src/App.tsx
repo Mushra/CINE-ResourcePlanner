@@ -9,6 +9,7 @@ import { Projects } from './ui/views/Projects';
 import { ProjectDetail } from './ui/views/ProjectDetail';
 import { Team } from './ui/views/Team';
 import { Forecast } from './ui/views/Forecast';
+import { Structure } from './ui/views/Structure';
 
 function App() {
   const status = useStore((s) => s.status);
@@ -48,6 +49,7 @@ function App() {
         {view === 'project-detail' && selectedProjectId && <ProjectDetail projectId={selectedProjectId} />}
         {view === 'team' && <Team />}
         {view === 'forecast' && <Forecast />}
+        {view === 'structure' && <Structure />}
       </AppShell>
       <Toaster />
     </>

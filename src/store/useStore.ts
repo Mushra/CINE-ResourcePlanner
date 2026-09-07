@@ -5,10 +5,11 @@ import {
   createProject as repoCreateProject, updateProject as repoUpdateProject, deleteProject as repoDeleteProject,
   createPool as repoCreatePool, updatePool as repoUpdatePool, deletePool as repoDeletePool,
   setPoolCapacityOverride as repoSetPoolCapacityOverride,
-  getOrCreateRequirement, setRequirementAllocation as repoSetRequirementAllocation, deleteRequirement as repoDeleteRequirement,
+  getOrCreateRequirement, setRequirementAllocation as repoSetRequirementAllocation, setRequirementAllocations as repoSetRequirementAllocations, deleteRequirement as repoDeleteRequirement,
   createDiscipline as repoCreateDiscipline, updateDiscipline as repoUpdateDiscipline, deleteDiscipline as repoDeleteDiscipline,
   createPerson as repoCreatePerson, updatePerson as repoUpdatePerson, deletePerson as repoDeletePerson,
-  getOrCreatePersonAssignment, setPersonAssignmentAllocation as repoSetPersonAssignmentAllocation, deletePersonAssignment as repoDeletePersonAssignment,
+  getOrCreatePersonAssignment, setPersonAssignmentAllocation as repoSetPersonAssignmentAllocation, setPersonAssignmentAllocations as repoSetPersonAssignmentAllocations, deletePersonAssignment as repoDeletePersonAssignment,
+  upsertStructureOverride as repoUpsertStructureOverride, deleteStructureOverride as repoDeleteStructureOverride,
 } from '../db/repository';
 import { applyRpmImport, type ImportMode } from '../db/applyImport';
 import { seedDemoData } from '../db/seed';
@@ -19,6 +20,8 @@ import { parseRpmWorkbook, type ImportReport } from '../import/rpmImport';
 import { PlanningEngine } from '../engine/planning';
 import type { Discipline, PlanningData, Period, Person, Project, ResourcePool } from '../domain/types';
 import { emptyPlanningData } from '../domain/types';
+import { applyStructureOverrides } from '../domain/overrides';
+import { normalizeKey } from '../domain/identity';
 
 export type ToastKind = 'success' | 'error' | 'info';
 
@@ -76,9 +79,16 @@ interface StoreState {
   deletePerson: (personId: string) => void;
 
   setRequirement: (projectId: string, poolId: string, period: Period, fte: number) => void;
+  setRequirementRange: (projectId: string, poolId: string, periods: Period[], fte: number) => void;
   setPersonAssignment: (personId: string, projectId: string, period: Period, fte: number) => void;
+  setPersonAssignmentRange: (personId: string, projectId: string, periods: Period[], fte: number) => void;
   clearRequirementPool: (projectId: string, poolId: string) => void;
   clearPersonAssignment: (personId: string, projectId: string) => void;
+
+  setPoolDiscipline: (poolName: string, disciplineName: string) => void;
+  setPersonPool: (personName: string, poolName: string) => void;
+  setPoolPersonPool: (sourcePoolName: string, targetPoolName: string) => void;
+  clearOverride: (overrideId: string) => void;
 }
 
 function nextToastId(): string {
@@ -87,7 +97,8 @@ function nextToastId(): string {
 
 export const useStore = create<StoreState>((set, get) => {
   function reload(db: PlannerDatabase): void {
-    const data = loadPlanningData(db);
+    const raw = loadPlanningData(db);
+    const data = applyStructureOverrides(raw, raw.structureOverrides);
     const engine = new PlanningEngine(data, BASE_SCENARIO_ID);
     set({ data, engine });
   }
@@ -345,11 +356,25 @@ export const useStore = create<StoreState>((set, get) => {
       repoSetRequirementAllocation(db, req.id, period, clamped);
       persist();
     },
+    setRequirementRange: (projectId, poolId, periods, fte) => {
+      const db = get().db!;
+      const clamped = Math.max(0, fte);
+      const req = getOrCreateRequirement(db, projectId, poolId, BASE_SCENARIO_ID);
+      repoSetRequirementAllocations(db, req.id, periods, clamped);
+      persist();
+    },
     setPersonAssignment: (personId, projectId, period, fte) => {
       const db = get().db!;
       const clamped = Math.max(0, fte);
       const asn = getOrCreatePersonAssignment(db, personId, projectId, BASE_SCENARIO_ID);
       repoSetPersonAssignmentAllocation(db, asn.id, period, clamped);
+      persist();
+    },
+    setPersonAssignmentRange: (personId, projectId, periods, fte) => {
+      const db = get().db!;
+      const clamped = Math.max(0, fte);
+      const asn = getOrCreatePersonAssignment(db, personId, projectId, BASE_SCENARIO_ID);
+      repoSetPersonAssignmentAllocations(db, asn.id, periods, clamped);
       persist();
     },
     clearRequirementPool: (projectId, poolId) => {
@@ -362,6 +387,27 @@ export const useStore = create<StoreState>((set, get) => {
       const db = get().db!;
       const asn = get().data.personAssignments.find((a) => a.personId === personId && a.projectId === projectId);
       if (asn) repoDeletePersonAssignment(db, asn.id);
+      persist();
+    },
+
+    setPoolDiscipline: (poolName, disciplineName) => {
+      const db = get().db!;
+      repoUpsertStructureOverride(db, 'pool_discipline', normalizeKey(poolName), normalizeKey(disciplineName));
+      persist();
+    },
+    setPersonPool: (personName, poolName) => {
+      const db = get().db!;
+      repoUpsertStructureOverride(db, 'person_pool', normalizeKey(personName), normalizeKey(poolName));
+      persist();
+    },
+    setPoolPersonPool: (sourcePoolName, targetPoolName) => {
+      const db = get().db!;
+      repoUpsertStructureOverride(db, 'pool_person_pool', normalizeKey(sourcePoolName), normalizeKey(targetPoolName));
+      persist();
+    },
+    clearOverride: (overrideId) => {
+      const db = get().db!;
+      repoDeleteStructureOverride(db, overrideId);
       persist();
     },
   };

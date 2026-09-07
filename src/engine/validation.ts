@@ -1,5 +1,6 @@
 import type { Period, Severity } from '../domain/types';
-import { PlanningEngine, round2 } from './planning';
+import { PlanningEngine, UNASSIGNED_DISCIPLINE_ID, round2 } from './planning';
+import { getForecastWindowPeriods } from './forecast';
 import { comparePeriod, formatPeriodLabel, periodFromISODate, periodRange } from '../domain/periods';
 
 export type CheckCategory =
@@ -8,7 +9,11 @@ export type CheckCategory =
   | 'unstaffed_requirement'
   | 'invalid_dates'
   | 'tbd_dates'
-  | 'available_not_assigned';
+  | 'available_not_assigned'
+  | 'over_allocated'
+  | 'assignment_without_requirement'
+  | 'duration_mismatch'
+  | 'unstaffed_person';
 
 export interface SanityCheck {
   id: string;
@@ -18,6 +23,10 @@ export interface SanityCheck {
   projectName?: string;
   poolId?: string;
   poolName?: string;
+  disciplineId?: string;
+  disciplineName?: string;
+  personId?: string;
+  personName?: string;
   period?: Period;
   message: string;
   impact: string;
@@ -33,8 +42,25 @@ export function getSanityChecks(engine: PlanningEngine): SanityCheck[] {
 
   checks.push(...checkOverCapacity(engine, periods));
   checks.push(...checkProjectStaffing(engine));
+  checks.push(...checkDurationMismatch(engine));
   checks.push(...checkInvalidDates(engine));
   checks.push(...checkTbdDates(engine));
+  checks.push(...checkUnstaffedPeople(engine));
+
+  for (const check of checks) {
+    if (check.disciplineId) continue;
+    const poolId = check.poolId;
+    if (!poolId) continue;
+    const pool = engine.pool(poolId);
+    if (!pool) continue;
+    if (pool.disciplineId) {
+      check.disciplineId = pool.disciplineId;
+      check.disciplineName = engine.discipline(pool.disciplineId)?.name;
+    } else {
+      check.disciplineId = UNASSIGNED_DISCIPLINE_ID;
+      check.disciplineName = 'Unassigned';
+    }
+  }
 
   return checks.sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
 }
@@ -77,7 +103,38 @@ function checkProjectStaffing(engine: PlanningEngine): SanityCheck[] {
     for (const period of periods) {
       const staffing = engine.getProjectStaffing(project.id, period);
       for (const line of staffing.lines) {
-        if (line.required <= 0) continue;
+        if (line.required <= 0) {
+          if (line.assigned > 0.001) {
+            checks.push({
+              id: `assignment-without-requirement:${project.id}:${line.poolId}:${period}`,
+              severity: 'warning',
+              category: 'assignment_without_requirement',
+              projectId: project.id,
+              projectName: project.name,
+              poolId: line.poolId,
+              poolName: line.poolName,
+              period,
+              message: `${project.name} has ${line.poolName} assigned with no requirement in ${formatPeriodLabel(period)}`,
+              impact: `${line.assigned} FTE assigned but no requirement exists for this role/period`,
+            });
+          }
+          continue;
+        }
+
+        if (line.gap > 0.001) {
+          checks.push({
+            id: `over-allocated:${project.id}:${line.poolId}:${period}`,
+            severity: 'warning',
+            category: 'over_allocated',
+            projectId: project.id,
+            projectName: project.name,
+            poolId: line.poolId,
+            poolName: line.poolName,
+            period,
+            message: `${project.name} is over-allocated on ${line.poolName} in ${formatPeriodLabel(period)}`,
+            impact: `Assigned ${line.assigned} FTE exceeds requirement ${line.required} FTE by ${round2(line.gap)} FTE`,
+          });
+        }
 
         if (line.assigned <= 0.001) {
           // No assignment at all for this pool on this project — a distinct, more severe case.
@@ -131,6 +188,45 @@ function checkProjectStaffing(engine: PlanningEngine): SanityCheck[] {
             });
           }
         }
+      }
+    }
+  }
+  return checks;
+}
+
+/** Flags assignments that reach into periods a pool has no requirement for on that project. */
+function checkDurationMismatch(engine: PlanningEngine): SanityCheck[] {
+  const checks: SanityCheck[] = [];
+  for (const project of engine.projects()) {
+    if (project.status === 'cancelled' || project.status === 'completed') continue;
+    const periods = engine.projectAllocatedPeriods(project.id);
+    for (const poolId of engine.projectPoolIds(project.id)) {
+      const reqPeriods = new Set<Period>();
+      const extraAsnPeriods: Period[] = [];
+      for (const period of periods) {
+        const line = engine.getProjectStaffing(project.id, period).lines.find((l) => l.poolId === poolId);
+        if (!line) continue;
+        if (line.required > 0.001) reqPeriods.add(period);
+      }
+      if (reqPeriods.size === 0) continue; // no requirement at all for this pool — covered by assignment_without_requirement
+      for (const period of periods) {
+        const line = engine.getProjectStaffing(project.id, period).lines.find((l) => l.poolId === poolId);
+        if (line && line.assigned > 0.001 && !reqPeriods.has(period)) extraAsnPeriods.push(period);
+      }
+      if (extraAsnPeriods.length > 0) {
+        const poolName = engine.pool(poolId)?.name ?? poolId;
+        const list = extraAsnPeriods.sort(comparePeriod).map((p) => formatPeriodLabel(p)).join(', ');
+        checks.push({
+          id: `duration-mismatch:${project.id}:${poolId}`,
+          severity: 'warning',
+          category: 'duration_mismatch',
+          projectId: project.id,
+          projectName: project.name,
+          poolId,
+          poolName,
+          message: `${project.name} has ${poolName} assigned outside its requirement's duration`,
+          impact: `Assigned in ${list}, where no requirement is defined for this role`,
+        });
       }
     }
   }
@@ -191,6 +287,30 @@ function checkTbdDates(engine: PlanningEngine): SanityCheck[] {
         impact: 'Timeline placement and capacity forecasting are limited until dates are confirmed',
       });
     }
+  }
+  return checks;
+}
+
+/** Active people with capacity but no assignment anywhere in the near-term forecast window. */
+function checkUnstaffedPeople(engine: PlanningEngine): SanityCheck[] {
+  const checks: SanityCheck[] = [];
+  const periods = getForecastWindowPeriods(engine, 6);
+  for (const person of engine.people()) {
+    if (!person.active || person.capacityFte <= 0.001) continue;
+    const totalAssigned = periods.reduce((sum, period) => sum + engine.getPersonAssigned(person.id, period), 0);
+    if (totalAssigned > 0.001) continue;
+    const pool = person.poolId ? engine.pool(person.poolId) : undefined;
+    checks.push({
+      id: `unstaffed-person:${person.id}`,
+      severity: 'info',
+      category: 'unstaffed_person',
+      personId: person.id,
+      personName: person.name,
+      poolId: person.poolId ?? undefined,
+      poolName: pool?.name,
+      message: `${person.name} has no assignment in the next few months`,
+      impact: `${person.capacityFte} FTE of capacity is unstaffed over the forecast window`,
+    });
   }
   return checks;
 }

@@ -1,8 +1,9 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useRef, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
 import { addMonths, formatPeriodLabel, periodFromISODate, periodRange, todayPeriod } from '../../domain/periods';
 import { getSanityChecks } from '../../engine/validation';
+import type { Period } from '../../domain/types';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
 import { StatusPill } from '../components/StatusPill';
@@ -17,17 +18,19 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const engine = useStore((s) => s.engine);
   const pools = useStore((s) => s.data.pools);
   const people = useStore((s) => s.data.people);
+  const requirements = useStore((s) => s.data.requirements);
   const updateProject = useStore((s) => s.updateProject);
   const deleteProject = useStore((s) => s.deleteProject);
   const setRequirement = useStore((s) => s.setRequirement);
+  const setRequirementRange = useStore((s) => s.setRequirementRange);
   const setPersonAssignment = useStore((s) => s.setPersonAssignment);
+  const setPersonAssignmentRange = useStore((s) => s.setPersonAssignmentRange);
   const clearRequirementPool = useStore((s) => s.clearRequirementPool);
   const clearPersonAssignment = useStore((s) => s.clearPersonAssignment);
   const backToProjects = useUiStore((s) => s.backToProjects);
   const [editing, setEditing] = useState(false);
-  const [addingPool, setAddingPool] = useState(false);
 
-  const checks = useMemo(() => (project ? getSanityChecks(engine).filter((c) => c.projectId === project.id) : []), [engine, project]);
+  const checks = project ? getSanityChecks(engine).filter((c) => c.projectId === project.id) : [];
 
   if (!project) {
     return (
@@ -44,9 +47,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     ? explicitLifecycle
     : (allocatedPeriods.length > 0 ? allocatedPeriods : periodRange(todayPeriod(), addMonths(todayPeriod(), 3)));
 
+  const requirementPoolIds = new Set(requirements.filter((r) => r.projectId === project.id).map((r) => r.poolId));
+  const requirementPools = pools.filter((p) => requirementPoolIds.has(p.id));
+
   const usedPoolIds = new Set(engine.projectPoolIds(project.id));
   const usedPools = pools.filter((p) => usedPoolIds.has(p.id));
-  const availablePools = pools.filter((p) => !usedPoolIds.has(p.id));
 
   return (
     <div className="project-detail-view">
@@ -90,39 +95,85 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
       <div className="card requirements-card">
         <div className="panel-header">
-          <h2>Resource requirements</h2>
-          {availablePools.length > 0 && (
-            addingPool ? (
-              <select
-                autoFocus
-                className="pool-add-select"
-                defaultValue=""
-                onChange={(e) => {
-                  if (e.target.value) setRequirement(project.id, e.target.value, months[0] ?? todayPeriod(), 1);
-                  setAddingPool(false);
-                }}
-                onBlur={() => setAddingPool(false)}
-              >
-                <option value="" disabled>Choose a discipline…</option>
-                {availablePools.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            ) : (
-              <Button variant="ghost" size="sm" icon="plus" onClick={() => setAddingPool(true)}>Add discipline</Button>
-            )
-          )}
+          <h2>Besoins</h2>
+          <span className="panel-sub">What the project needs, by role and month</span>
         </div>
 
-        {usedPools.length === 0 ? (
-          <p className="empty-inline">No resource requirements yet. Add a discipline to start planning.</p>
+        <RangePanel
+          options={pools.map((p) => ({ id: p.id, label: p.name }))}
+          months={months}
+          onApply={(poolId, periods, fte) => setRequirementRange(project.id, poolId, periods, fte)}
+        />
+
+        {requirementPools.length === 0 ? (
+          <p className="empty-inline">No resource requirements yet. Use the panel above to set a need.</p>
         ) : (
           <div className="table-scroll">
             <table className="alloc-table">
               <thead>
                 <tr>
-                  <th className="alloc-row-label">Discipline</th>
-                  <th className="alloc-kind-label" />
+                  <th className="alloc-row-label">Emploi repère</th>
                   {months.map((m) => <th key={m}>{formatPeriodLabel(m, { withYear: false })}</th>)}
                   <th className="alloc-actions-col" />
+                </tr>
+              </thead>
+              <tbody>
+                {requirementPools.map((pool) => {
+                  const staffingByMonth = months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === pool.id));
+                  return (
+                    <tr key={pool.id}>
+                      <td className="alloc-row-label">
+                        <span className="pool-dot" style={{ background: pool.color }} />
+                        {pool.name}
+                      </td>
+                      {months.map((m, i) => (
+                        <AllocCell
+                          key={m}
+                          value={staffingByMonth[i]?.required ?? 0}
+                          onCommit={(v) => setRequirement(project.id, pool.id, m, v)}
+                          onFillRight={i < months.length - 1 ? () => setRequirementRange(project.id, pool.id, months.slice(i + 1), staffingByMonth[i]?.required ?? 0) : undefined}
+                        />
+                      ))}
+                      <td className="alloc-actions-col">
+                        <ConfirmButton
+                          label="Remove"
+                          onConfirm={() => {
+                            clearRequirementPool(project.id, pool.id);
+                            engine.peopleInPool(pool.id).forEach((person) => clearPersonAssignment(person.id, project.id));
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="card requirements-card">
+        <div className="panel-header">
+          <h2>Assignations</h2>
+          <span className="panel-sub">Who is actually staffed, by month</span>
+        </div>
+
+        <RangePanel
+          options={people.map((p) => ({ id: p.id, label: p.poolId ? `${p.name} (${pools.find((pl) => pl.id === p.poolId)?.name ?? ''})` : p.name }))}
+          months={months}
+          fteLabel="FTE"
+          onApply={(personId, periods, fte) => setPersonAssignmentRange(personId, project.id, periods, fte)}
+        />
+
+        {usedPools.length === 0 ? (
+          <p className="empty-inline">No one is assigned yet.</p>
+        ) : (
+          <div className="table-scroll">
+            <table className="alloc-table">
+              <thead>
+                <tr>
+                  <th className="alloc-row-label">Person</th>
+                  {months.map((m) => <th key={m}>{formatPeriodLabel(m, { withYear: false })}</th>)}
                 </tr>
               </thead>
               <tbody>
@@ -135,29 +186,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   const assignedPersonIds = [...assignedPeople.keys()].sort((a, b) => assignedPeople.get(a)!.localeCompare(assignedPeople.get(b)!));
 
                   const addablePeople = people.filter((p) => p.poolId === pool.id && !assignedPeople.has(p.id));
-                  const rowSpan = 1 + assignedPersonIds.length + (addablePeople.length > 0 ? 1 : 0);
 
                   return (
                     <Fragment key={pool.id}>
-                      <tr className="pool-group-row">
-                        <td className="alloc-row-label" rowSpan={rowSpan}>
+                      <tr className="pool-subheader-row">
+                        <td className="pool-subheader" colSpan={months.length + 1}>
                           <span className="pool-dot" style={{ background: pool.color }} />
                           {pool.name}
-                        </td>
-                        <td className="alloc-kind-label">Required</td>
-                        {months.map((m, i) => (
-                          <td key={m} className="alloc-cell">
-                            <NumberField value={staffingByMonth[i]?.required ?? 0} onCommit={(v) => setRequirement(project.id, pool.id, m, v)} className="num-input" />
-                          </td>
-                        ))}
-                        <td rowSpan={rowSpan} className="alloc-actions-col">
-                          <ConfirmButton
-                            label="Remove"
-                            onConfirm={() => {
-                              clearRequirementPool(project.id, pool.id);
-                              assignedPersonIds.forEach((personId) => clearPersonAssignment(personId, project.id));
-                            }}
-                          />
                         </td>
                       </tr>
                       {assignedPersonIds.map((personId) => (
@@ -174,9 +209,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                             const short = required > 0 && assigned < required - 0.001;
                             const fte = personLinesByMonth[i].find((l) => l.personId === personId)?.fte ?? 0;
                             return (
-                              <td key={m} className={`alloc-cell ${short ? 'alloc-cell-short' : ''}`}>
-                                <NumberField value={fte} onCommit={(v) => setPersonAssignment(personId, project.id, m, v)} className="num-input" />
-                              </td>
+                              <AllocCell
+                                key={m}
+                                value={fte}
+                                highlightShort={short}
+                                onCommit={(v) => setPersonAssignment(personId, project.id, m, v)}
+                                onFillRight={i < months.length - 1 ? () => setPersonAssignmentRange(personId, project.id, months.slice(i + 1), fte) : undefined}
+                              />
                             );
                           })}
                         </tr>
@@ -228,6 +267,73 @@ function DateChip({ label, date, certainty }: { label: string; date: string | nu
       <span className="date-chip-label">{label}</span>
       <span className="date-chip-value">{date ?? 'TBD'}</span>
       <span className="date-chip-certainty">{CERTAINTY_LABEL[certainty]}</span>
+    </div>
+  );
+}
+
+/** One grid cell: an editable FTE plus a fill-right affordance that copies its value to every month after it. */
+function AllocCell({ value, onCommit, onFillRight, highlightShort }: {
+  value: number;
+  onCommit: (value: number) => void;
+  onFillRight?: () => void;
+  highlightShort?: boolean;
+}) {
+  return (
+    <td className={`alloc-cell ${highlightShort ? 'alloc-cell-short' : ''}`}>
+      <div className="alloc-cell-inner">
+        <NumberField value={value} onCommit={onCommit} onFillRight={onFillRight} className="num-input" />
+        {onFillRight && (
+          <button type="button" className="alloc-fill-right" title="Fill right with this value" onClick={onFillRight}>
+            <Icon name="chevron-right" size={10} />
+          </button>
+        )}
+      </div>
+    </td>
+  );
+}
+
+/** Bulk-entry panel: pick a target (pool or person), a month range and an FTE, apply to every month at once. */
+function RangePanel({ options, months, onApply, fteLabel = 'FTE' }: {
+  options: { id: string; label: string }[];
+  months: Period[];
+  onApply: (targetId: string, periods: Period[], fte: number) => void;
+  fteLabel?: string;
+}) {
+  const targetRef = useRef<HTMLSelectElement>(null);
+  const fromRef = useRef<HTMLSelectElement>(null);
+  const toRef = useRef<HTMLSelectElement>(null);
+  const fteRef = useRef<HTMLInputElement>(null);
+
+  if (options.length === 0) return null;
+
+  return (
+    <div className="range-panel">
+      <select ref={targetRef} className="range-panel-select" defaultValue={options[0].id}>
+        {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+      </select>
+      <span className="range-panel-label">from</span>
+      <select ref={fromRef} defaultValue="0">
+        {months.map((m, i) => <option key={m} value={i}>{formatPeriodLabel(m, { withYear: false })}</option>)}
+      </select>
+      <span className="range-panel-label">to</span>
+      <select ref={toRef} defaultValue={String(months.length - 1)}>
+        {months.map((m, i) => <option key={m} value={i}>{formatPeriodLabel(m, { withYear: false })}</option>)}
+      </select>
+      <input ref={fteRef} type="number" step={0.5} min={0} defaultValue={1} className="num-input range-panel-fte" title={fteLabel} />
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={() => {
+          const targetId = targetRef.current!.value;
+          const fromIdx = Number(fromRef.current!.value);
+          const toIdx = Number(toRef.current!.value);
+          const fte = parseFloat(fteRef.current!.value ?? '') || 0;
+          if (!targetId || fromIdx > toIdx) return;
+          onApply(targetId, months.slice(fromIdx, toIdx + 1), fte);
+        }}
+      >
+        Apply
+      </Button>
     </div>
   );
 }

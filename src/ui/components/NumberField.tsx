@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 export function NumberField({
   value,
   onCommit,
+  onFillRight,
   step = 0.5,
   min = 0,
   placeholder = '0',
@@ -11,6 +12,8 @@ export function NumberField({
 }: {
   value: number;
   onCommit: (value: number) => void;
+  /** Optional: Shift+Enter or Ctrl+Enter triggers this instead of just committing, for keyboard-driven fill-right. */
+  onFillRight?: () => void;
   step?: number;
   min?: number;
   placeholder?: string;
@@ -49,6 +52,12 @@ export function NumberField({
       onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === 'Enter') {
+          if ((e.shiftKey || e.ctrlKey) && onFillRight) {
+            e.preventDefault();
+            commit();
+            onFillRight();
+            return;
+          }
           (e.target as HTMLInputElement).blur();
         } else if (e.key === 'Escape') {
           skipCommitRef.current = true;

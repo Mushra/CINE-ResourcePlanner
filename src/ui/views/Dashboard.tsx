@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
-import { getSanityChecks } from '../../engine/validation';
+import { getSanityChecks, type SanityCheck } from '../../engine/validation';
 import { utilizationStatus } from '../../engine/forecast';
 import { round2 } from '../../engine/planning';
 import { todayPeriod, formatPeriodLabel } from '../../domain/periods';
@@ -9,6 +9,7 @@ import { Icon } from '../components/Icon';
 import { StatusPill } from '../components/StatusPill';
 import { EmptyState } from '../components/EmptyState';
 import { Button } from '../components/Button';
+import { Collapsible } from '../components/Collapsible';
 
 export function Dashboard() {
   const engine = useStore((s) => s.engine);
@@ -39,6 +40,20 @@ export function Dashboard() {
   const understaffedProjectIds = new Set(
     checks.filter((c) => c.category === 'understaffed_project' || c.category === 'unstaffed_requirement').map((c) => c.projectId),
   );
+  const overAllocatedProjectIds = new Set(checks.filter((c) => c.category === 'over_allocated').map((c) => c.projectId));
+  const unstaffedPeople = checks.filter((c) => c.category === 'unstaffed_person');
+
+  const groupedChecks: { id: string; name: string; checks: SanityCheck[] }[] = [];
+  {
+    const groups = new Map<string, { id: string; name: string; checks: SanityCheck[] }>();
+    for (const check of checks) {
+      const id = check.disciplineId ?? '__other__';
+      const name = check.disciplineName ?? 'Other';
+      if (!groups.has(id)) groups.set(id, { id, name, checks: [] });
+      groups.get(id)!.checks.push(check);
+    }
+    groupedChecks.push(...groups.values());
+  }
 
   return (
     <div className="dashboard">
@@ -57,6 +72,18 @@ export function Dashboard() {
           value={String(understaffedProjectIds.size)}
           icon="warning"
           tone={understaffedProjectIds.size > 0 ? 'warning' : 'neutral'}
+        />
+        <KpiTile
+          label="Over-allocated projects"
+          value={String(overAllocatedProjectIds.size)}
+          icon="warning"
+          tone={overAllocatedProjectIds.size > 0 ? 'warning' : 'neutral'}
+        />
+        <KpiTile
+          label="Unstaffed people"
+          value={String(unstaffedPeople.length)}
+          icon="team"
+          tone={unstaffedPeople.length > 0 ? 'warning' : 'neutral'}
         />
       </div>
 
@@ -100,28 +127,36 @@ export function Dashboard() {
           {checks.length === 0 ? (
             <EmptyState icon="check" title="All clear" description="No capacity conflicts or staffing gaps detected." />
           ) : (
-            <ul className="issue-list">
-              {checks.slice(0, 8).map((check) => (
-                <li key={check.id} className="issue-row">
-                  <StatusPill tone={check.severity}>{check.severity}</StatusPill>
-                  <div className="issue-body">
-                    <button
-                      type="button"
-                      className="issue-message"
-                      onClick={() => (check.projectId ? openProject(check.projectId) : navigate('forecast'))}
-                    >
-                      {check.message}
-                    </button>
-                    <div className="issue-impact">{check.impact}</div>
-                  </div>
-                </li>
+            <div className="issue-groups">
+              {groupedChecks.map((group, idx) => (
+                <Collapsible
+                  key={group.id}
+                  scopeKey={`dashboard:need:${group.id}`}
+                  className="issue-group"
+                  defaultOpen={idx === 0 || group.checks.some((c) => c.severity === 'critical')}
+                  summary={<span className="issue-group-name">{group.name}</span>}
+                  count={group.checks.length}
+                >
+                  <ul className="issue-list">
+                    {group.checks.map((check) => (
+                      <li key={check.id} className="issue-row">
+                        <StatusPill tone={check.severity}>{check.severity}</StatusPill>
+                        <div className="issue-body">
+                          <button
+                            type="button"
+                            className="issue-message"
+                            onClick={() => (check.projectId ? openProject(check.projectId) : navigate('forecast'))}
+                          >
+                            {check.message}
+                          </button>
+                          <div className="issue-impact">{check.impact}</div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </Collapsible>
               ))}
-            </ul>
-          )}
-          {checks.length > 8 && (
-            <button type="button" className="panel-more" onClick={() => navigate('forecast')}>
-              <Icon name="chevron-right" size={13} /> View all {checks.length} issues in Forecast
-            </button>
+            </div>
           )}
         </section>
       </div>

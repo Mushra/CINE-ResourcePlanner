@@ -1,0 +1,45 @@
+.structure-view {
+  max-width: 1180px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.structure-card { padding: 16px; }
+.structure-card + .structure-card { margin-top: 0; }
+.structure-card-header { margin-bottom: 10px; }
+.structure-card-header h2 { margin: 0; font-size: 14px; font-weight: 650; }
+
+.structure-card .pool-dot { margin-right: 6px; }
+
+.structure-origin { color: var(--text-tertiary); font-size: 12px; }
+
+.structure-dangling { margin-left: 8px; }
+
+.structure-rule-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.structure-rule-form select { min-width: 160px; }
+.structure-rule-arrow { color: var(--text-tertiary); flex-shrink: 0; }
+
+.structure-rule-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.structure-rule-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.structure-rule-list li:first-child { border-top: none; }
+.structure-rule-list li .btn { margin-left: auto; }

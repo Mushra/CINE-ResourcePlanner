@@ -36,6 +36,8 @@ export interface ResourcePool {
   color: string;
   sortOrder: number;
   disciplineId: string | null;
+  /** Baseline disciplineId before structure overrides — set by applyStructureOverrides, not persisted on this row. */
+  importDisciplineId?: string | null;
 }
 
 export interface Discipline {
@@ -53,6 +55,8 @@ export interface Person {
   active: boolean;
   notes: string;
   sortOrder: number;
+  /** Baseline poolId before structure overrides — set by applyStructureOverrides, not persisted on this row. */
+  importPoolId?: string | null;
 }
 
 /** Lets a pool's capacity vary over time (e.g. a hire lands in November). */
@@ -95,6 +99,21 @@ export interface PersonAssignmentAllocation {
   fte: number;
 }
 
+/** Kind of a persistent structure override — see applyStructureOverrides for how each is resolved. */
+export type StructureOverrideKind = 'person_pool' | 'pool_discipline' | 'pool_person_pool';
+
+/**
+ * A name-keyed override that lets the Structure view reshape the team without touching the
+ * imported baseline. `sourceKey`/`targetKey` are normalizeKey(name) values, so overrides re-apply
+ * automatically after a re-import that matches rows by name.
+ */
+export interface StructureOverride {
+  id: string;
+  kind: StructureOverrideKind;
+  sourceKey: string;
+  targetKey: string;
+}
+
 /** Full snapshot of persisted data the engine operates on. Pure — no DB or UI concerns. */
 export interface PlanningData {
   projects: Project[];
@@ -107,6 +126,7 @@ export interface PlanningData {
   requirementAllocations: RequirementAllocation[];
   personAssignments: PersonAssignment[];
   personAssignmentAllocations: PersonAssignmentAllocation[];
+  structureOverrides: StructureOverride[];
 }
 
 export function emptyPlanningData(): PlanningData {
@@ -121,5 +141,6 @@ export function emptyPlanningData(): PlanningData {
     requirementAllocations: [],
     personAssignments: [],
     personAssignmentAllocations: [],
+    structureOverrides: [],
   };
 }

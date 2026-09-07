@@ -6,6 +6,7 @@ import { formatPeriodLabel } from '../../domain/periods';
 import { EmptyState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
 import { StatusPill } from '../components/StatusPill';
+import { Collapsible } from '../components/Collapsible';
 
 export function Forecast() {
   const engine = useStore((s) => s.engine);
@@ -54,7 +55,7 @@ export function Forecast() {
           <table className="forecast-matrix">
             <thead>
               <tr>
-                <th className="matrix-row-label">Discipline</th>
+                <th className="matrix-row-label">Emploi repère</th>
                 {forecast.periods.map((p) => <th key={p}>{formatPeriodLabel(p, { withYear: false })}</th>)}
               </tr>
             </thead>
@@ -83,12 +84,14 @@ export function Forecast() {
       <h2 className="forecast-detail-heading">Capacity detail</h2>
       <div className="capacity-disciplines">
         {disciplineGroups.map((group) => (
-          <details key={group.id} className="card discipline-detail-card" open={disciplineGroups.length === 1}>
-            <summary className="discipline-detail-summary">
-              <Icon name="chevron-right" size={13} />
-              <span className="discipline-detail-name">{group.name}</span>
-              <span className="discipline-detail-count">{group.pools.length} role{group.pools.length === 1 ? '' : 's'}</span>
-            </summary>
+          <Collapsible
+            key={group.id}
+            scopeKey={`forecast:disc:${group.id}`}
+            className="card discipline-detail-card"
+            defaultOpen={disciplineGroups.length === 1}
+            summary={<span className="discipline-detail-name">{group.name}</span>}
+            count={group.pools.length}
+          >
             <div className="capacity-pools">
               {group.pools.map((pool) => (
                 <div key={pool.id} className="capacity-pool-card">
@@ -139,7 +142,7 @@ export function Forecast() {
                 </div>
               ))}
             </div>
-          </details>
+          </Collapsible>
         ))}
       </div>
     </div>

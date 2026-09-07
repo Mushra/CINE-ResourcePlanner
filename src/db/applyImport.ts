@@ -1,4 +1,5 @@
 import type { NormalizedImport } from '../import/rpmImport';
+import { normalizeKey } from '../domain/identity';
 import {
   createDiscipline,
   createPerson,
@@ -11,10 +12,6 @@ import {
 import type { PlannerDatabase } from './database';
 
 export type ImportMode = 'replace' | 'merge';
-
-function normalizeKey(name: string): string {
-  return name.trim().toLowerCase();
-}
 
 /**
  * Writes a NormalizedImport into a database. In 'merge' mode, existing disciplines/pools/

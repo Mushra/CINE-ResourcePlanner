@@ -5,6 +5,7 @@ import { todayPeriod } from '../../domain/periods';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
 import { ConfirmButton } from '../components/ConfirmButton';
+import { Collapsible } from '../components/Collapsible';
 import { DisciplineFormDrawer, type DisciplineFormValue } from '../components/DisciplineFormDrawer';
 import { PoolFormDrawer, type PoolFormValue } from '../components/PoolFormDrawer';
 import { PersonFormDrawer, type PersonFormValue } from '../components/PersonFormDrawer';
@@ -74,29 +75,34 @@ export function Team() {
 
       <div className="team-disciplines">
         {groups.map((group) => (
-          <div key={group.id} className="card discipline-card">
-            <div className="discipline-header">
-              <span className="discipline-dot" style={{ background: group.discipline?.color ?? '#9ca3af' }} />
-              <h2>{group.discipline?.name ?? 'Unassigned'}</h2>
-              <span className="discipline-role-count">{group.poolsInGroup.length} role{group.poolsInGroup.length === 1 ? '' : 's'}</span>
-              <div className="discipline-actions">
-                {group.discipline && (
-                  <>
-                    <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditingDiscipline(group.discipline)}>Edit</Button>
-                    <ConfirmButton label="Delete" onConfirm={() => deleteDiscipline(group.discipline!.id)} />
-                  </>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon="plus"
-                  onClick={() => { setNewPoolDisciplineId(group.discipline?.id ?? null); setShowNewPool(true); }}
-                >
-                  Add role
-                </Button>
-              </div>
-            </div>
-
+          <Collapsible
+            key={group.id}
+            scopeKey={`team:disc:${group.id}`}
+            className="card discipline-card"
+            summary={
+              <>
+                <span className="discipline-dot" style={{ background: group.discipline?.color ?? '#9ca3af' }} />
+                <h2>{group.discipline?.name ?? 'Unassigned'}</h2>
+                <span className="discipline-role-count">{group.poolsInGroup.length} role{group.poolsInGroup.length === 1 ? '' : 's'}</span>
+                <div className="discipline-actions" onClick={(e) => e.stopPropagation()}>
+                  {group.discipline && (
+                    <>
+                      <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditingDiscipline(group.discipline)}>Edit</Button>
+                      <ConfirmButton label="Delete" onConfirm={() => deleteDiscipline(group.discipline!.id)} />
+                    </>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon="plus"
+                    onClick={() => { setNewPoolDisciplineId(group.discipline?.id ?? null); setShowNewPool(true); }}
+                  >
+                    Add role
+                  </Button>
+                </div>
+              </>
+            }
+          >
             {group.poolsInGroup.length === 0 ? (
               <p className="empty-inline">No roles in this discipline yet.</p>
             ) : (
@@ -104,17 +110,23 @@ export function Team() {
                 {group.poolsInGroup.map((pool) => {
                   const rolePeople = engine.peopleInPool(pool.id);
                   return (
-                    <div key={pool.id} className="team-role">
-                      <div className="team-role-header">
-                        <span className="pool-dot" style={{ background: pool.color }} />
-                        <h3>{pool.name}</h3>
-                        <span className="team-role-capacity">{engine.getCapacity(pool.id, period)} FTE</span>
-                        <div className="team-role-actions">
-                          <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditingPool(pool)}>Edit</Button>
-                          <ConfirmButton label="Delete" onConfirm={() => deletePool(pool.id)} />
-                          <Button variant="ghost" size="sm" icon="plus" onClick={() => setNewPersonForPool(pool.id)}>Add person</Button>
-                        </div>
-                      </div>
+                    <Collapsible
+                      key={pool.id}
+                      scopeKey={`team:pool:${pool.id}`}
+                      className="team-role"
+                      summary={
+                        <>
+                          <span className="pool-dot" style={{ background: pool.color }} />
+                          <h3>{pool.name}</h3>
+                          <span className="team-role-capacity">{engine.getCapacity(pool.id, period)} FTE</span>
+                          <div className="team-role-actions" onClick={(e) => e.stopPropagation()}>
+                            <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditingPool(pool)}>Edit</Button>
+                            <ConfirmButton label="Delete" onConfirm={() => deletePool(pool.id)} />
+                            <Button variant="ghost" size="sm" icon="plus" onClick={() => setNewPersonForPool(pool.id)}>Add person</Button>
+                          </div>
+                        </>
+                      }
+                    >
                       {rolePeople.length === 0 ? (
                         <p className="empty-inline">No people in this role yet.</p>
                       ) : (
@@ -144,12 +156,12 @@ export function Team() {
                           </tbody>
                         </table>
                       )}
-                    </div>
+                    </Collapsible>
                   );
                 })}
               </div>
             )}
-          </div>
+          </Collapsible>
         ))}
       </div>
 

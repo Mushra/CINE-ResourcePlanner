@@ -10,9 +10,9 @@ import { Icon } from '../components/Icon';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
 import { ProjectFormDrawer, type ProjectFormValue } from '../components/ProjectFormDrawer';
+import type { TimelineZoom } from '../../store/useUiStore';
 
-type Zoom = 'compact' | 'comfortable' | 'wide';
-const PX_PER_DAY: Record<Zoom, number> = { compact: 3, comfortable: 5, wide: 9 };
+const PX_PER_DAY: Record<TimelineZoom, number> = { compact: 3, comfortable: 5, wide: 9 };
 
 export function Timeline() {
   const engine = useStore((s) => s.engine);
@@ -21,11 +21,18 @@ export function Timeline() {
   const createProject = useStore((s) => s.createProject);
   const setRequirement = useStore((s) => s.setRequirement);
   const openProject = useUiStore((s) => s.openProject);
+  const collapsed = useUiStore((s) => s.collapsed);
+  const toggleCollapse = useUiStore((s) => s.toggleCollapse);
+  const zoom = useUiStore((s) => s.timelineZoom);
+  const setZoom = useUiStore((s) => s.setTimelineZoom);
+  const search = useUiStore((s) => s.timelineSearch);
+  const setSearch = useUiStore((s) => s.setTimelineSearch);
+  const storedPoolFilter = useUiStore((s) => s.timelinePoolFilter);
+  const setStoredPoolFilter = useUiStore((s) => s.setTimelinePoolFilter);
 
-  const [zoom, setZoom] = useState<Zoom>('comfortable');
-  const [poolFilter, setPoolFilter] = useState<Set<string> | null>(null);
-  const [search, setSearch] = useState('');
   const [showNew, setShowNew] = useState(false);
+  const poolFilter = storedPoolFilter ? new Set(storedPoolFilter) : null;
+  const setPoolFilter = (next: Set<string> | null) => setStoredPoolFilter(next ? Array.from(next) : null);
 
   const pxPerDay = PX_PER_DAY[zoom];
   const window = useMemo(() => buildTimelineWindow(engine.allKnownPeriods()), [engine]);
@@ -112,7 +119,7 @@ export function Timeline() {
           <div className="tl-today-line" style={{ left: 200 + todayX }} title="Today" />
 
           <div className="tl-header-row">
-            <div className="tl-label-cell tl-corner">Project / Discipline</div>
+            <div className="tl-label-cell tl-corner">Project / Emploi repère</div>
             <div className="tl-months-row">
               {window.map((period) => (
                 <div key={period} className="tl-month-header" style={{ width: monthWidthPx(period, pxPerDay) }}>
@@ -127,10 +134,20 @@ export function Timeline() {
           ) : (
             scheduled.map((project) => {
               const poolIds = engine.projectPoolIds(project.id).filter((id) => activePoolIds.has(id));
+              const collapseKey = `timeline:proj:${project.id}`;
+              const projectCollapsed = collapsed[collapseKey] === true;
               return (
                 <div key={project.id} className="tl-project-group">
                   <div className="tl-project-header-row">
                     <div className="tl-label-cell tl-project-label">
+                      <button
+                        type="button"
+                        className="tl-project-collapse"
+                        onClick={() => toggleCollapse(collapseKey)}
+                        aria-label={projectCollapsed ? 'Expand' : 'Collapse'}
+                      >
+                        <Icon name="chevron-right" size={12} className={projectCollapsed ? '' : 'tl-project-collapse-open'} />
+                      </button>
                       <button type="button" className="tl-project-name" onClick={() => openProject(project.id)}>{project.name}</button>
                       <span className={`priority-badge priority-${project.priority} tl-priority-badge`}>{project.priority}</span>
                     </div>
@@ -144,7 +161,7 @@ export function Timeline() {
                       />
                     </div>
                   </div>
-                  {poolIds.length === 0 ? (
+                  {projectCollapsed ? null : poolIds.length === 0 ? (
                     <div className="tl-pool-row tl-pool-row-empty">
                       <div className="tl-label-cell tl-pool-label">No disciplines assigned</div>
                     </div>

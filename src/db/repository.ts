@@ -13,6 +13,8 @@ import type {
   RequirementAllocation,
   ResourcePool,
   Scenario,
+  StructureOverride,
+  StructureOverrideKind,
 } from '../domain/types';
 import type { PlannerDatabase } from './database';
 
@@ -98,6 +100,10 @@ export function loadPlanningData(db: PlannerDatabase): PlanningData {
     .query<{ person_assignment_id: string; period: string; fte: number }>('SELECT * FROM person_assignment_allocations')
     .map((r): PersonAssignmentAllocation => ({ personAssignmentId: r.person_assignment_id, period: r.period, fte: r.fte }));
 
+  const structureOverrides = db
+    .query<{ id: string; kind: string; source_key: string; target_key: string }>('SELECT * FROM structure_overrides')
+    .map((r): StructureOverride => ({ id: r.id, kind: r.kind as StructureOverrideKind, sourceKey: r.source_key, targetKey: r.target_key }));
+
   return {
     projects,
     pools,
@@ -109,6 +115,7 @@ export function loadPlanningData(db: PlannerDatabase): PlanningData {
     requirementAllocations,
     personAssignments,
     personAssignmentAllocations,
+    structureOverrides,
   };
 }
 
@@ -204,6 +211,20 @@ export function deleteRequirement(db: PlannerDatabase, requirementId: string): v
   db.exec('DELETE FROM requirements WHERE id = ?', [requirementId]);
 }
 
+/** Sets the same FTE across many periods for one requirement in a single batched write. */
+export function setRequirementAllocations(db: PlannerDatabase, requirementId: string, periods: Period[], fte: number): void {
+  if (periods.length === 0) return;
+  if (fte <= 0) {
+    db.execMany('DELETE FROM requirement_allocations WHERE requirement_id = ? AND period = ?', periods.map((period) => [requirementId, period]));
+    return;
+  }
+  db.execMany(
+    `INSERT INTO requirement_allocations (requirement_id, period, fte) VALUES (?, ?, ?)
+     ON CONFLICT(requirement_id, period) DO UPDATE SET fte = excluded.fte`,
+    periods.map((period) => [requirementId, period, fte]),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Disciplines
 // ---------------------------------------------------------------------------
@@ -277,4 +298,34 @@ export function setPersonAssignmentAllocation(db: PlannerDatabase, personAssignm
 
 export function deletePersonAssignment(db: PlannerDatabase, personAssignmentId: string): void {
   db.exec('DELETE FROM person_assignments WHERE id = ?', [personAssignmentId]);
+}
+
+// ---------------------------------------------------------------------------
+// Structure overrides — persistent, name-keyed overlay used by the Structure view
+// ---------------------------------------------------------------------------
+
+export function upsertStructureOverride(db: PlannerDatabase, kind: StructureOverrideKind, sourceKey: string, targetKey: string): void {
+  db.exec(
+    `INSERT INTO structure_overrides (id, kind, source_key, target_key) VALUES (?, ?, ?, ?)
+     ON CONFLICT(kind, source_key) DO UPDATE SET target_key = excluded.target_key`,
+    [newId('sovr'), kind, sourceKey, targetKey],
+  );
+}
+
+export function deleteStructureOverride(db: PlannerDatabase, overrideId: string): void {
+  db.exec('DELETE FROM structure_overrides WHERE id = ?', [overrideId]);
+}
+
+/** Sets the same FTE across many periods for one person assignment in a single batched write. */
+export function setPersonAssignmentAllocations(db: PlannerDatabase, personAssignmentId: string, periods: Period[], fte: number): void {
+  if (periods.length === 0) return;
+  if (fte <= 0) {
+    db.execMany('DELETE FROM person_assignment_allocations WHERE person_assignment_id = ? AND period = ?', periods.map((period) => [personAssignmentId, period]));
+    return;
+  }
+  db.execMany(
+    `INSERT INTO person_assignment_allocations (person_assignment_id, period, fte) VALUES (?, ?, ?)
+     ON CONFLICT(person_assignment_id, period) DO UPDATE SET fte = excluded.fte`,
+    periods.map((period) => [personAssignmentId, period, fte]),
+  );
 }
