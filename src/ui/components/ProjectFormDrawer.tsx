@@ -12,11 +12,12 @@ export interface ProjectFormValue {
   endDate: string | null;
   endCertainty: DateCertainty;
   notes: string;
+  isDispo: boolean;
 }
 
 function fromProject(project?: Project): ProjectFormValue {
   if (!project) {
-    return { name: '', status: 'planned', priority: 'medium', startDate: null, startCertainty: 'estimated', endDate: null, endCertainty: 'estimated', notes: '' };
+    return { name: '', status: 'planned', priority: 'medium', startDate: null, startCertainty: 'estimated', endDate: null, endCertainty: 'estimated', notes: '', isDispo: false };
   }
   return {
     name: project.name,
@@ -27,6 +28,7 @@ function fromProject(project?: Project): ProjectFormValue {
     endDate: project.endDate,
     endCertainty: project.endCertainty,
     notes: project.notes,
+    isDispo: project.isDispo,
   };
 }
 
@@ -85,6 +87,13 @@ export function ProjectFormDrawer({ project, onClose, onSave }: { project?: Proj
       <div className="field">
         <label htmlFor="proj-notes">Notes</label>
         <textarea id="proj-notes" rows={4} value={value.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Context, dependencies, greenlight status…" />
+      </div>
+
+      <div className="field field-checkbox">
+        <label htmlFor="proj-dispo">
+          <input id="proj-dispo" type="checkbox" checked={value.isDispo} onChange={(e) => set('isDispo', e.target.checked)} />
+          Projet dispo (placeholder)
+        </label>
       </div>
 
       {value.startDate && value.endDate && value.startDate > value.endDate && (

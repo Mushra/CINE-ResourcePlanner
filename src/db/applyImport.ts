@@ -58,7 +58,7 @@ export function applyRpmImport(db: PlannerDatabase, normalized: NormalizedImport
     const key = normalizeKey(person.name);
     if (personIdByName.has(key)) continue;
     const poolId = poolIdByName.get(normalizeKey(person.poolName)) ?? null;
-    const created = createPerson(db, { name: person.name, poolId, capacityFte: 1, active: true, notes: '' });
+    const created = createPerson(db, { name: person.name, poolId, capacityFte: 1, active: true, notes: '', team: '' });
     personIdByName.set(key, created.id);
   }
 
@@ -80,6 +80,7 @@ export function applyRpmImport(db: PlannerDatabase, normalized: NormalizedImport
       endCertainty: project.endDate ? 'estimated' : 'tbd',
       priority: 'medium',
       notes: '',
+      isDispo: false,
     });
     projectIdByName.set(key, created.id);
   }

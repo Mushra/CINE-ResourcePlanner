@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS people (
   capacity_fte REAL NOT NULL DEFAULT 1.0,
   active       INTEGER NOT NULL DEFAULT 1,
   notes        TEXT NOT NULL DEFAULT '',
-  sort_order   INTEGER NOT NULL DEFAULT 0
+  sort_order   INTEGER NOT NULL DEFAULT 0,
+  team         TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS pool_capacity_overrides (
@@ -56,7 +57,8 @@ CREATE TABLE IF NOT EXISTS projects (
   end_certainty   TEXT NOT NULL DEFAULT 'estimated',
   priority        TEXT NOT NULL DEFAULT 'medium',
   notes           TEXT NOT NULL DEFAULT '',
-  sort_order      INTEGER NOT NULL DEFAULT 0
+  sort_order      INTEGER NOT NULL DEFAULT 0,
+  is_dispo        INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS requirements (
@@ -94,7 +96,7 @@ CREATE TABLE IF NOT EXISTS person_assignment_allocations (
 -- normalized name re-applies automatically after a re-import.
 CREATE TABLE IF NOT EXISTS structure_overrides (
   id         TEXT PRIMARY KEY,
-  kind       TEXT NOT NULL, -- 'person_pool' | 'pool_discipline' | 'pool_person_pool'
+  kind       TEXT NOT NULL, -- 'person_pool' | 'pool_discipline' | 'pool_person_pool' | '{discipline,pool,person,project}_name'
   source_key TEXT NOT NULL,
   target_key TEXT NOT NULL,
   UNIQUE (kind, source_key)

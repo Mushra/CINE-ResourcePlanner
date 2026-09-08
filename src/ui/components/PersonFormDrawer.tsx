@@ -10,11 +10,12 @@ export interface PersonFormValue {
   capacityFte: number;
   active: boolean;
   notes: string;
+  team: string;
 }
 
 function fromPerson(person?: Person, defaultPoolId?: string | null): PersonFormValue {
-  if (!person) return { name: '', poolId: defaultPoolId ?? null, capacityFte: 1, active: true, notes: '' };
-  return { name: person.name, poolId: person.poolId, capacityFte: person.capacityFte, active: person.active, notes: person.notes };
+  if (!person) return { name: '', poolId: defaultPoolId ?? null, capacityFte: 1, active: true, notes: '', team: '' };
+  return { name: person.name, poolId: person.poolId, capacityFte: person.capacityFte, active: person.active, notes: person.notes, team: person.team };
 }
 
 export function PersonFormDrawer({
@@ -52,6 +53,11 @@ export function PersonFormDrawer({
           <label htmlFor="person-capacity">Capacity (FTE)</label>
           <NumberField value={value.capacityFte} onCommit={(v) => set('capacityFte', v)} step={0.1} min={0} />
         </div>
+      </div>
+
+      <div className="field">
+        <label htmlFor="person-team">Team</label>
+        <input id="person-team" value={value.team} onChange={(e) => set('team', e.target.value)} placeholder="Team name" />
       </div>
 
       <div className="field field-checkbox">

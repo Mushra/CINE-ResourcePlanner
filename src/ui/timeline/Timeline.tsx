@@ -10,6 +10,7 @@ import { Icon } from '../components/Icon';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
 import { ProjectFormDrawer, type ProjectFormValue } from '../components/ProjectFormDrawer';
+import { PoolFilterMenu } from './PoolFilterMenu';
 import { round2, UNASSIGNED_DISCIPLINE_ID } from '../../engine/planning';
 import { isGenericPoolName } from '../../domain/identity';
 import type { TimelineZoom } from '../../store/useUiStore';
@@ -165,35 +166,12 @@ export function Timeline() {
           <Icon name="search" size={13} />
           <input placeholder="Filter projects…" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <div className="tl-pool-chips">
-          {pools.map((pool) => {
-            const on = activePoolIds.has(pool.id);
-            return (
-              <button
-                key={pool.id}
-                type="button"
-                className={`pool-chip ${on ? 'on' : ''}`}
-                style={on ? { borderColor: pool.color, color: pool.color, background: `${pool.color}14` } : undefined}
-                onClick={() => {
-                  const next = new Set(activePoolIds);
-                  if (next.has(pool.id) && next.size === pools.length) {
-                    setPoolFilter(new Set([pool.id]));
-                  } else if (next.has(pool.id)) {
-                    next.delete(pool.id);
-                    setPoolFilter(next);
-                  } else {
-                    next.add(pool.id);
-                    setPoolFilter(next.size === pools.length ? null : next);
-                  }
-                }}
-              >
-                <span className="pool-dot" style={{ background: pool.color }} />
-                {pool.name}
-              </button>
-            );
-          })}
-          {poolFilter && <button type="button" className="pool-chip-reset" onClick={() => setPoolFilter(null)}>Clear</button>}
-        </div>
+        <PoolFilterMenu
+          pools={pools}
+          disciplineName={(pool) => (pool.disciplineId ? engine.discipline(pool.disciplineId)?.name ?? 'Unassigned' : 'Unassigned')}
+          activePoolIds={activePoolIds}
+          onChange={setPoolFilter}
+        />
         <div className="tl-zoom">
           <button type="button" className="zoom-btn" onClick={() => setZoom(zoom === 'wide' ? 'comfortable' : 'compact')} aria-label="Zoom out"><Icon name="zoom-out" size={14} /></button>
           <span className="zoom-label">{zoom === 'compact' ? 'Compact' : zoom === 'wide' ? 'Wide' : 'Comfortable'}</span>

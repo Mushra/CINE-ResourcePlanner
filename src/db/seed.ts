@@ -45,7 +45,7 @@ export function seedDemoData(db: PlannerDatabase): void {
   const techDesign = createPool(db, { name: 'Tech Design', capacityFte: 3, color: '#ec6a9c', disciplineId: technicalDisc.id });
 
   function people(poolId: string, names: string[]) {
-    return names.map((name) => createPerson(db, { name, poolId, capacityFte: 1, active: true, notes: '' }));
+    return names.map((name) => createPerson(db, { name, poolId, capacityFte: 1, active: true, notes: '', team: '' }));
   }
 
   const [ava, liam, mia, noah, zoe, leo, ivy, omar] = people(animation.id, [
@@ -65,6 +65,7 @@ export function seedDemoData(db: PlannerDatabase): void {
     endCertainty: 'estimated',
     priority: 'medium',
     notes: 'Hero cinematic for the season finale. VFX bar was recently raised — staffing has not caught up.',
+    isDispo: false,
   });
 
   const bravo = createProject(db, {
@@ -76,6 +77,7 @@ export function seedDemoData(db: PlannerDatabase): void {
     endCertainty: 'estimated',
     priority: 'high',
     notes: 'Fully staffed to plan. Watch Animation capacity in November — portfolio-wide crunch.',
+    isDispo: false,
   });
 
   const charlie = createProject(db, {
@@ -87,6 +89,7 @@ export function seedDemoData(db: PlannerDatabase): void {
     endCertainty: 'estimated',
     priority: 'critical',
     notes: 'Greenlit for a December trailer beat — Animation is one FTE short that month.',
+    isDispo: false,
   });
 
   const delta = createProject(db, {
@@ -98,6 +101,7 @@ export function seedDemoData(db: PlannerDatabase): void {
     endCertainty: 'tbd',
     priority: 'low',
     notes: 'Pending greenlight. Tech Design has pencilled in early capacity for Q1.',
+    isDispo: false,
   });
 
   // Cinematic Alpha — Animation dips 1 FTE short in November; VFX runs half-staffed throughout.

@@ -26,6 +26,10 @@ export interface Project {
   priority: Priority;
   notes: string;
   sortOrder: number;
+  /** Marks a "dispo"/bench placeholder project — people parked here still count as staffed for warnings. */
+  isDispo: boolean;
+  /** Baseline (import-matched) name before a rename override — set by applyStructureOverrides, not persisted on this row. */
+  importName?: string;
 }
 
 export interface ResourcePool {
@@ -38,6 +42,8 @@ export interface ResourcePool {
   disciplineId: string | null;
   /** Baseline disciplineId before structure overrides — set by applyStructureOverrides, not persisted on this row. */
   importDisciplineId?: string | null;
+  /** Baseline (import-matched) name before a rename override — set by applyStructureOverrides, not persisted on this row. */
+  importName?: string;
 }
 
 export interface Discipline {
@@ -45,6 +51,8 @@ export interface Discipline {
   name: string;
   color: string;
   sortOrder: number;
+  /** Baseline (import-matched) name before a rename override — set by applyStructureOverrides, not persisted on this row. */
+  importName?: string;
 }
 
 export interface Person {
@@ -55,8 +63,12 @@ export interface Person {
   active: boolean;
   notes: string;
   sortOrder: number;
+  /** Free-text team name, independent of the role/pool hierarchy. */
+  team: string;
   /** Baseline poolId before structure overrides — set by applyStructureOverrides, not persisted on this row. */
   importPoolId?: string | null;
+  /** Baseline (import-matched) name before a rename override — set by applyStructureOverrides, not persisted on this row. */
+  importName?: string;
 }
 
 /** Lets a pool's capacity vary over time (e.g. a hire lands in November). */
@@ -99,8 +111,15 @@ export interface PersonAssignmentAllocation {
   fte: number;
 }
 
-/** Kind of a persistent structure override — see applyStructureOverrides for how each is resolved. */
-export type StructureOverrideKind = 'person_pool' | 'pool_discipline' | 'pool_person_pool';
+/**
+ * Kind of a persistent structure override — see applyStructureOverrides for how each is resolved.
+ * The `*_name` kinds are rename overrides: sourceKey is normalizeKey(the frozen, import-matched
+ * name), targetKey is the literal (case-preserved) display name — never normalized, since there is
+ * no entity to look up, just a label to show.
+ */
+export type StructureOverrideKind =
+  | 'person_pool' | 'pool_discipline' | 'pool_person_pool'
+  | 'discipline_name' | 'pool_name' | 'person_name' | 'project_name';
 
 /**
  * A name-keyed override that lets the Structure view reshape the team without touching the

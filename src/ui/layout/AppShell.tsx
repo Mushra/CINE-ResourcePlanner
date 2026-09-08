@@ -9,7 +9,7 @@ const NAV: { view: ViewName; label: string; icon: IconName }[] = [
   { view: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
   { view: 'timeline', label: 'Timeline', icon: 'timeline' },
   { view: 'projects', label: 'Projects', icon: 'projects' },
-  { view: 'team', label: 'Team', icon: 'team' },
+  { view: 'team', label: 'Teams', icon: 'team' },
   { view: 'forecast', label: 'Forecast', icon: 'forecast' },
   { view: 'structure', label: 'Structure', icon: 'structure' },
 ];

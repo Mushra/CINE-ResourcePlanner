@@ -70,7 +70,7 @@ export function Team() {
     <div className="team-view">
       <div className="view-header">
         <div>
-          <h1>Team</h1>
+          <h1>Teams</h1>
           <p className="view-sub">Disciplines, roles and people — the org chart behind staffing</p>
         </div>
         <Button variant="primary" icon="plus" onClick={() => setNewDiscipline(true)}>New discipline</Button>
@@ -137,6 +137,7 @@ export function Team() {
                           <thead>
                             <tr>
                               <th>Name</th>
+                              <th>Team</th>
                               <th>Assigned now</th>
                               <th>Status</th>
                               <th />
@@ -146,6 +147,7 @@ export function Team() {
                             {rolePeople.map((person) => (
                               <tr key={person.id} className={person.active ? '' : 'person-inactive'}>
                                 <td>{person.name}</td>
+                                <td>{person.team || '—'}</td>
                                 <td>{engine.getPersonAssigned(person.id, period)}</td>
                                 <td>{person.active ? 'Active' : 'Inactive'}</td>
                                 <td className="team-people-actions">

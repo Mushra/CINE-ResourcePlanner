@@ -5,7 +5,7 @@ export type IconName =
   | 'plus' | 'chevron-right' | 'chevron-down' | 'chevron-left' | 'close'
   | 'warning' | 'critical' | 'check' | 'info'
   | 'sun' | 'moon' | 'save' | 'folder-open' | 'file-plus' | 'download'
-  | 'search' | 'more' | 'arrow-left' | 'trash' | 'edit' | 'calendar' | 'zoom-in' | 'zoom-out' | 'structure';
+  | 'search' | 'more' | 'arrow-left' | 'trash' | 'edit' | 'calendar' | 'zoom-in' | 'zoom-out' | 'structure' | 'filter';
 
 const PATHS: Record<IconName, React.ReactNode> = {
   dashboard: <><rect x="3" y="3" width="7" height="9" rx="1.2" /><rect x="14" y="3" width="7" height="5" rx="1.2" /><rect x="14" y="12" width="7" height="9" rx="1.2" /><rect x="3" y="16" width="7" height="5" rx="1.2" /></>,
@@ -37,6 +37,7 @@ const PATHS: Record<IconName, React.ReactNode> = {
   'zoom-in': <><circle cx="10.5" cy="10.5" r="6.5" /><line x1="19.5" y1="19.5" x2="15.2" y2="15.2" /><line x1="7.5" y1="10.5" x2="13.5" y2="10.5" /><line x1="10.5" y1="7.5" x2="10.5" y2="13.5" /></>,
   'zoom-out': <><circle cx="10.5" cy="10.5" r="6.5" /><line x1="19.5" y1="19.5" x2="15.2" y2="15.2" /><line x1="7.5" y1="10.5" x2="13.5" y2="10.5" /></>,
   structure: <><rect x="9" y="3" width="6" height="5" rx="1" /><rect x="3" y="16" width="6" height="5" rx="1" /><rect x="15" y="16" width="6" height="5" rx="1" /><path d="M12 8v4" /><path d="M6 16v-2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2" /></>,
+  filter: <path d="M4 4h16l-6 8v6l-4 2v-8Z" />,
 };
 
 export function Icon({ name, size = 16, ...rest }: { name: IconName; size?: number } & SVGProps<SVGSVGElement>) {

@@ -40,6 +40,7 @@ export function loadPlanningData(db: PlannerDatabase): PlanningData {
     .query<{
       id: string; name: string; status: string; start_date: string | null; start_certainty: string;
       end_date: string | null; end_certainty: string; priority: string; notes: string; sort_order: number;
+      is_dispo: number;
     }>('SELECT * FROM projects ORDER BY sort_order, name')
     .map((r): Project => ({
       id: r.id,
@@ -52,6 +53,7 @@ export function loadPlanningData(db: PlannerDatabase): PlanningData {
       priority: r.priority as Priority,
       notes: r.notes,
       sortOrder: r.sort_order,
+      isDispo: r.is_dispo === 1,
     }));
 
   const pools = db
@@ -72,12 +74,12 @@ export function loadPlanningData(db: PlannerDatabase): PlanningData {
     .map((r): Discipline => ({ id: r.id, name: r.name, color: r.color, sortOrder: r.sort_order }));
 
   const people = db
-    .query<{ id: string; name: string; pool_id: string | null; capacity_fte: number; active: number; notes: string; sort_order: number }>(
+    .query<{ id: string; name: string; pool_id: string | null; capacity_fte: number; active: number; notes: string; sort_order: number; team: string }>(
       'SELECT * FROM people ORDER BY sort_order, name',
     )
     .map((r): Person => ({
       id: r.id, name: r.name, poolId: r.pool_id, capacityFte: r.capacity_fte, active: r.active === 1,
-      notes: r.notes, sortOrder: r.sort_order,
+      notes: r.notes, sortOrder: r.sort_order, team: r.team,
     }));
 
   const scenarios = db
@@ -127,17 +129,17 @@ export function createProject(db: PlannerDatabase, input: Omit<Project, 'id' | '
   const id = newId('proj');
   const maxOrder = db.query<{ m: number | null }>('SELECT MAX(sort_order) as m FROM projects')[0]?.m ?? -1;
   db.exec(
-    `INSERT INTO projects (id, name, status, start_date, start_certainty, end_date, end_certainty, priority, notes, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, input.name, input.status, input.startDate, input.startCertainty, input.endDate, input.endCertainty, input.priority, input.notes, maxOrder + 1],
+    `INSERT INTO projects (id, name, status, start_date, start_certainty, end_date, end_certainty, priority, notes, sort_order, is_dispo)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, input.name, input.status, input.startDate, input.startCertainty, input.endDate, input.endCertainty, input.priority, input.notes, maxOrder + 1, input.isDispo ? 1 : 0],
   );
   return { ...input, id, sortOrder: maxOrder + 1 };
 }
 
 export function updateProject(db: PlannerDatabase, project: Project): void {
   db.exec(
-    `UPDATE projects SET name=?, status=?, start_date=?, start_certainty=?, end_date=?, end_certainty=?, priority=?, notes=?, sort_order=? WHERE id=?`,
-    [project.name, project.status, project.startDate, project.startCertainty, project.endDate, project.endCertainty, project.priority, project.notes, project.sortOrder, project.id],
+    `UPDATE projects SET name=?, status=?, start_date=?, start_certainty=?, end_date=?, end_certainty=?, priority=?, notes=?, sort_order=?, is_dispo=? WHERE id=?`,
+    [project.name, project.status, project.startDate, project.startCertainty, project.endDate, project.endCertainty, project.priority, project.notes, project.sortOrder, project.isDispo ? 1 : 0, project.id],
   );
 }
 
@@ -253,15 +255,15 @@ export function deleteDiscipline(db: PlannerDatabase, disciplineId: string): voi
 export function createPerson(db: PlannerDatabase, input: Omit<Person, 'id' | 'sortOrder'>): Person {
   const id = newId('person');
   const maxOrder = db.query<{ m: number | null }>('SELECT MAX(sort_order) as m FROM people')[0]?.m ?? -1;
-  db.exec('INSERT INTO people (id, name, pool_id, capacity_fte, active, notes, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)', [
-    id, input.name, input.poolId, input.capacityFte, input.active ? 1 : 0, input.notes, maxOrder + 1,
+  db.exec('INSERT INTO people (id, name, pool_id, capacity_fte, active, notes, sort_order, team) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [
+    id, input.name, input.poolId, input.capacityFte, input.active ? 1 : 0, input.notes, maxOrder + 1, input.team,
   ]);
   return { ...input, id, sortOrder: maxOrder + 1 };
 }
 
 export function updatePerson(db: PlannerDatabase, person: Person): void {
-  db.exec('UPDATE people SET name=?, pool_id=?, capacity_fte=?, active=?, notes=?, sort_order=? WHERE id=?', [
-    person.name, person.poolId, person.capacityFte, person.active ? 1 : 0, person.notes, person.sortOrder, person.id,
+  db.exec('UPDATE people SET name=?, pool_id=?, capacity_fte=?, active=?, notes=?, sort_order=?, team=? WHERE id=?', [
+    person.name, person.poolId, person.capacityFte, person.active ? 1 : 0, person.notes, person.sortOrder, person.team, person.id,
   ]);
 }
 
@@ -314,6 +316,12 @@ export function upsertStructureOverride(db: PlannerDatabase, kind: StructureOver
 
 export function deleteStructureOverride(db: PlannerDatabase, overrideId: string): void {
   db.exec('DELETE FROM structure_overrides WHERE id = ?', [overrideId]);
+}
+
+/** Removes an override by its (kind, sourceKey) identity rather than its row id — used when an
+ * edit reverts an entity back to its frozen, import-matched name. */
+export function deleteStructureOverrideByKey(db: PlannerDatabase, kind: StructureOverrideKind, sourceKey: string): void {
+  db.exec('DELETE FROM structure_overrides WHERE kind = ? AND source_key = ?', [kind, sourceKey]);
 }
 
 /** Sets the same FTE across many periods for one person assignment in a single batched write. */

@@ -10,9 +10,39 @@ import { Icon } from '../components/Icon';
 import { StatusPill } from '../components/StatusPill';
 import { NumberField } from '../components/NumberField';
 import { ConfirmButton } from '../components/ConfirmButton';
+import { Collapsible } from '../components/Collapsible';
 import { ProjectFormDrawer, type ProjectFormValue } from '../components/ProjectFormDrawer';
+import { RequirementTimeline, type RequirementLane } from '../components/RequirementTimeline';
 
 const CERTAINTY_LABEL: Record<string, string> = { confirmed: 'Confirmed', estimated: 'Estimated', tbd: 'TBD' };
+
+interface ColumnDef {
+  key: string;
+  label: string;
+  periods: Period[];
+}
+
+/** Groups `months` into either one column per month, or one column per year (for the year-granularity Besoins table). */
+function buildColumns(months: Period[], granularity: 'month' | 'year'): ColumnDef[] {
+  if (granularity === 'month') {
+    return months.map((m) => ({ key: m, label: formatPeriodLabel(m, { withYear: false }), periods: [m] }));
+  }
+  const byYear = new Map<string, Period[]>();
+  for (const m of months) {
+    const year = m.slice(0, 4);
+    if (!byYear.has(year)) byYear.set(year, []);
+    byYear.get(year)!.push(m);
+  }
+  return [...byYear.entries()].map(([year, periods]) => ({ key: year, label: year, periods }));
+}
+
+/** A year column's display value is its first month's; `mixed` flags when the months disagree. */
+function columnValue(periods: Period[], months: Period[], requiredByMonth: number[]): { value: number; mixed: boolean } {
+  const vals = periods.map((p) => requiredByMonth[months.indexOf(p)] ?? 0);
+  const first = vals[0] ?? 0;
+  const mixed = vals.some((v) => Math.abs(v - first) > 0.001);
+  return { value: first, mixed };
+}
 
 export function ProjectDetail({ projectId }: { projectId: string }) {
   const project = useStore((s) => s.data.projects.find((p) => p.id === projectId));
@@ -35,6 +65,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const collapsed = useUiStore((s) => s.collapsed);
   const toggleCollapse = useUiStore((s) => s.toggleCollapse);
   const [editing, setEditing] = useState(false);
+  const [besoinsMode, setBesoinsMode] = useState<'table' | 'timeline'>('table');
+  const [besoinsGranularity, setBesoinsGranularity] = useState<'month' | 'year'>('month');
 
   const checks = project ? getSanityChecks(engine).filter((c) => c.projectId === project.id) : [];
 
@@ -74,6 +106,37 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const usedPoolIds = new Set(engine.projectPoolIds(project.id));
   const usedPools = pools.filter((p) => usedPoolIds.has(p.id) && !isGenericPoolName(p.name));
 
+  const columns = buildColumns(months, besoinsGranularity);
+
+  const genericPoolLanes: RequirementLane[] = genericRequirementPools.map((pool) => {
+    const discipline = disciplines.find((d) => d.id === pool.disciplineId);
+    return {
+      key: `disc:${pool.disciplineId}`,
+      label: discipline?.name ?? 'Discipline',
+      color: discipline?.color ?? '#9ca3af',
+      values: months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === pool.id)?.required ?? 0),
+      onCommitRange: (periods, fte) => setDisciplineRequirementRange(project.id, pool.disciplineId!, periods, fte),
+      onRemove: () => clearRequirementPool(project.id, pool.id),
+    };
+  });
+  const specificPoolLanes: RequirementLane[] = specificRequirementPools.map((pool) => ({
+    key: pool.id,
+    label: pool.name,
+    color: pool.color,
+    values: months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === pool.id)?.required ?? 0),
+    onCommitRange: (periods, fte) => setRequirementRange(project.id, pool.id, periods, fte),
+    onRemove: () => {
+      clearRequirementPool(project.id, pool.id);
+      engine.peopleInPool(pool.id).forEach((person) => clearPersonAssignment(person.id, project.id));
+    },
+  }));
+  const timelineLanes = [...genericPoolLanes, ...specificPoolLanes];
+  const presentTargetIds = new Set([
+    ...genericRequirementPools.map((p) => `disc:${p.disciplineId}`),
+    ...specificRequirementPools.map((p) => p.id),
+  ]);
+  const timelineAddOptions = requirementTargetOptions.filter((o) => !presentTargetIds.has(o.id));
+
   return (
     <div className="project-detail-view">
       <button type="button" className="back-link" onClick={backToProjects}><Icon name="arrow-left" size={14} /> Back to projects</button>
@@ -87,6 +150,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               <span>{project.status.replace('_', ' ')}</span>
               <span className="meta-sep">·</span>
               <span className={`priority-badge priority-${project.priority}`}>{project.priority}</span>
+              {project.isDispo && (
+                <>
+                  <span className="meta-sep">·</span>
+                  <span className="dispo-badge">Dispo</span>
+                </>
+              )}
             </div>
           </div>
           <div className="detail-header-actions">
@@ -103,14 +172,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         {project.notes && <p className="detail-notes">{project.notes}</p>}
 
         {checks.length > 0 && (
-          <div className="detail-checks">
-            {checks.map((c) => (
-              <div key={c.id} className="detail-check-row">
-                <StatusPill tone={c.severity}>{c.severity}</StatusPill>
-                <span>{c.message} — {c.impact}</span>
-              </div>
-            ))}
-          </div>
+          <Collapsible scopeKey={`projdetail:checks:${project.id}`} count={checks.length} summary={<span>Warnings</span>}>
+            <div className="detail-checks">
+              {checks.map((c) => (
+                <div key={c.id} className="detail-check-row">
+                  <StatusPill tone={c.severity}>{c.severity}</StatusPill>
+                  <span>{c.message} — {c.impact}</span>
+                </div>
+              ))}
+            </div>
+          </Collapsible>
         )}
       </div>
 
@@ -118,6 +189,18 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         <div className="panel-header">
           <h2>Besoins</h2>
           <span className="panel-sub">What the project needs, by role and month</span>
+          <div className="panel-header-toggles">
+            {besoinsMode === 'table' && (
+              <div className="segmented segmented-sm">
+                <button type="button" className={besoinsGranularity === 'month' ? 'active' : ''} onClick={() => setBesoinsGranularity('month')}>Month</button>
+                <button type="button" className={besoinsGranularity === 'year' ? 'active' : ''} onClick={() => setBesoinsGranularity('year')}>Year</button>
+              </div>
+            )}
+            <div className="segmented segmented-sm">
+              <button type="button" className={besoinsMode === 'table' ? 'active' : ''} onClick={() => setBesoinsMode('table')}>Table</button>
+              <button type="button" className={besoinsMode === 'timeline' ? 'active' : ''} onClick={() => setBesoinsMode('timeline')}>Timeline</button>
+            </div>
+          </div>
         </div>
 
         <RangePanel
@@ -132,13 +215,24 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
         {requirementDisciplines.length === 0 && unassignedSpecificPools.length === 0 ? (
           <p className="empty-inline">No resource requirements yet. Use the panel above to set a need — pick a whole discipline for a headcount minimum, or a specific role.</p>
+        ) : besoinsMode === 'timeline' ? (
+          <RequirementTimeline
+            months={months}
+            lanes={timelineLanes}
+            addOptions={timelineAddOptions}
+            onAddLane={(targetId) => (
+              targetId.startsWith('disc:')
+                ? setDisciplineRequirement(project.id, targetId.slice(5), months[0], 1)
+                : setRequirement(project.id, targetId, months[0], 1)
+            )}
+          />
         ) : (
           <div className="table-scroll">
             <table className="alloc-table">
               <thead>
                 <tr>
                   <th className="alloc-row-label">Discipline / Emploi repère</th>
-                  {months.map((m) => <th key={m}>{formatPeriodLabel(m, { withYear: false })}</th>)}
+                  {columns.map((c) => <th key={c.key}>{c.label}</th>)}
                   <th className="alloc-actions-col" />
                 </tr>
               </thead>
@@ -148,7 +242,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   const specificPools = specificRequirementPools.filter((p) => p.disciplineId === discipline.id);
                   const collapseKey = `projdetail:req-disc:${project.id}:${discipline.id}`;
                   const rowsCollapsed = specificPools.length > 0 && collapsed[collapseKey] === true;
-                  const staffingByMonth = months.map((m) => genericPool && engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === genericPool.id));
+                  const requiredByMonth = months.map((m) => genericPool && engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === genericPool.id)?.required || 0);
                   return (
                     <Fragment key={discipline.id}>
                       <tr className="requirement-discipline-row">
@@ -166,14 +260,18 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                           <span className="discipline-dot" style={{ background: discipline.color }} />
                           {discipline.name}
                         </td>
-                        {months.map((m, i) => (
-                          <AllocCell
-                            key={m}
-                            value={staffingByMonth[i]?.required ?? 0}
-                            onCommit={(v) => setDisciplineRequirement(project.id, discipline.id, m, v)}
-                            onFillRight={i < months.length - 1 ? () => setDisciplineRequirementRange(project.id, discipline.id, months.slice(i + 1), staffingByMonth[i]?.required ?? 0) : undefined}
-                          />
-                        ))}
+                        {columns.map((col, i) => {
+                          const { value, mixed } = columnValue(col.periods, months, requiredByMonth);
+                          return (
+                            <AllocCell
+                              key={col.key}
+                              value={value}
+                              mixed={mixed}
+                              onCommit={(v) => setDisciplineRequirementRange(project.id, discipline.id, col.periods, v)}
+                              onFillRight={i < columns.length - 1 ? () => setDisciplineRequirementRange(project.id, discipline.id, columns.slice(i + 1).flatMap((c) => c.periods), value) : undefined}
+                            />
+                          );
+                        })}
                         <td className="alloc-actions-col">
                           {genericPool && (
                             <ConfirmButton
@@ -184,21 +282,25 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                         </td>
                       </tr>
                       {!rowsCollapsed && specificPools.map((pool) => {
-                        const poolStaffingByMonth = months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === pool.id));
+                        const poolRequiredByMonth = months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === pool.id)?.required ?? 0);
                         return (
                           <tr key={pool.id} className="requirement-pool-row">
                             <td className="alloc-row-label alloc-row-label-indent">
                               <span className="pool-dot" style={{ background: pool.color }} />
                               {pool.name}
                             </td>
-                            {months.map((m, i) => (
-                              <AllocCell
-                                key={m}
-                                value={poolStaffingByMonth[i]?.required ?? 0}
-                                onCommit={(v) => setRequirement(project.id, pool.id, m, v)}
-                                onFillRight={i < months.length - 1 ? () => setRequirementRange(project.id, pool.id, months.slice(i + 1), poolStaffingByMonth[i]?.required ?? 0) : undefined}
-                              />
-                            ))}
+                            {columns.map((col, i) => {
+                              const { value, mixed } = columnValue(col.periods, months, poolRequiredByMonth);
+                              return (
+                                <AllocCell
+                                  key={col.key}
+                                  value={value}
+                                  mixed={mixed}
+                                  onCommit={(v) => setRequirementRange(project.id, pool.id, col.periods, v)}
+                                  onFillRight={i < columns.length - 1 ? () => setRequirementRange(project.id, pool.id, columns.slice(i + 1).flatMap((c) => c.periods), value) : undefined}
+                                />
+                              );
+                            })}
                             <td className="alloc-actions-col">
                               <ConfirmButton
                                 label="Remove"
@@ -215,21 +317,25 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   );
                 })}
                 {unassignedSpecificPools.map((pool) => {
-                  const staffingByMonth = months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === pool.id));
+                  const requiredByMonth = months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === pool.id)?.required ?? 0);
                   return (
                     <tr key={pool.id}>
                       <td className="alloc-row-label">
                         <span className="pool-dot" style={{ background: pool.color }} />
                         {pool.name}
                       </td>
-                      {months.map((m, i) => (
-                        <AllocCell
-                          key={m}
-                          value={staffingByMonth[i]?.required ?? 0}
-                          onCommit={(v) => setRequirement(project.id, pool.id, m, v)}
-                          onFillRight={i < months.length - 1 ? () => setRequirementRange(project.id, pool.id, months.slice(i + 1), staffingByMonth[i]?.required ?? 0) : undefined}
-                        />
-                      ))}
+                      {columns.map((col, i) => {
+                        const { value, mixed } = columnValue(col.periods, months, requiredByMonth);
+                        return (
+                          <AllocCell
+                            key={col.key}
+                            value={value}
+                            mixed={mixed}
+                            onCommit={(v) => setRequirementRange(project.id, pool.id, col.periods, v)}
+                            onFillRight={i < columns.length - 1 ? () => setRequirementRange(project.id, pool.id, columns.slice(i + 1).flatMap((c) => c.periods), value) : undefined}
+                          />
+                        );
+                      })}
                       <td className="alloc-actions-col">
                         <ConfirmButton
                           label="Remove"
@@ -368,14 +474,15 @@ function DateChip({ label, date, certainty }: { label: string; date: string | nu
 }
 
 /** One grid cell: an editable FTE plus a fill-right affordance that copies its value to every month after it. */
-function AllocCell({ value, onCommit, onFillRight, highlightShort }: {
+function AllocCell({ value, onCommit, onFillRight, highlightShort, mixed }: {
   value: number;
   onCommit: (value: number) => void;
   onFillRight?: () => void;
   highlightShort?: boolean;
+  mixed?: boolean;
 }) {
   return (
-    <td className={`alloc-cell ${highlightShort ? 'alloc-cell-short' : ''}`}>
+    <td className={`alloc-cell ${highlightShort ? 'alloc-cell-short' : ''} ${mixed ? 'alloc-cell-mixed' : ''}`} title={mixed ? 'Months in this year have different values' : undefined}>
       <div className="alloc-cell-inner">
         <NumberField value={value} onCommit={onCommit} onFillRight={onFillRight} className="num-input" />
         {onFillRight && (

@@ -10,6 +10,7 @@ import {
   createPerson as repoCreatePerson, updatePerson as repoUpdatePerson, deletePerson as repoDeletePerson,
   getOrCreatePersonAssignment, setPersonAssignmentAllocation as repoSetPersonAssignmentAllocation, setPersonAssignmentAllocations as repoSetPersonAssignmentAllocations, deletePersonAssignment as repoDeletePersonAssignment,
   upsertStructureOverride as repoUpsertStructureOverride, deleteStructureOverride as repoDeleteStructureOverride,
+  deleteStructureOverrideByKey as repoDeleteStructureOverrideByKey,
 } from '../db/repository';
 import { applyRpmImport, type ImportMode } from '../db/applyImport';
 import { seedDemoData } from '../db/seed';
@@ -17,11 +18,12 @@ import { getStoredFileName, loadAutosave, saveAutosave, setStoredFileName } from
 import * as files from '../persistence/files';
 import { exportWorkbookToBytes } from '../export/xlsx';
 import { parseRpmWorkbook, type ImportReport } from '../import/rpmImport';
-import { PlanningEngine } from '../engine/planning';
-import type { Discipline, PlanningData, Period, Person, Project, ResourcePool } from '../domain/types';
+import { PlanningEngine, round2 } from '../engine/planning';
+import type { Discipline, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
 import { emptyPlanningData } from '../domain/types';
 import { applyStructureOverrides } from '../domain/overrides';
 import { normalizeKey, genericPoolName } from '../domain/identity';
+import { formatPeriodLabel } from '../domain/periods';
 
 export type ToastKind = 'success' | 'error' | 'info';
 
@@ -123,6 +125,42 @@ export const useStore = create<StoreState>((set, get) => {
     if (existing) return existing.id;
     const pool = repoCreatePool(db, { name, disciplineId, color: discipline.color, capacityFte: 0 });
     return pool.id;
+  }
+
+  /**
+   * Freezes an entity's `name` at its import-matched value and routes any display rename through
+   * a `*_name` structure override instead, so a later merge re-import still matches by the
+   * original name (writing straight to `name` would break that match and spawn a duplicate).
+   * Returns the frozen name to persist in place of `edited.name`.
+   */
+  function freezeRename<T extends { name: string; importName?: string }>(
+    db: PlannerDatabase,
+    kind: StructureOverrideKind,
+    original: T | undefined,
+    edited: T,
+  ): string {
+    const frozenName = original?.importName ?? original?.name ?? edited.name;
+    const sourceKey = normalizeKey(frozenName);
+    if (normalizeKey(edited.name) !== sourceKey) {
+      repoUpsertStructureOverride(db, kind, sourceKey, edited.name.trim());
+    } else {
+      repoDeleteStructureOverrideByKey(db, kind, sourceKey);
+    }
+    return frozenName;
+  }
+
+  /** After a fresh assignment write, warns if the person is now over-allocated in any touched period (across all their projects, dispo included). */
+  function warnIfOverAllocated(personId: string, periods: Period[]): void {
+    const { engine, data } = get();
+    const person = data.people.find((p) => p.id === personId);
+    if (!person || !person.active) return;
+    for (const period of periods) {
+      const total = round2(engine.getPersonAssigned(personId, period));
+      if (total > person.capacityFte + 0.001) {
+        get().toast('error', `${person.name} est staffé à ${total} FTE en ${formatPeriodLabel(period, { withYear: true })}, au-delà de sa capacité de ${person.capacityFte} FTE`);
+        return;
+      }
+    }
   }
 
   return {
@@ -286,7 +324,9 @@ export const useStore = create<StoreState>((set, get) => {
     },
     updateProject: (project) => {
       const db = get().db!;
-      repoUpdateProject(db, project);
+      const original = get().data.projects.find((p) => p.id === project.id);
+      const name = freezeRename(db, 'project_name', original, project);
+      repoUpdateProject(db, { ...project, name });
       persist();
     },
     deleteProject: (projectId) => {
@@ -306,7 +346,9 @@ export const useStore = create<StoreState>((set, get) => {
     },
     updatePool: (pool) => {
       const db = get().db!;
-      repoUpdatePool(db, pool);
+      const original = get().data.pools.find((p) => p.id === pool.id);
+      const name = freezeRename(db, 'pool_name', original, pool);
+      repoUpdatePool(db, { ...pool, name });
       persist();
     },
     deletePool: (poolId) => {
@@ -331,7 +373,9 @@ export const useStore = create<StoreState>((set, get) => {
     },
     updateDiscipline: (discipline) => {
       const db = get().db!;
-      repoUpdateDiscipline(db, discipline);
+      const original = get().data.disciplines.find((d) => d.id === discipline.id);
+      const name = freezeRename(db, 'discipline_name', original, discipline);
+      repoUpdateDiscipline(db, { ...discipline, name });
       persist();
     },
     deleteDiscipline: (disciplineId) => {
@@ -351,7 +395,9 @@ export const useStore = create<StoreState>((set, get) => {
     },
     updatePerson: (person) => {
       const db = get().db!;
-      repoUpdatePerson(db, person);
+      const original = get().data.people.find((p) => p.id === person.id);
+      const name = freezeRename(db, 'person_name', original, person);
+      repoUpdatePerson(db, { ...person, name });
       persist();
     },
     deletePerson: (personId) => {
@@ -400,6 +446,7 @@ export const useStore = create<StoreState>((set, get) => {
       const asn = getOrCreatePersonAssignment(db, personId, projectId, BASE_SCENARIO_ID);
       repoSetPersonAssignmentAllocation(db, asn.id, period, clamped);
       persist();
+      warnIfOverAllocated(personId, [period]);
     },
     setPersonAssignmentRange: (personId, projectId, periods, fte) => {
       const db = get().db!;
@@ -407,6 +454,7 @@ export const useStore = create<StoreState>((set, get) => {
       const asn = getOrCreatePersonAssignment(db, personId, projectId, BASE_SCENARIO_ID);
       repoSetPersonAssignmentAllocations(db, asn.id, periods, clamped);
       persist();
+      warnIfOverAllocated(personId, periods);
     },
     clearRequirementPool: (projectId, poolId) => {
       const db = get().db!;

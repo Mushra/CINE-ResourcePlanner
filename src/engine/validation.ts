@@ -13,7 +13,8 @@ export type CheckCategory =
   | 'over_allocated'
   | 'assignment_without_requirement'
   | 'duration_mismatch'
-  | 'unstaffed_person';
+  | 'unstaffed_person'
+  | 'over_allocated_person';
 
 export interface SanityCheck {
   id: string;
@@ -46,6 +47,7 @@ export function getSanityChecks(engine: PlanningEngine): SanityCheck[] {
   checks.push(...checkInvalidDates(engine));
   checks.push(...checkTbdDates(engine));
   checks.push(...checkUnstaffedPeople(engine));
+  checks.push(...checkOverAllocatedPeople(engine));
 
   for (const check of checks) {
     if (check.disciplineId) continue;
@@ -286,6 +288,35 @@ function checkTbdDates(engine: PlanningEngine): SanityCheck[] {
         message: `${project.name} has TBD dates`,
         impact: 'Timeline placement and capacity forecasting are limited until dates are confirmed',
       });
+    }
+  }
+  return checks;
+}
+
+/** Active people staffed beyond their own capacity in a period, summed across every project (dispo included). */
+function checkOverAllocatedPeople(engine: PlanningEngine): SanityCheck[] {
+  const checks: SanityCheck[] = [];
+  const periods = engine.allKnownPeriods();
+  for (const person of engine.people()) {
+    if (!person.active) continue;
+    for (const period of periods) {
+      const assigned = round2(engine.getPersonAssigned(person.id, period));
+      const over = round2(assigned - person.capacityFte);
+      if (over > 0.001) {
+        const pool = person.poolId ? engine.pool(person.poolId) : undefined;
+        checks.push({
+          id: `over-allocated-person:${person.id}:${period}`,
+          severity: 'warning',
+          category: 'over_allocated_person',
+          personId: person.id,
+          personName: person.name,
+          poolId: person.poolId ?? undefined,
+          poolName: pool?.name,
+          period,
+          message: `${person.name} is over-allocated in ${formatPeriodLabel(period)}`,
+          impact: `Staffed ${assigned} FTE across all projects, ${over} FTE over their ${person.capacityFte} FTE capacity`,
+        });
+      }
     }
   }
   return checks;
