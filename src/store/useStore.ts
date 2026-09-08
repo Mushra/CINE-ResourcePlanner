@@ -78,6 +78,7 @@ interface StoreState {
 
   createPerson: (input: Omit<Person, 'id' | 'sortOrder'>) => Person;
   updatePerson: (person: Person) => void;
+  batchUpdatePeople: (personIds: string[], patch: Partial<Pick<Person, 'team' | 'poolId' | 'active'>>) => void;
   deletePerson: (personId: string) => void;
 
   setRequirement: (projectId: string, poolId: string, period: Period, fte: number) => void;
@@ -399,6 +400,19 @@ export const useStore = create<StoreState>((set, get) => {
       const name = freezeRename(db, 'person_name', original, person);
       repoUpdatePerson(db, { ...person, name });
       persist();
+    },
+    batchUpdatePeople: (personIds, patch) => {
+      const db = get().db!;
+      const people = get().data.people;
+      for (const personId of personIds) {
+        const original = people.find((p) => p.id === personId);
+        if (!original) continue;
+        const updated = { ...original, ...patch };
+        const name = freezeRename(db, 'person_name', original, updated);
+        repoUpdatePerson(db, { ...updated, name });
+      }
+      persist();
+      get().toast('success', `${personIds.length} person${personIds.length === 1 ? '' : 's'} updated`);
     },
     deletePerson: (personId) => {
       const db = get().db!;

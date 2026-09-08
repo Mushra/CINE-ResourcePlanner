@@ -19,11 +19,12 @@ function fromPerson(person?: Person, defaultPoolId?: string | null): PersonFormV
 }
 
 export function PersonFormDrawer({
-  person, pools, defaultPoolId, onClose, onSave,
+  person, pools, defaultPoolId, teamOptions, onClose, onSave,
 }: {
   person?: Person;
   pools: ResourcePool[];
   defaultPoolId?: string | null;
+  teamOptions?: string[];
   onClose: () => void;
   onSave: (value: PersonFormValue) => void;
 }) {
@@ -57,7 +58,12 @@ export function PersonFormDrawer({
 
       <div className="field">
         <label htmlFor="person-team">Team</label>
-        <input id="person-team" value={value.team} onChange={(e) => set('team', e.target.value)} placeholder="Team name" />
+        <input id="person-team" list="team-options" value={value.team} onChange={(e) => set('team', e.target.value)} placeholder="Team name" />
+        {teamOptions && teamOptions.length > 0 && (
+          <datalist id="team-options">
+            {teamOptions.map((t) => <option key={t} value={t} />)}
+          </datalist>
+        )}
       </div>
 
       <div className="field field-checkbox">

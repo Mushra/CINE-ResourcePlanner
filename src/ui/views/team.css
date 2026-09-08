@@ -22,3 +22,20 @@
 }
 .team-people-actions { display: flex; justify-content: flex-end; gap: 2px; white-space: nowrap; }
 .person-inactive td { color: var(--text-tertiary); }
+
+.team-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.team-batch-bar {
+  display: flex; align-items: center; gap: 10px;
+  margin-left: auto;
+  padding: 4px 10px 4px 12px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.team-people-table td:first-child, .team-people-table th:first-child { width: 22px; }
+.team-select-checkbox { width: auto; margin: 0; }
+.empty-inline-filtered { color: var(--text-tertiary); }
