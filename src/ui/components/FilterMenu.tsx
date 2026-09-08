@@ -74,11 +74,11 @@ export function FilterMenu({
         <div className="filter-popover">
           <div className="filter-search">
             <Icon name="search" size={12} />
-            <input autoFocus placeholder="Rechercher…" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <input autoFocus placeholder="Search…" value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
           <div className="filter-actions">
-            <button type="button" onClick={() => onChange(null)}>Tout sélectionner</button>
-            <button type="button" onClick={() => onChange(new Set())}>Effacer</button>
+            <button type="button" onClick={() => onChange(null)}>Select all</button>
+            <button type="button" onClick={() => onChange(new Set())}>Clear</button>
           </div>
           <div className="filter-list">
             {groups.length === 0 && <p className="empty-inline">No match</p>}

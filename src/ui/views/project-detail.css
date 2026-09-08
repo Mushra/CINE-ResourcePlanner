@@ -82,6 +82,15 @@
 
 /* Requirement block-timeline (Besoins → Timeline mode) */
 .req-timeline { overflow-x: auto; user-select: none; }
+.req-timeline-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+.req-timeline-hint svg { flex-shrink: 0; }
 .req-timeline-header { display: grid; padding-bottom: 4px; }
 .req-timeline-corner { position: sticky; left: 0; }
 .req-timeline-month {

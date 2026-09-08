@@ -140,6 +140,21 @@ export function Timeline() {
   const unscheduled = projects.filter((p) => !p.startDate || !p.endDate)
     .filter((p) => !search || p.name.toLowerCase().includes(search.toLowerCase()));
 
+  const setManyCollapsed = useUiStore((s) => s.setManyCollapsed);
+  const visibleCollapseKeys: string[] = [];
+  for (const project of scheduled) {
+    visibleCollapseKeys.push(`timeline:proj:${project.id}`);
+    const discIdsInProject = new Set(
+      engine.projectPoolIds(project.id)
+        .filter((id) => {
+          const pool = poolById.get(id);
+          return pool && !isGenericPoolName(pool.name) && activePoolIds.has(id);
+        })
+        .map((id) => poolById.get(id)?.disciplineId ?? UNASSIGNED_DISCIPLINE_ID),
+    );
+    for (const discId of discIdsInProject) visibleCollapseKeys.push(`timeline:disc:${project.id}:${discId}`);
+  }
+
   if (projects.length === 0) {
     return (
       <EmptyState
@@ -177,6 +192,12 @@ export function Timeline() {
           <span className="zoom-label">{zoom === 'compact' ? 'Compact' : zoom === 'wide' ? 'Wide' : 'Comfortable'}</span>
           <button type="button" className="zoom-btn" onClick={() => setZoom(zoom === 'compact' ? 'comfortable' : 'wide')} aria-label="Zoom in"><Icon name="zoom-in" size={14} /></button>
         </div>
+        {visibleCollapseKeys.length > 0 && (
+          <>
+            <Button variant="ghost" size="sm" onClick={() => setManyCollapsed(visibleCollapseKeys, false)}>Expand all</Button>
+            <Button variant="ghost" size="sm" onClick={() => setManyCollapsed(visibleCollapseKeys, true)}>Collapse all</Button>
+          </>
+        )}
       </div>
 
       {unscheduled.length > 0 && (

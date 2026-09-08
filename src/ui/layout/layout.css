@@ -107,6 +107,29 @@
   gap: 6px;
 }
 
+.topbar-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--text-tertiary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.topbar-search:hover { color: var(--text-secondary); border-color: var(--border-strong); }
+.topbar-search kbd {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin-left: 2px;
+}
+
 .theme-toggle {
   display: flex;
   align-items: center;

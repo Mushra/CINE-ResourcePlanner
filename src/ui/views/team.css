@@ -36,6 +36,22 @@
   color: var(--text-primary);
 }
 
+.team-overalloc-flag {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 5px;
+  color: var(--status-warning);
+  cursor: help;
+}
+
+.team-override-flag {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 5px;
+  color: var(--status-info);
+  cursor: help;
+}
+
 .team-people-table td:first-child, .team-people-table th:first-child { width: 22px; }
 .team-select-checkbox { width: auto; margin: 0; }
 .empty-inline-filtered { color: var(--text-tertiary); }

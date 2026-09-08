@@ -158,7 +158,7 @@ export const useStore = create<StoreState>((set, get) => {
     for (const period of periods) {
       const total = round2(engine.getPersonAssigned(personId, period));
       if (total > person.capacityFte + 0.001) {
-        get().toast('error', `${person.name} est staffé à ${total} FTE en ${formatPeriodLabel(period, { withYear: true })}, au-delà de sa capacité de ${person.capacityFte} FTE`);
+        get().toast('error', `${person.name} is staffed at ${total} FTE in ${formatPeriodLabel(period, { withYear: true })}, beyond their capacity of ${person.capacityFte} FTE`);
         return;
       }
     }

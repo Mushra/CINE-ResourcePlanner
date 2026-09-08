@@ -34,17 +34,22 @@ function fromProject(project?: Project): ProjectFormValue {
 
 export function ProjectFormDrawer({ project, onClose, onSave }: { project?: Project; onClose: () => void; onSave: (value: ProjectFormValue) => void }) {
   const [value, setValue] = useState<ProjectFormValue>(() => fromProject(project));
+  const [initialSnapshot] = useState(() => JSON.stringify(value));
   const canSave = value.name.trim().length > 0;
+  const dirty = JSON.stringify(value) !== initialSnapshot;
 
   function set<K extends keyof ProjectFormValue>(key: K, v: ProjectFormValue[K]): void {
     setValue((prev) => ({ ...prev, [key]: v }));
   }
 
   return (
-    <Drawer title={project ? 'Edit project' : 'New project'} onClose={onClose}>
+    <Drawer title={project ? 'Edit project' : 'New project'} onClose={onClose} dirty={dirty}>
       <div className="field">
         <label htmlFor="proj-name">Name</label>
         <input id="proj-name" autoFocus value={value.name} onChange={(e) => set('name', e.target.value)} placeholder="Cinematic Alpha" />
+        {project?.importName && project.importName !== value.name && (
+          <p className="field-hint">Imported as "{project.importName}" — renaming here only changes the display name, a re-import will still match the original.</p>
+        )}
       </div>
 
       <div className="field-row">

@@ -23,17 +23,22 @@ export function DisciplineFormDrawer({
   onSave: (value: DisciplineFormValue) => void;
 }) {
   const [value, setValue] = useState<DisciplineFormValue>(() => fromDiscipline(discipline));
+  const [initialSnapshot] = useState(() => JSON.stringify(value));
   const canSave = value.name.trim().length > 0;
+  const dirty = JSON.stringify(value) !== initialSnapshot;
 
   function set<K extends keyof DisciplineFormValue>(key: K, v: DisciplineFormValue[K]): void {
     setValue((prev) => ({ ...prev, [key]: v }));
   }
 
   return (
-    <Drawer title={discipline ? 'Edit discipline' : 'New discipline'} onClose={onClose}>
+    <Drawer title={discipline ? 'Edit discipline' : 'New discipline'} onClose={onClose} dirty={dirty}>
       <div className="field">
         <label htmlFor="discipline-name">Name (Famille d'emplois)</label>
         <input id="discipline-name" autoFocus value={value.name} onChange={(e) => set('name', e.target.value)} placeholder="Animation" />
+        {discipline?.importName && discipline.importName !== value.name && (
+          <p className="field-hint">Imported as "{discipline.importName}" — renaming here only changes the display name, a re-import will still match the original.</p>
+        )}
       </div>
 
       <div className="field">

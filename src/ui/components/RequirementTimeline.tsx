@@ -53,6 +53,10 @@ export function RequirementTimeline({
 }) {
   return (
     <div className="req-timeline">
+      <p className="req-timeline-hint">
+        <Icon name="info" size={12} />
+        Drag across a lane to create a block, drag a block to move it, drag its edges to resize, click a block to edit its FTE.
+      </p>
       <div className="req-timeline-header" style={{ gridTemplateColumns: `160px repeat(${months.length}, ${MONTH_W}px)` }}>
         <div className="req-timeline-corner" />
         {months.map((m) => <div key={m} className="req-timeline-month">{formatPeriodLabel(m, { withYear: false })}</div>)}

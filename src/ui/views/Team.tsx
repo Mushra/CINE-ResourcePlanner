@@ -1,12 +1,15 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../../store/useStore';
+import { useUiStore } from '../../store/useUiStore';
 import { UNASSIGNED_DISCIPLINE_ID } from '../../engine/planning';
 import { isGenericPoolName } from '../../domain/identity';
 import { todayPeriod } from '../../domain/periods';
+import { getSanityChecks } from '../../engine/validation';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
 import { ConfirmButton } from '../components/ConfirmButton';
 import { Collapsible } from '../components/Collapsible';
+import { Icon } from '../components/Icon';
 import { FilterMenu, type FilterOption } from '../components/FilterMenu';
 import { DisciplineFormDrawer, type DisciplineFormValue } from '../components/DisciplineFormDrawer';
 import { PoolFormDrawer, type PoolFormValue } from '../components/PoolFormDrawer';
@@ -40,12 +43,29 @@ export function Team() {
   const [newPersonForPool, setNewPersonForPool] = useState<string | null>(null);
   const [editingPerson, setEditingPerson] = useState<Person | null>(null);
 
-  const [teamFilter, setTeamFilter] = useState<Set<string> | null>(null);
-  const [disciplineFilter, setDisciplineFilter] = useState<Set<string> | null>(null);
+  const storedTeamFilter = useUiStore((s) => s.teamFilter);
+  const setStoredTeamFilter = useUiStore((s) => s.setTeamFilter);
+  const storedDisciplineFilter = useUiStore((s) => s.teamDisciplineFilter);
+  const setStoredDisciplineFilter = useUiStore((s) => s.setTeamDisciplineFilter);
+  const setManyCollapsed = useUiStore((s) => s.setManyCollapsed);
+  const teamFilter = storedTeamFilter ? new Set(storedTeamFilter) : null;
+  const setTeamFilter = (next: Set<string> | null) => setStoredTeamFilter(next ? Array.from(next) : null);
+  const disciplineFilter = storedDisciplineFilter ? new Set(storedDisciplineFilter) : null;
+  const setDisciplineFilter = (next: Set<string> | null) => setStoredDisciplineFilter(next ? Array.from(next) : null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showBatchEdit, setShowBatchEdit] = useState(false);
 
   const period = todayPeriod();
+
+  const overAllocatedNow = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const check of getSanityChecks(engine)) {
+      if (check.category === 'over_allocated_person' && check.period === period && check.personId) {
+        map.set(check.personId, check.impact);
+      }
+    }
+    return map;
+  }, [engine, period]);
 
   const visiblePools = pools.filter((p) => !isGenericPoolName(p.name));
 
@@ -74,6 +94,12 @@ export function Team() {
 
   const anyFilterActive = teamFilter !== null || disciplineFilter !== null;
   const groups = allGroups.filter((g) => !disciplineFilter || disciplineFilter.has(g.id));
+
+  const visibleCollapseKeys: string[] = [];
+  for (const group of groups) {
+    visibleCollapseKeys.push(`team:disc:${group.id}`);
+    for (const pool of group.poolsInGroup) visibleCollapseKeys.push(`team:pool:${pool.id}`);
+  }
 
   // Precompute the filtered people for each pool once, both for rendering and for "select all visible".
   const peopleByPool = new Map<string, Person[]>();
@@ -139,6 +165,12 @@ export function Team() {
       <div className="team-toolbar">
         <FilterMenu label="Team" options={teamOptions} activeIds={teamFilter} onChange={setTeamFilter} />
         <FilterMenu label="Discipline" options={disciplineOptions} activeIds={disciplineFilter} onChange={setDisciplineFilter} />
+        {visibleCollapseKeys.length > 0 && (
+          <>
+            <Button variant="ghost" size="sm" onClick={() => setManyCollapsed(visibleCollapseKeys, false)}>Expand all</Button>
+            <Button variant="ghost" size="sm" onClick={() => setManyCollapsed(visibleCollapseKeys, true)}>Collapse all</Button>
+          </>
+        )}
         {visiblePersonIds.length > 0 && (
           <Button
             variant="ghost"
@@ -195,6 +227,7 @@ export function Team() {
                   const rolePeopleAll = engine.peopleInPool(pool.id);
                   const rolePeople = peopleByPool.get(pool.id) ?? [];
                   const poolAllSelected = rolePeople.length > 0 && rolePeople.every((p) => selected.has(p.id));
+                  const poolOverridden = pool.importDisciplineId !== pool.disciplineId;
                   return (
                     <Collapsible
                       key={pool.id}
@@ -204,6 +237,11 @@ export function Team() {
                         <>
                           <span className="pool-dot" style={{ background: pool.color }} />
                           <h3>{pool.name}</h3>
+                          {poolOverridden && (
+                            <span className="team-override-flag" title="This role's discipline is set by a Structure override, which takes precedence over the Discipline field in Edit role.">
+                              <Icon name="structure" size={12} />
+                            </span>
+                          )}
                           <span className="team-role-capacity">{engine.getCapacity(pool.id, period)} FTE</span>
                           <div className="team-role-actions" onClick={(e) => e.stopPropagation()}>
                             <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditingPool(pool)}>Edit</Button>
@@ -249,9 +287,23 @@ export function Team() {
                                     aria-label={`Select ${person.name}`}
                                   />
                                 </td>
-                                <td>{person.name}</td>
+                                <td>
+                                  {person.name}
+                                  {person.importPoolId !== person.poolId && (
+                                    <span className="team-override-flag" title="This person's role is set by a Structure override or role-remap rule, which takes precedence over the Role field in Edit person.">
+                                      <Icon name="structure" size={11} />
+                                    </span>
+                                  )}
+                                </td>
                                 <td>{person.team || '—'}</td>
-                                <td>{engine.getPersonAssigned(person.id, period)}</td>
+                                <td>
+                                  {engine.getPersonAssigned(person.id, period)}
+                                  {overAllocatedNow.has(person.id) && (
+                                    <span className="team-overalloc-flag" title={overAllocatedNow.get(person.id)}>
+                                      <Icon name="warning" size={12} />
+                                    </span>
+                                  )}
+                                </td>
                                 <td>{person.active ? 'Active' : 'Inactive'}</td>
                                 <td className="team-people-actions">
                                   <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditingPerson(person)} />

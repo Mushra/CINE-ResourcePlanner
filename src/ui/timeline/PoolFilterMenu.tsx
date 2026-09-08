@@ -13,7 +13,7 @@ export function PoolFilterMenu({
   const options = pools.map((pool) => ({ id: pool.id, label: pool.name, color: pool.color, group: disciplineName(pool) }));
   return (
     <FilterMenu
-      label="Filtrer par métier"
+      label="Role"
       options={options}
       activeIds={activePoolIds}
       onChange={onChange}

@@ -64,9 +64,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const backToProjects = useUiStore((s) => s.backToProjects);
   const collapsed = useUiStore((s) => s.collapsed);
   const toggleCollapse = useUiStore((s) => s.toggleCollapse);
+  const besoinsMode = useUiStore((s) => s.besoinsMode);
+  const setBesoinsMode = useUiStore((s) => s.setBesoinsMode);
+  const besoinsGranularity = useUiStore((s) => s.besoinsGranularity);
+  const setBesoinsGranularity = useUiStore((s) => s.setBesoinsGranularity);
+  const assignationsGranularity = useUiStore((s) => s.assignationsGranularity);
+  const setAssignationsGranularity = useUiStore((s) => s.setAssignationsGranularity);
   const [editing, setEditing] = useState(false);
-  const [besoinsMode, setBesoinsMode] = useState<'table' | 'timeline'>('table');
-  const [besoinsGranularity, setBesoinsGranularity] = useState<'month' | 'year'>('month');
 
   const checks = project ? getSanityChecks(engine).filter((c) => c.projectId === project.id) : [];
 
@@ -107,6 +111,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const usedPools = pools.filter((p) => usedPoolIds.has(p.id) && !isGenericPoolName(p.name));
 
   const columns = buildColumns(months, besoinsGranularity);
+  const assignColumns = buildColumns(months, assignationsGranularity);
 
   const genericPoolLanes: RequirementLane[] = genericRequirementPools.map((pool) => {
     const discipline = disciplines.find((d) => d.id === pool.disciplineId);
@@ -358,6 +363,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         <div className="panel-header">
           <h2>Assignations</h2>
           <span className="panel-sub">Who is actually staffed, by month</span>
+          <div className="panel-header-toggles">
+            <div className="segmented segmented-sm">
+              <button type="button" className={assignationsGranularity === 'month' ? 'active' : ''} onClick={() => setAssignationsGranularity('month')}>Month</button>
+              <button type="button" className={assignationsGranularity === 'year' ? 'active' : ''} onClick={() => setAssignationsGranularity('year')}>Year</button>
+            </div>
+          </div>
         </div>
 
         <RangePanel
@@ -375,13 +386,15 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               <thead>
                 <tr>
                   <th className="alloc-row-label">Person</th>
-                  {months.map((m) => <th key={m}>{formatPeriodLabel(m, { withYear: false })}</th>)}
+                  {assignColumns.map((c) => <th key={c.key}>{c.label}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {usedPools.map((pool) => {
                   const staffingByMonth = months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === pool.id));
                   const personLinesByMonth = months.map((m) => engine.getProjectPersonStaffing(project.id, m).lines.filter((l) => l.poolId === pool.id));
+                  const requiredByMonth = staffingByMonth.map((s) => s?.required ?? 0);
+                  const assignedByMonth = staffingByMonth.map((s) => s?.assigned ?? 0);
 
                   const assignedPeople = new Map<string, string>();
                   personLinesByMonth.forEach((lines) => lines.forEach((l) => assignedPeople.set(l.personId, l.personName)));
@@ -392,7 +405,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   return (
                     <Fragment key={pool.id}>
                       <tr className="pool-subheader-row">
-                        <td className="pool-subheader" colSpan={months.length + 1}>
+                        <td className="pool-subheader" colSpan={assignColumns.length + 1}>
                           <span className="pool-dot" style={{ background: pool.color }} />
                           {pool.name}
                         </td>
@@ -405,18 +418,20 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                               <Icon name="close" size={11} />
                             </button>
                           </td>
-                          {months.map((m, i) => {
-                            const required = staffingByMonth[i]?.required ?? 0;
-                            const assigned = staffingByMonth[i]?.assigned ?? 0;
+                          {assignColumns.map((col, i) => {
+                            const { value: required } = columnValue(col.periods, months, requiredByMonth);
+                            const { value: assigned } = columnValue(col.periods, months, assignedByMonth);
                             const short = required > 0 && assigned < required - 0.001;
-                            const fte = personLinesByMonth[i].find((l) => l.personId === personId)?.fte ?? 0;
+                            const fteByMonth = months.map((_, mi) => personLinesByMonth[mi].find((l) => l.personId === personId)?.fte ?? 0);
+                            const { value: fte, mixed } = columnValue(col.periods, months, fteByMonth);
                             return (
                               <AllocCell
-                                key={m}
+                                key={col.key}
                                 value={fte}
+                                mixed={mixed}
                                 highlightShort={short}
-                                onCommit={(v) => setPersonAssignment(personId, project.id, m, v)}
-                                onFillRight={i < months.length - 1 ? () => setPersonAssignmentRange(personId, project.id, months.slice(i + 1), fte) : undefined}
+                                onCommit={(v) => setPersonAssignmentRange(personId, project.id, col.periods, v)}
+                                onFillRight={i < assignColumns.length - 1 ? () => setPersonAssignmentRange(personId, project.id, assignColumns.slice(i + 1).flatMap((c) => c.periods), fte) : undefined}
                               />
                             );
                           })}
@@ -437,7 +452,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                               {addablePeople.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                             </select>
                           </td>
-                          {months.map((m) => <td key={m} className="alloc-cell" />)}
+                          {assignColumns.map((c) => <td key={c.key} className="alloc-cell" />)}
                         </tr>
                       )}
                     </Fragment>

@@ -29,17 +29,22 @@ export function PersonFormDrawer({
   onSave: (value: PersonFormValue) => void;
 }) {
   const [value, setValue] = useState<PersonFormValue>(() => fromPerson(person, defaultPoolId));
+  const [initialSnapshot] = useState(() => JSON.stringify(value));
   const canSave = value.name.trim().length > 0;
+  const dirty = JSON.stringify(value) !== initialSnapshot;
 
   function set<K extends keyof PersonFormValue>(key: K, v: PersonFormValue[K]): void {
     setValue((prev) => ({ ...prev, [key]: v }));
   }
 
   return (
-    <Drawer title={person ? 'Edit person' : 'New person'} onClose={onClose}>
+    <Drawer title={person ? 'Edit person' : 'New person'} onClose={onClose} dirty={dirty}>
       <div className="field">
         <label htmlFor="person-name">Name (Ressource affectée)</label>
         <input id="person-name" autoFocus value={value.name} onChange={(e) => set('name', e.target.value)} placeholder="Jane Doe" />
+        {person?.importName && person.importName !== value.name && (
+          <p className="field-hint">Imported as "{person.importName}" — renaming here only changes the display name, a re-import will still match the original.</p>
+        )}
       </div>
 
       <div className="field-row">
@@ -49,6 +54,11 @@ export function PersonFormDrawer({
             <option value="">Unassigned</option>
             {pools.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
+          {person && person.importPoolId !== person.poolId && (
+            <p className="field-hint field-hint-warning">
+              A Structure override or role-remap rule currently controls this person's role and takes precedence — changing this field here has no visible effect until you clear it in Structure.
+            </p>
+          )}
         </div>
         <div className="field">
           <label htmlFor="person-capacity">Capacity (FTE)</label>

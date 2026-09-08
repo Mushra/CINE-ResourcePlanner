@@ -33,7 +33,7 @@ export function BatchEditPersonDrawer({
   }
 
   return (
-    <Drawer title={`Batch edit — ${count} selected`} onClose={onClose}>
+    <Drawer title={`Batch edit — ${count} selected`} onClose={onClose} dirty={canSave}>
       <p className="view-sub" style={{ marginTop: -4 }}>Tick a field below to apply it to all {count} selected people.</p>
 
       <div className="batch-field">

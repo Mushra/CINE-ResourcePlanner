@@ -26,17 +26,22 @@ export function PoolFormDrawer({
   onSave: (value: PoolFormValue) => void;
 }) {
   const [value, setValue] = useState<PoolFormValue>(() => fromPool(pool, defaultDisciplineId));
+  const [initialSnapshot] = useState(() => JSON.stringify(value));
   const canSave = value.name.trim().length > 0;
+  const dirty = JSON.stringify(value) !== initialSnapshot;
 
   function set<K extends keyof PoolFormValue>(key: K, v: PoolFormValue[K]): void {
     setValue((prev) => ({ ...prev, [key]: v }));
   }
 
   return (
-    <Drawer title={pool ? 'Edit role' : 'New role'} onClose={onClose}>
+    <Drawer title={pool ? 'Edit role' : 'New role'} onClose={onClose} dirty={dirty}>
       <div className="field">
         <label htmlFor="pool-name">Name (Emploi repère)</label>
         <input id="pool-name" autoFocus value={value.name} onChange={(e) => set('name', e.target.value)} placeholder="Animateur·trice" />
+        {pool?.importName && pool.importName !== value.name && (
+          <p className="field-hint">Imported as "{pool.importName}" — renaming here only changes the display name, a re-import will still match the original.</p>
+        )}
       </div>
 
       <div className="field-row">
@@ -50,6 +55,11 @@ export function PoolFormDrawer({
             <option value="">Unassigned</option>
             {disciplines.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
+          {pool && pool.importDisciplineId !== pool.disciplineId && (
+            <p className="field-hint field-hint-warning">
+              A Structure override currently controls this role's discipline and takes precedence — changing this field here has no visible effect until you clear that override in Structure.
+            </p>
+          )}
         </div>
         <div className="field">
           <label htmlFor="pool-color">Color</label>

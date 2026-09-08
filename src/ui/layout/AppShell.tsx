@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Icon, type IconName } from '../components/Icon';
 import { Button } from '../components/Button';
 import { ImportDrawer } from '../components/ImportDrawer';
+import { CommandPalette } from '../components/CommandPalette';
 import { useStore } from '../../store/useStore';
 import { useUiStore, type ViewName } from '../../store/useUiStore';
 
@@ -43,6 +44,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <TopBar />
         <main className="content">{children}</main>
       </div>
+      <CommandPalette />
     </div>
   );
 }
@@ -54,6 +56,7 @@ function TopBar() {
   const toggleTheme = useStore((s) => s.toggleTheme);
   const saveDatabase = useStore((s) => s.saveDatabase);
   const exportXlsx = useStore((s) => s.exportXlsx);
+  const setCommandPaletteOpen = useUiStore((s) => s.setCommandPaletteOpen);
   const [menuOpen, setMenuOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -75,6 +78,11 @@ function TopBar() {
         {dirty && <span className="dirty-dot" title="Unsaved changes to this file" />}
       </div>
       <div className="topbar-actions">
+        <button type="button" className="topbar-search" onClick={() => setCommandPaletteOpen(true)}>
+          <Icon name="search" size={13} />
+          Jump to…
+          <kbd>Ctrl K</kbd>
+        </button>
         <Button icon="save" size="sm" variant={dirty ? 'primary' : 'secondary'} onClick={() => void saveDatabase()}>
           Save
         </Button>
