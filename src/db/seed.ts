@@ -45,7 +45,7 @@ export function seedDemoData(db: PlannerDatabase): void {
   const techDesign = createPool(db, { name: 'Tech Design', capacityFte: 3, color: '#ec6a9c', disciplineId: technicalDisc.id });
 
   function people(poolId: string, names: string[]) {
-    return names.map((name) => createPerson(db, { name, poolId, capacityFte: 1, active: true, notes: '', team: '' }));
+    return names.map((name) => createPerson(db, { name, poolId, capacityFte: 1, active: true, notes: '', team: '', site: '' }));
   }
 
   const [ava, liam, mia, noah, zoe, leo, ivy, omar] = people(animation.id, [

@@ -1,11 +1,14 @@
 import { create } from 'zustand';
+import type { GlobalFilter } from '../domain/filter';
+import { EMPTY_GLOBAL_FILTER } from '../domain/filter';
 
-export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'forecast' | 'project-detail' | 'structure';
+export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'forecast' | 'availability' | 'project-detail' | 'structure';
 export type TimelineZoom = 'compact' | 'comfortable' | 'wide';
+export type HorizonMonths = 3 | 6 | 12;
 
 const COLLAPSE_STORAGE_KEY = 'cine-planner-collapse';
 const TIMELINE_FILTERS_KEY = 'cine-planner-timeline-filters';
-const TEAM_FILTERS_KEY = 'cine-planner-team-filters';
+const GLOBAL_FILTER_KEY = 'cine-planner-global-filter';
 const BESOINS_PREFS_KEY = 'cine-planner-besoins-prefs';
 
 function loadCollapsed(): Record<string, boolean> {
@@ -46,29 +49,33 @@ function saveTimelineFilters(filters: TimelineFilters): void {
   localStorage.setItem(TIMELINE_FILTERS_KEY, JSON.stringify(filters));
 }
 
-interface TeamFilters {
-  team: string[] | null;
-  discipline: string[] | null;
+interface GlobalFilterPrefs {
+  filter: GlobalFilter;
+  horizonMonths: HorizonMonths;
 }
 
-function loadTeamFilters(): TeamFilters {
-  const fallback: TeamFilters = { team: null, discipline: null };
+function loadGlobalFilterPrefs(): GlobalFilterPrefs {
+  const fallback: GlobalFilterPrefs = { filter: EMPTY_GLOBAL_FILTER, horizonMonths: 6 };
   try {
-    const raw = localStorage.getItem(TEAM_FILTERS_KEY);
+    const raw = localStorage.getItem(GLOBAL_FILTER_KEY);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) return fallback;
-    return {
-      team: Array.isArray(parsed.team) ? parsed.team : null,
-      discipline: Array.isArray(parsed.discipline) ? parsed.discipline : null,
+    const f = parsed.filter;
+    const filter: GlobalFilter = {
+      sites: Array.isArray(f?.sites) ? f.sites : null,
+      teams: Array.isArray(f?.teams) ? f.teams : null,
+      disciplineIds: Array.isArray(f?.disciplineIds) ? f.disciplineIds : null,
     };
+    const horizonMonths: HorizonMonths = parsed.horizonMonths === 3 || parsed.horizonMonths === 12 ? parsed.horizonMonths : 6;
+    return { filter, horizonMonths };
   } catch {
     return fallback;
   }
 }
 
-function saveTeamFilters(filters: TeamFilters): void {
-  localStorage.setItem(TEAM_FILTERS_KEY, JSON.stringify(filters));
+function saveGlobalFilterPrefs(prefs: GlobalFilterPrefs): void {
+  localStorage.setItem(GLOBAL_FILTER_KEY, JSON.stringify(prefs));
 }
 
 export type BesoinsMode = 'table' | 'timeline';
@@ -124,10 +131,11 @@ interface UiState {
   setTimelineSearch: (search: string) => void;
   setTimelinePoolFilter: (poolFilter: string[] | null) => void;
 
-  teamFilter: string[] | null;
-  teamDisciplineFilter: string[] | null;
-  setTeamFilter: (teamFilter: string[] | null) => void;
-  setTeamDisciplineFilter: (disciplineFilter: string[] | null) => void;
+  /** Shared across Dashboard/Forecast/Team/Availability — recomputes the engine, not just row visibility. */
+  globalFilter: GlobalFilter;
+  horizonMonths: HorizonMonths;
+  setGlobalFilter: (filter: GlobalFilter) => void;
+  setHorizonMonths: (months: HorizonMonths) => void;
 
   besoinsMode: BesoinsMode;
   besoinsGranularity: BesoinsGranularity;
@@ -142,7 +150,7 @@ interface UiState {
 }
 
 const initialTimelineFilters = loadTimelineFilters();
-const initialTeamFilters = loadTeamFilters();
+const initialGlobalFilterPrefs = loadGlobalFilterPrefs();
 const initialBesoinsPrefs = loadBesoinsPrefs();
 
 export const useUiStore = create<UiState>((set, get) => ({
@@ -190,15 +198,15 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ timelinePoolFilter: poolFilter });
   },
 
-  teamFilter: initialTeamFilters.team,
-  teamDisciplineFilter: initialTeamFilters.discipline,
-  setTeamFilter: (teamFilter) => {
-    saveTeamFilters({ team: teamFilter, discipline: get().teamDisciplineFilter });
-    set({ teamFilter });
+  globalFilter: initialGlobalFilterPrefs.filter,
+  horizonMonths: initialGlobalFilterPrefs.horizonMonths,
+  setGlobalFilter: (filter) => {
+    saveGlobalFilterPrefs({ filter, horizonMonths: get().horizonMonths });
+    set({ globalFilter: filter });
   },
-  setTeamDisciplineFilter: (disciplineFilter) => {
-    saveTeamFilters({ team: get().teamFilter, discipline: disciplineFilter });
-    set({ teamDisciplineFilter: disciplineFilter });
+  setHorizonMonths: (horizonMonths) => {
+    saveGlobalFilterPrefs({ filter: get().globalFilter, horizonMonths });
+    set({ horizonMonths });
   },
 
   besoinsMode: initialBesoinsPrefs.mode,

@@ -74,12 +74,12 @@ export function loadPlanningData(db: PlannerDatabase): PlanningData {
     .map((r): Discipline => ({ id: r.id, name: r.name, color: r.color, sortOrder: r.sort_order }));
 
   const people = db
-    .query<{ id: string; name: string; pool_id: string | null; capacity_fte: number; active: number; notes: string; sort_order: number; team: string }>(
+    .query<{ id: string; name: string; pool_id: string | null; capacity_fte: number; active: number; notes: string; sort_order: number; team: string; site: string }>(
       'SELECT * FROM people ORDER BY sort_order, name',
     )
     .map((r): Person => ({
       id: r.id, name: r.name, poolId: r.pool_id, capacityFte: r.capacity_fte, active: r.active === 1,
-      notes: r.notes, sortOrder: r.sort_order, team: r.team,
+      notes: r.notes, sortOrder: r.sort_order, team: r.team, site: r.site,
     }));
 
   const scenarios = db
@@ -255,15 +255,15 @@ export function deleteDiscipline(db: PlannerDatabase, disciplineId: string): voi
 export function createPerson(db: PlannerDatabase, input: Omit<Person, 'id' | 'sortOrder'>): Person {
   const id = newId('person');
   const maxOrder = db.query<{ m: number | null }>('SELECT MAX(sort_order) as m FROM people')[0]?.m ?? -1;
-  db.exec('INSERT INTO people (id, name, pool_id, capacity_fte, active, notes, sort_order, team) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [
-    id, input.name, input.poolId, input.capacityFte, input.active ? 1 : 0, input.notes, maxOrder + 1, input.team,
+  db.exec('INSERT INTO people (id, name, pool_id, capacity_fte, active, notes, sort_order, team, site) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [
+    id, input.name, input.poolId, input.capacityFte, input.active ? 1 : 0, input.notes, maxOrder + 1, input.team, input.site,
   ]);
   return { ...input, id, sortOrder: maxOrder + 1 };
 }
 
 export function updatePerson(db: PlannerDatabase, person: Person): void {
-  db.exec('UPDATE people SET name=?, pool_id=?, capacity_fte=?, active=?, notes=?, sort_order=?, team=? WHERE id=?', [
-    person.name, person.poolId, person.capacityFte, person.active ? 1 : 0, person.notes, person.sortOrder, person.team, person.id,
+  db.exec('UPDATE people SET name=?, pool_id=?, capacity_fte=?, active=?, notes=?, sort_order=?, team=?, site=? WHERE id=?', [
+    person.name, person.poolId, person.capacityFte, person.active ? 1 : 0, person.notes, person.sortOrder, person.team, person.site, person.id,
   ]);
 }
 

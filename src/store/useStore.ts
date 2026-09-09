@@ -17,7 +17,8 @@ import { seedDemoData } from '../db/seed';
 import { getStoredFileName, loadAutosave, saveAutosave, setStoredFileName } from '../persistence/indexeddb';
 import * as files from '../persistence/files';
 import { exportWorkbookToBytes } from '../export/xlsx';
-import { parseRpmWorkbook, type ImportReport } from '../import/rpmImport';
+import type { ImportReport } from '../import/rpmImport';
+import { parseAnyWorkbook } from '../import/staffingImport';
 import { PlanningEngine, round2 } from '../engine/planning';
 import type { Discipline, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
 import { emptyPlanningData } from '../domain/types';
@@ -287,7 +288,7 @@ export const useStore = create<StoreState>((set, get) => {
       try {
         const opened = await files.openXlsxFile();
         if (!opened) return null;
-        const normalized = await parseRpmWorkbook(opened.buffer, opened.name);
+        const normalized = await parseAnyWorkbook(opened.buffer, opened.name);
 
         const currentDb = get().db;
         const effectiveMode: ImportMode = mode === 'replace' || !currentDb ? 'replace' : 'merge';

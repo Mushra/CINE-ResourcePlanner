@@ -3,24 +3,25 @@ import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
 import { UNASSIGNED_DISCIPLINE_ID } from '../../engine/planning';
 import { isGenericPoolName } from '../../domain/identity';
+import { isGlobalFilterActive } from '../../domain/filter';
 import { todayPeriod } from '../../domain/periods';
 import { getSanityChecks } from '../../engine/validation';
+import { useFilteredEngine } from '../hooks/useFilteredEngine';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
 import { ConfirmButton } from '../components/ConfirmButton';
 import { Collapsible } from '../components/Collapsible';
 import { Icon } from '../components/Icon';
-import { FilterMenu, type FilterOption } from '../components/FilterMenu';
+import { GlobalFilterBar } from '../components/GlobalFilterBar';
 import { DisciplineFormDrawer, type DisciplineFormValue } from '../components/DisciplineFormDrawer';
 import { PoolFormDrawer, type PoolFormValue } from '../components/PoolFormDrawer';
 import { PersonFormDrawer, type PersonFormValue } from '../components/PersonFormDrawer';
 import { BatchEditPersonDrawer, type BatchPersonPatch } from '../components/BatchEditPersonDrawer';
 import type { Discipline, Person, ResourcePool } from '../../domain/types';
 
-const NO_TEAM_KEY = '__no_team__';
-
 export function Team() {
-  const engine = useStore((s) => s.engine);
+  const { engine, options } = useFilteredEngine();
+  const globalFilter = useUiStore((s) => s.globalFilter);
   const disciplines = useStore((s) => s.data.disciplines);
   const pools = useStore((s) => s.data.pools);
   const people = useStore((s) => s.data.people);
@@ -43,15 +44,7 @@ export function Team() {
   const [newPersonForPool, setNewPersonForPool] = useState<string | null>(null);
   const [editingPerson, setEditingPerson] = useState<Person | null>(null);
 
-  const storedTeamFilter = useUiStore((s) => s.teamFilter);
-  const setStoredTeamFilter = useUiStore((s) => s.setTeamFilter);
-  const storedDisciplineFilter = useUiStore((s) => s.teamDisciplineFilter);
-  const setStoredDisciplineFilter = useUiStore((s) => s.setTeamDisciplineFilter);
   const setManyCollapsed = useUiStore((s) => s.setManyCollapsed);
-  const teamFilter = storedTeamFilter ? new Set(storedTeamFilter) : null;
-  const setTeamFilter = (next: Set<string> | null) => setStoredTeamFilter(next ? Array.from(next) : null);
-  const disciplineFilter = storedDisciplineFilter ? new Set(storedDisciplineFilter) : null;
-  const setDisciplineFilter = (next: Set<string> | null) => setStoredDisciplineFilter(next ? Array.from(next) : null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showBatchEdit, setShowBatchEdit] = useState(false);
 
@@ -69,31 +62,18 @@ export function Team() {
 
   const visiblePools = pools.filter((p) => !isGenericPoolName(p.name));
 
-  const teamOptions: FilterOption[] = useMemo(() => {
-    const known = [...new Set(people.map((p) => p.team).filter((t) => t.trim().length > 0))].sort();
-    const options = known.map((t) => ({ id: t, label: t }));
-    if (people.some((p) => !p.team.trim())) options.unshift({ id: NO_TEAM_KEY, label: 'No team' });
-    return options;
-  }, [people]);
-  const knownTeamNames = useMemo(() => teamOptions.filter((o) => o.id !== NO_TEAM_KEY).map((o) => o.label), [teamOptions]);
+  const knownTeamNames = useMemo(() => [...new Set(people.map((p) => p.team).filter((t) => t.trim().length > 0))].sort(), [people]);
+  const knownSiteNames = useMemo(() => [...new Set(people.map((p) => p.site).filter((s) => s.trim().length > 0))].sort(), [people]);
 
-  function matchesTeamFilter(person: Person): boolean {
-    if (!teamFilter) return true;
-    return teamFilter.has(person.team.trim() ? person.team : NO_TEAM_KEY);
-  }
-
-  const allGroups: { id: string; discipline: Discipline | null; poolsInGroup: ResourcePool[] }[] = engine.disciplines().map((d) => ({
+  const groups: { id: string; discipline: Discipline | null; poolsInGroup: ResourcePool[] }[] = engine.disciplines().map((d) => ({
     id: d.id,
     discipline: d,
     poolsInGroup: engine.poolsInDiscipline(d.id).filter((p) => !isGenericPoolName(p.name)),
   }));
   const unassignedPools = engine.poolsInDiscipline(UNASSIGNED_DISCIPLINE_ID).filter((p) => !isGenericPoolName(p.name));
-  if (unassignedPools.length > 0) allGroups.push({ id: UNASSIGNED_DISCIPLINE_ID, discipline: null, poolsInGroup: unassignedPools });
+  if (unassignedPools.length > 0) groups.push({ id: UNASSIGNED_DISCIPLINE_ID, discipline: null, poolsInGroup: unassignedPools });
 
-  const disciplineOptions: FilterOption[] = allGroups.map((g) => ({ id: g.id, label: g.discipline?.name ?? 'Unassigned', color: g.discipline?.color ?? '#9ca3af' }));
-
-  const anyFilterActive = teamFilter !== null || disciplineFilter !== null;
-  const groups = allGroups.filter((g) => !disciplineFilter || disciplineFilter.has(g.id));
+  const anyFilterActive = isGlobalFilterActive(globalFilter);
 
   const visibleCollapseKeys: string[] = [];
   for (const group of groups) {
@@ -106,7 +86,7 @@ export function Team() {
   const visiblePersonIds: string[] = [];
   for (const group of groups) {
     for (const pool of group.poolsInGroup) {
-      const rolePeople = engine.peopleInPool(pool.id).filter(matchesTeamFilter);
+      const rolePeople = engine.peopleInPool(pool.id);
       peopleByPool.set(pool.id, rolePeople);
       for (const person of rolePeople) visiblePersonIds.push(person.id);
     }
@@ -162,9 +142,9 @@ export function Team() {
         <Button variant="primary" icon="plus" onClick={() => setNewDiscipline(true)}>New discipline</Button>
       </div>
 
+      <GlobalFilterBar options={options} />
+
       <div className="team-toolbar">
-        <FilterMenu label="Team" options={teamOptions} activeIds={teamFilter} onChange={setTeamFilter} />
-        <FilterMenu label="Discipline" options={disciplineOptions} activeIds={disciplineFilter} onChange={setDisciplineFilter} />
         {visibleCollapseKeys.length > 0 && (
           <>
             <Button variant="ghost" size="sm" onClick={() => setManyCollapsed(visibleCollapseKeys, false)}>Expand all</Button>
@@ -224,7 +204,6 @@ export function Team() {
             ) : (
               <div className="team-roles">
                 {group.poolsInGroup.map((pool) => {
-                  const rolePeopleAll = engine.peopleInPool(pool.id);
                   const rolePeople = peopleByPool.get(pool.id) ?? [];
                   const poolAllSelected = rolePeople.length > 0 && rolePeople.every((p) => selected.has(p.id));
                   const poolOverridden = pool.importDisciplineId !== pool.disciplineId;
@@ -251,10 +230,8 @@ export function Team() {
                         </>
                       }
                     >
-                      {rolePeopleAll.length === 0 ? (
+                      {rolePeople.length === 0 ? (
                         <p className="empty-inline">No people in this role yet.</p>
-                      ) : rolePeople.length === 0 ? (
-                        <p className="empty-inline empty-inline-filtered">No one here matches the current filters.</p>
                       ) : (
                         <table className="data-table team-people-table">
                           <thead>
@@ -270,6 +247,7 @@ export function Team() {
                               </th>
                               <th>Name</th>
                               <th>Team</th>
+                              <th>Site</th>
                               <th>Assigned now</th>
                               <th>Status</th>
                               <th />
@@ -296,6 +274,7 @@ export function Team() {
                                   )}
                                 </td>
                                 <td>{person.team || '—'}</td>
+                                <td>{person.site || '—'}</td>
                                 <td>
                                   {engine.getPersonAssigned(person.id, period)}
                                   {overAllocatedNow.has(person.id) && (
@@ -360,6 +339,7 @@ export function Team() {
           pools={visiblePools}
           defaultPoolId={newPersonForPool}
           teamOptions={knownTeamNames}
+          siteOptions={knownSiteNames}
           onClose={() => setNewPersonForPool(null)}
           onSave={(v: PersonFormValue) => { createPerson(v); setNewPersonForPool(null); }}
         />
@@ -369,6 +349,7 @@ export function Team() {
           person={editingPerson}
           pools={visiblePools}
           teamOptions={knownTeamNames}
+          siteOptions={knownSiteNames}
           onClose={() => setEditingPerson(null)}
           onSave={(v: PersonFormValue) => { updatePerson({ ...editingPerson, ...v }); setEditingPerson(null); }}
         />

@@ -65,6 +65,8 @@ export interface Person {
   sortOrder: number;
   /** Free-text team name, independent of the role/pool hierarchy. */
   team: string;
+  /** Free-text studio/location, independent of team. */
+  site: string;
   /** Baseline poolId before structure overrides — set by applyStructureOverrides, not persisted on this row. */
   importPoolId?: string | null;
   /** Baseline (import-matched) name before a rename override — set by applyStructureOverrides, not persisted on this row. */

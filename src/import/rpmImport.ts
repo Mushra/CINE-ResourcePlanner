@@ -29,12 +29,18 @@ export interface NormalizedPool {
 export interface NormalizedPerson {
   name: string;
   poolName: string;
+  /** Free-text team, when the source provides one (defaults to '' if absent). */
+  team?: string;
+  /** Free-text studio/location, when the source provides one (defaults to '' if absent). */
+  site?: string;
 }
 
 export interface NormalizedProject {
   name: string;
   startDate: string | null;
   endDate: string | null;
+  /** Marks a bench/availability placeholder project (defaults to false if absent). */
+  isDispo?: boolean;
 }
 
 export interface NormalizedAssignmentGroup {

@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS people (
   active       INTEGER NOT NULL DEFAULT 1,
   notes        TEXT NOT NULL DEFAULT '',
   sort_order   INTEGER NOT NULL DEFAULT 0,
-  team         TEXT NOT NULL DEFAULT ''
+  team         TEXT NOT NULL DEFAULT '',
+  site         TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS pool_capacity_overrides (

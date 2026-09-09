@@ -206,6 +206,17 @@ export class PlanningEngine {
     return round2(total);
   }
 
+  /** Like getPersonAssigned, but a person parked on an isDispo (bench) project doesn't count as assigned — for "who's actually free" views. */
+  getPersonAssignedExcludingDispo(personId: string, period: Period): number {
+    let total = 0;
+    for (const pa of this.data.personAssignments) {
+      if (pa.personId !== personId || pa.scenarioId !== this.scenarioId) continue;
+      if (this.projectsById.get(pa.projectId)?.isDispo) continue;
+      total += this.personAllocationAt(pa.id, period);
+    }
+    return round2(total);
+  }
+
   /** Required vs. assigned FTE per pool for one project at one period. */
   getProjectStaffing(projectId: string, period: Period): ProjectStaffing {
     const pools = new Map<string, ProjectStaffingLine>();

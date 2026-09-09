@@ -19,14 +19,15 @@ export function ImportDrawer({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Drawer title="Import RPM export" onClose={onClose} width={460}>
+    <Drawer title="Import export" onClose={onClose} width={460}>
       {report ? (
         <ImportReportView report={report} onClose={onClose} />
       ) : (
         <>
           <p className="drawer-hint">
-            Import an RPM production export (.xlsx). Assigned rows become named people, grouped
-            into disciplines and roles — requirements are left empty for you to set.
+            Import an RPM production export or a Staffing consolidated workbook (.xlsx) — the
+            format is detected automatically. Assigned rows become named people, grouped into
+            disciplines and roles — requirements are left empty for you to set.
           </p>
 
           <div className="import-mode-options">

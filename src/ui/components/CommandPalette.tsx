@@ -19,7 +19,8 @@ export function CommandPalette() {
   const setOpen = useUiStore((s) => s.setCommandPaletteOpen);
   const navigate = useUiStore((s) => s.navigate);
   const openProject = useUiStore((s) => s.openProject);
-  const setTeamDisciplineFilter = useUiStore((s) => s.setTeamDisciplineFilter);
+  const globalFilter = useUiStore((s) => s.globalFilter);
+  const setGlobalFilter = useUiStore((s) => s.setGlobalFilter);
   const setCollapsed = useUiStore((s) => s.setCollapsed);
 
   const projects = useStore((s) => s.data.projects);
@@ -66,7 +67,7 @@ export function CommandPalette() {
         sublabel: 'Discipline',
         onSelect: () => {
           navigate('team');
-          setTeamDisciplineFilter([discipline.id]);
+          setGlobalFilter({ ...globalFilter, disciplineIds: [discipline.id] });
           setCollapsed(`team:disc:${discipline.id}`, false);
         },
       });
@@ -84,7 +85,7 @@ export function CommandPalette() {
         sublabel: discipline ? `Role — ${discipline.name}` : 'Role — Unassigned',
         onSelect: () => {
           navigate('team');
-          setTeamDisciplineFilter([disciplineId]);
+          setGlobalFilter({ ...globalFilter, disciplineIds: [disciplineId] });
           setCollapsed(`team:disc:${disciplineId}`, false);
           setCollapsed(`team:pool:${pool.id}`, false);
         },
@@ -102,7 +103,7 @@ export function CommandPalette() {
         sublabel: pool ? `Person — ${pool.name}` : 'Person — Unassigned',
         onSelect: () => {
           navigate('team');
-          setTeamDisciplineFilter([disciplineId]);
+          setGlobalFilter({ ...globalFilter, disciplineIds: [disciplineId] });
           setCollapsed(`team:disc:${disciplineId}`, false);
           if (pool) setCollapsed(`team:pool:${pool.id}`, false);
         },
@@ -110,7 +111,7 @@ export function CommandPalette() {
     }
 
     return list;
-  }, [projects, disciplines, pools, people, poolById, disciplineById, openProject, navigate, setTeamDisciplineFilter, setCollapsed]);
+  }, [projects, disciplines, pools, people, poolById, disciplineById, openProject, navigate, globalFilter, setGlobalFilter, setCollapsed]);
 
   if (!open) return null;
 

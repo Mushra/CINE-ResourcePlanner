@@ -11,20 +11,25 @@ export interface PersonFormValue {
   active: boolean;
   notes: string;
   team: string;
+  site: string;
 }
 
 function fromPerson(person?: Person, defaultPoolId?: string | null): PersonFormValue {
-  if (!person) return { name: '', poolId: defaultPoolId ?? null, capacityFte: 1, active: true, notes: '', team: '' };
-  return { name: person.name, poolId: person.poolId, capacityFte: person.capacityFte, active: person.active, notes: person.notes, team: person.team };
+  if (!person) return { name: '', poolId: defaultPoolId ?? null, capacityFte: 1, active: true, notes: '', team: '', site: '' };
+  return {
+    name: person.name, poolId: person.poolId, capacityFte: person.capacityFte, active: person.active,
+    notes: person.notes, team: person.team, site: person.site,
+  };
 }
 
 export function PersonFormDrawer({
-  person, pools, defaultPoolId, teamOptions, onClose, onSave,
+  person, pools, defaultPoolId, teamOptions, siteOptions, onClose, onSave,
 }: {
   person?: Person;
   pools: ResourcePool[];
   defaultPoolId?: string | null;
   teamOptions?: string[];
+  siteOptions?: string[];
   onClose: () => void;
   onSave: (value: PersonFormValue) => void;
 }) {
@@ -72,6 +77,16 @@ export function PersonFormDrawer({
         {teamOptions && teamOptions.length > 0 && (
           <datalist id="team-options">
             {teamOptions.map((t) => <option key={t} value={t} />)}
+          </datalist>
+        )}
+      </div>
+
+      <div className="field">
+        <label htmlFor="person-site">Site</label>
+        <input id="person-site" list="site-options" value={value.site} onChange={(e) => set('site', e.target.value)} placeholder="Studio / location" />
+        {siteOptions && siteOptions.length > 0 && (
+          <datalist id="site-options">
+            {siteOptions.map((s) => <option key={s} value={s} />)}
           </datalist>
         )}
       </div>

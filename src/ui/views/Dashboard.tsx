@@ -1,8 +1,8 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
 import { getSanityChecks, type SanityCheck } from '../../engine/validation';
-import { utilizationStatus } from '../../engine/forecast';
+import { getForecastWindowPeriods, utilizationStatus } from '../../engine/forecast';
 import { round2 } from '../../engine/planning';
 import { todayPeriod, formatPeriodLabel } from '../../domain/periods';
 import { Icon } from '../components/Icon';
@@ -10,16 +10,29 @@ import { StatusPill } from '../components/StatusPill';
 import { EmptyState } from '../components/EmptyState';
 import { Button } from '../components/Button';
 import { Collapsible } from '../components/Collapsible';
+import { GlobalFilterBar } from '../components/GlobalFilterBar';
+import { useFilteredEngine } from '../hooks/useFilteredEngine';
+import type { ImportReport } from '../../import/rpmImport';
 
 export function Dashboard() {
-  const engine = useStore((s) => s.engine);
+  const { engine, options } = useFilteredEngine();
   const projects = useStore((s) => s.data.projects);
+  const lastImportReport = useStore((s) => s.lastImportReport);
   const navigate = useUiStore((s) => s.navigate);
   const openProject = useUiStore((s) => s.openProject);
   const newDatabase = useStore((s) => s.newDatabase);
+  const horizonMonths = useUiStore((s) => s.horizonMonths);
 
   const checks = useMemo(() => getSanityChecks(engine), [engine]);
   const period = todayPeriod();
+  const trendPeriods = useMemo(() => getForecastWindowPeriods(engine, horizonMonths), [engine, horizonMonths]);
+  const trend = useMemo(() => trendPeriods.map((p) => {
+    const pools = engine.pools();
+    const capacity = pools.reduce((sum, pool) => sum + engine.getCapacity(pool.id, p), 0);
+    const required = pools.reduce((sum, pool) => sum + engine.getRequiredCapacity(pool.id, p), 0);
+    const pct = capacity > 0 ? round2((required / capacity) * 100) : required > 0 ? 999 : 0;
+    return { period: p, pct, status: utilizationStatus(pct) };
+  }), [engine, trendPeriods]);
 
   if (projects.length === 0) {
     return (
@@ -57,6 +70,11 @@ export function Dashboard() {
 
   return (
     <div className="dashboard">
+      <div className="dashboard-topbar">
+        <GlobalFilterBar options={options} />
+        {lastImportReport && lastImportReport.warnings.length > 0 && <ImportQualityBadge report={lastImportReport} />}
+      </div>
+
       <div className="kpi-row">
         <KpiTile label="Active projects" value={String(activeProjects.length)} icon="projects" />
         <KpiTile label="Total capacity" value={`${round2(totalCapacity)} FTE`} icon="team" sub={formatPeriodLabel(period)} />
@@ -86,6 +104,25 @@ export function Dashboard() {
           tone={unstaffedPeople.length > 0 ? 'warning' : 'neutral'}
         />
       </div>
+
+      <section className="card panel trend-panel">
+        <div className="panel-header">
+          <h2>Occupation dans le temps</h2>
+          <span className="panel-sub">Required demand as a share of total capacity, per month</span>
+        </div>
+        <div className="utilization-list">
+          {trend.map((t) => (
+            <div key={t.period} className="utilization-row">
+              <div className="utilization-label">{formatPeriodLabel(t.period, { withYear: false })}</div>
+              <div className="utilization-track">
+                <div className={`utilization-fill fill-${t.status}`} style={{ width: `${Math.min(100, t.pct)}%` }} />
+                {t.pct > 100 && <div className="utilization-overflow" style={{ left: '100%' }} />}
+              </div>
+              <div className="utilization-pct">{t.pct}%</div>
+            </div>
+          ))}
+        </div>
+      </section>
 
       <div className="dashboard-grid">
         <section className="card panel">
@@ -160,6 +197,36 @@ export function Dashboard() {
           )}
         </section>
       </div>
+    </div>
+  );
+}
+
+function ImportQualityBadge({ report }: { report: ImportReport }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [open]);
+
+  return (
+    <div className="quality-badge-wrap" ref={ref}>
+      <button type="button" className="quality-badge" onClick={() => setOpen((v) => !v)}>
+        <Icon name="warning" size={13} />
+        {report.warnings.length} signal{report.warnings.length === 1 ? '' : 's'} to review since last import
+      </button>
+      {open && (
+        <div className="quality-badge-popover">
+          <ul className="import-warnings">
+            {report.warnings.map((warning, i) => <li key={i}>{warning}</li>)}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

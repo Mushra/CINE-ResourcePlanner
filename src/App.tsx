@@ -9,6 +9,7 @@ import { Projects } from './ui/views/Projects';
 import { ProjectDetail } from './ui/views/ProjectDetail';
 import { Team } from './ui/views/Team';
 import { Forecast } from './ui/views/Forecast';
+import { Availability } from './ui/views/Availability';
 import { Structure } from './ui/views/Structure';
 
 function App() {
@@ -49,6 +50,7 @@ function App() {
         {view === 'project-detail' && selectedProjectId && <ProjectDetail projectId={selectedProjectId} />}
         {view === 'team' && <Team />}
         {view === 'forecast' && <Forecast />}
+        {view === 'availability' && <Availability />}
         {view === 'structure' && <Structure />}
       </AppShell>
       <Toaster />

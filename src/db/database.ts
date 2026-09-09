@@ -12,7 +12,7 @@ async function getSqlJs(): Promise<SqlJsStatic> {
   return sqlJsModule;
 }
 
-export const SCHEMA_VERSION = '4';
+export const SCHEMA_VERSION = '5';
 
 /** Thin wrapper around a sql.js Database: schema bootstrap, typed helpers, byte export. */
 export class PlannerDatabase {
@@ -50,6 +50,7 @@ export class PlannerDatabase {
     if (from === null) return;
     if (Number(from) < 2) this.migrateV1toV2();
     if (Number(from) < 4) this.migrateV3toV4();
+    if (Number(from) < 5) this.migrateV4toV5();
   }
 
   /**
@@ -96,6 +97,14 @@ export class PlannerDatabase {
     const projectColumns = this.query<{ name: string }>('PRAGMA table_info(projects)');
     if (!projectColumns.some((c) => c.name === 'is_dispo')) {
       this.db.exec('ALTER TABLE projects ADD COLUMN is_dispo INTEGER NOT NULL DEFAULT 0');
+    }
+  }
+
+  /** v5 adds Person.site (free-text studio/location, independent of the team field). */
+  private migrateV4toV5(): void {
+    const peopleColumns = this.query<{ name: string }>('PRAGMA table_info(people)');
+    if (!peopleColumns.some((c) => c.name === 'site')) {
+      this.db.exec("ALTER TABLE people ADD COLUMN site TEXT NOT NULL DEFAULT ''");
     }
   }
 
