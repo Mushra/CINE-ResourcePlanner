@@ -5,6 +5,7 @@ import { getSanityChecks } from '../../engine/validation';
 import { periodRange, periodFromISODate } from '../../domain/periods';
 import { EmptyState } from '../components/EmptyState';
 import { Button } from '../components/Button';
+import { ConfirmButton } from '../components/ConfirmButton';
 import { StatusPill } from '../components/StatusPill';
 import { Icon } from '../components/Icon';
 import { ProjectFormDrawer, type ProjectFormValue } from '../components/ProjectFormDrawer';
@@ -19,6 +20,7 @@ export function Projects() {
   const projects = useStore((s) => s.data.projects);
   const engine = useStore((s) => s.engine);
   const createProject = useStore((s) => s.createProject);
+  const feedAllRequirementsFromAssignments = useStore((s) => s.feedAllRequirementsFromAssignments);
   const openProject = useUiStore((s) => s.openProject);
   const [showNew, setShowNew] = useState(false);
 
@@ -41,7 +43,21 @@ export function Projects() {
           <h1>Projects</h1>
           <p className="view-sub">{projects.length} project{projects.length === 1 ? '' : 's'} in the portfolio</p>
         </div>
-        <Button variant="primary" icon="plus" onClick={() => setShowNew(true)}>New project</Button>
+        <div className="view-header-actions">
+          <ConfirmButton
+            label="Fill empty from assignments"
+            confirmLabel="Fill empty everywhere"
+            icon="download"
+            onConfirm={() => feedAllRequirementsFromAssignments('fill-empty')}
+          />
+          <ConfirmButton
+            label="= assignments"
+            confirmLabel="Overwrite everywhere"
+            icon="download"
+            onConfirm={() => feedAllRequirementsFromAssignments('overwrite')}
+          />
+          <Button variant="primary" icon="plus" onClick={() => setShowNew(true)}>New project</Button>
+        </div>
       </div>
 
       {projects.length === 0 ? (

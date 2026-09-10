@@ -71,3 +71,26 @@ export function isoDateForX(x: number, window: Period[], pxPerDay: number): stri
 export function totalWindowWidth(window: Period[], pxPerDay: number): number {
   return window.reduce((sum, p) => sum + monthWidthPx(p, pxPerDay), 0);
 }
+
+let measureCanvas: HTMLCanvasElement | null = null;
+
+/** Pixel width of `text` rendered in `font` (CSS font shorthand), via an offscreen canvas. */
+export function measureTextWidth(text: string, font: string): number {
+  if (!measureCanvas) measureCanvas = document.createElement('canvas');
+  const ctx = measureCanvas.getContext('2d');
+  if (!ctx) return text.length * 7;
+  ctx.font = font;
+  return ctx.measureText(text).width;
+}
+
+/** Widest `text` (each with its own `font` and `extra` allowance for icons/indent/padding), clamped to [min, max]. */
+export function timelineLabelColumnWidth(
+  entries: { text: string; font: string; extra: number }[],
+  { min, max }: { min: number; max: number },
+): number {
+  let widest = min;
+  for (const entry of entries) {
+    widest = Math.max(widest, measureTextWidth(entry.text, entry.font) + entry.extra);
+  }
+  return Math.min(max, Math.ceil(widest));
+}

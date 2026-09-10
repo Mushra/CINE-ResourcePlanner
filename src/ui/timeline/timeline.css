@@ -98,9 +98,10 @@
   position: sticky;
   left: 0;
   z-index: 2;
-  width: 200px;
-  min-width: 200px;
-  max-width: 200px;
+  width: var(--tl-label-w, 200px);
+  min-width: var(--tl-label-w, 200px);
+  max-width: var(--tl-label-w, 200px);
+  flex-shrink: 0;
   box-sizing: border-box;
   background: var(--surface-0);
   border-right: 1px solid var(--border);
@@ -289,3 +290,21 @@
 .bar-handle-left { border-radius: 5px 0 0 5px; }
 .bar-handle-right { border-radius: 0 5px 5px 0; }
 .bar-handle:hover { background: rgba(255,255,255,0.35); }
+
+.bar-count {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 13px;
+  height: 13px;
+  padding: 0 2px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.28);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+  pointer-events: none;
+  z-index: 1;
+}

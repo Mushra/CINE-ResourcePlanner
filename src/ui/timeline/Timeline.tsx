@@ -1,7 +1,7 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useMemo, useState, type CSSProperties } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
-import { buildTimelineWindow, monthWidthPx, totalWindowWidth, xForIsoDate } from './timelineMath';
+import { buildTimelineWindow, monthWidthPx, timelineLabelColumnWidth, totalWindowWidth, xForIsoDate } from './timelineMath';
 import { formatPeriodLabel, todayPeriod } from '../../domain/periods';
 import { ProjectBar } from './ProjectBar';
 import { AllocationCell, formatNum, hexToRgba } from './AllocationCell';
@@ -155,6 +155,41 @@ export function Timeline() {
     for (const discId of discIdsInProject) visibleCollapseKeys.push(`timeline:disc:${project.id}:${discId}`);
   }
 
+  const bodyFontFamily = typeof document !== 'undefined' ? getComputedStyle(document.body).fontFamily : 'system-ui, sans-serif';
+  const font = (weight: number, size: number) => `${weight} ${size}px ${bodyFontFamily}`;
+  const labelEntries: { text: string; font: string; extra: number }[] = [
+    { text: 'Project / Emploi repère', font: font(600, 11), extra: 30 },
+  ];
+  for (const project of scheduled) {
+    labelEntries.push({ text: project.name, font: font(600, 12.5), extra: 110 });
+    const allPoolIds = engine.projectPoolIds(project.id);
+    const discIdsInProject = new Set(allPoolIds.map((id) => poolById.get(id)?.disciplineId ?? UNASSIGNED_DISCIPLINE_ID));
+    let anyGroup = false;
+    for (const discId of discIdsInProject) {
+      const specificPoolIds = allPoolIds.filter((id) => {
+        const pool = poolById.get(id);
+        if (!pool || isGenericPoolName(pool.name)) return false;
+        return (pool.disciplineId ?? UNASSIGNED_DISCIPLINE_ID) === discId && activePoolIds.has(id);
+      });
+      if (specificPoolIds.length === 0) continue;
+      anyGroup = true;
+      labelEntries.push({ text: engine.discipline(discId)?.name ?? 'Unassigned', font: font(600, 12), extra: 70 });
+      for (const poolId of specificPoolIds) {
+        labelEntries.push({ text: poolById.get(poolId)!.name, font: font(400, 11.5), extra: 97 });
+        const names = new Set<string>();
+        for (const period of window) {
+          for (const line of engine.getProjectPersonStaffing(project.id, period).lines) {
+            if (line.poolId === poolId) names.add(line.personName);
+          }
+        }
+        if (names.size === 0) labelEntries.push({ text: 'No one assigned yet', font: font(400, 11), extra: 88 });
+        else for (const name of names) labelEntries.push({ text: name, font: font(400, 11), extra: 88 });
+      }
+    }
+    if (!anyGroup) labelEntries.push({ text: 'No disciplines assigned', font: font(400, 11.5), extra: 56 });
+  }
+  const labelWidth = timelineLabelColumnWidth(labelEntries, { min: 200, max: 440 });
+
   if (projects.length === 0) {
     return (
       <EmptyState
@@ -205,8 +240,8 @@ export function Timeline() {
       )}
 
       <div className="tl-scroll">
-        <div className="tl-scroll-inner" style={{ width: 200 + totalWidth }}>
-          <div className="tl-today-line" style={{ left: 200 + todayX }} title="Today" />
+        <div className="tl-scroll-inner" style={{ width: labelWidth + totalWidth, '--tl-label-w': `${labelWidth}px` } as CSSProperties}>
+          <div className="tl-today-line" style={{ left: labelWidth + todayX }} title="Today" />
 
           <div className="tl-header-row">
             <div className="tl-label-cell tl-corner">Project / Emploi repère</div>
@@ -240,6 +275,7 @@ export function Timeline() {
                 .sort((a, b) => (disciplineOrder.get(a.discId) ?? Infinity) - (disciplineOrder.get(b.discId) ?? Infinity));
               const collapseKey = `timeline:proj:${project.id}`;
               const projectCollapsed = collapsed[collapseKey] === true;
+              const headcountByPeriod = new Map(window.map((period) => [period, engine.getProjectAssignedHeadcount(project.id, period)] as const));
               return (
                 <div key={project.id} className="tl-project-group">
                   <div className="tl-project-header-row">
@@ -262,6 +298,7 @@ export function Timeline() {
                         pxPerDay={pxPerDay}
                         onClick={() => openProject(project.id)}
                         onDatesChange={(start, end) => updateProject({ ...project, startDate: start, endDate: end })}
+                        headcountByPeriod={headcountByPeriod}
                       />
                     </div>
                   </div>

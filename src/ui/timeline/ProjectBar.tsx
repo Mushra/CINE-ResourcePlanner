@@ -1,18 +1,40 @@
 import { useRef, useState } from 'react';
 import type { Project } from '../../domain/types';
 import { isoAddDays, isoDiffDays, xForIsoDate } from './timelineMath';
+import { periodFromISODate } from '../../domain/periods';
 import type { Period } from '../../domain/types';
 
 type DragMode = 'move' | 'resize-start' | 'resize-end';
 
+/** Change points only — a marker per period where the headcount differs from the previous period (0 before the project starts). */
+function headcountMarkers(
+  window: Period[], pxPerDay: number, barLeft: number, startDate: string, endDate: string, headcountByPeriod: Map<Period, number>,
+): { x: number; count: number }[] {
+  const startPeriod = periodFromISODate(startDate);
+  const endPeriod = periodFromISODate(endDate);
+  if (!startPeriod || !endPeriod) return [];
+  const markers: { x: number; count: number }[] = [];
+  let prev = 0;
+  for (const period of window) {
+    if (period < startPeriod || period > endPeriod) continue;
+    const count = headcountByPeriod.get(period) ?? 0;
+    if (count !== prev) {
+      markers.push({ x: Math.max(2, xForIsoDate(`${period}-01`, window, pxPerDay) - barLeft), count });
+      prev = count;
+    }
+  }
+  return markers;
+}
+
 export function ProjectBar({
-  project, window, pxPerDay, onDatesChange, onClick,
+  project, window, pxPerDay, onDatesChange, onClick, headcountByPeriod,
 }: {
   project: Project;
   window: Period[];
   pxPerDay: number;
   onDatesChange: (startDate: string, endDate: string) => void;
   onClick: () => void;
+  headcountByPeriod: Map<Period, number>;
 }) {
   const [preview, setPreview] = useState<{ start: string; end: string } | null>(null);
   const dragRef = useRef<{ mode: DragMode; startX: number; origStart: string; origEnd: string } | null>(null);
@@ -25,6 +47,7 @@ export function ProjectBar({
   const left = xForIsoDate(start, window, pxPerDay);
   const right = xForIsoDate(isoAddDays(end, 1), window, pxPerDay);
   const width = Math.max(pxPerDay * 3, right - left);
+  const markers = preview ? [] : headcountMarkers(window, pxPerDay, left, project.startDate, project.endDate, headcountByPeriod);
 
   function beginDrag(mode: DragMode, e: React.PointerEvent): void {
     e.preventDefault();
@@ -90,6 +113,9 @@ export function ProjectBar({
         {project.name}
       </button>
       <span className="bar-handle bar-handle-right" onPointerDown={(e) => beginDrag('resize-end', e)} />
+      {markers.map((m) => (
+        <span key={m.x} className="bar-count" style={{ left: m.x }} title={`${m.count} assigned`}>{m.count}</span>
+      ))}
     </div>
   );
 }

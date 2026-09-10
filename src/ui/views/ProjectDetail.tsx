@@ -61,6 +61,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const setPersonAssignmentRange = useStore((s) => s.setPersonAssignmentRange);
   const clearRequirementPool = useStore((s) => s.clearRequirementPool);
   const clearPersonAssignment = useStore((s) => s.clearPersonAssignment);
+  const feedRequirementsFromAssignments = useStore((s) => s.feedRequirementsFromAssignments);
   const backToProjects = useUiStore((s) => s.backToProjects);
   const collapsed = useUiStore((s) => s.collapsed);
   const toggleCollapse = useUiStore((s) => s.toggleCollapse);
@@ -195,6 +196,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <h2>Besoins</h2>
           <span className="panel-sub">What the project needs, by role and month</span>
           <div className="panel-header-toggles">
+            <Button variant="ghost" size="sm" onClick={() => feedRequirementsFromAssignments(project.id, 'fill-empty')}>Fill empty from assignments</Button>
+            <ConfirmButton
+              label="= assignments"
+              confirmLabel="Overwrite"
+              icon="download"
+              onConfirm={() => feedRequirementsFromAssignments(project.id, 'overwrite')}
+            />
             {besoinsMode === 'table' && (
               <div className="segmented segmented-sm">
                 <button type="button" className={besoinsGranularity === 'month' ? 'active' : ''} onClick={() => setBesoinsGranularity('month')}>Month</button>
