@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS person_assignment_allocations (
 -- normalized name re-applies automatically after a re-import.
 CREATE TABLE IF NOT EXISTS structure_overrides (
   id         TEXT PRIMARY KEY,
-  kind       TEXT NOT NULL, -- 'person_pool' | 'pool_discipline' | 'pool_person_pool' | '{discipline,pool,person,project}_name'
+  kind       TEXT NOT NULL, -- 'person_pool' | 'pool_discipline' | 'pool_person_pool' | 'person_discipline' | '{discipline,pool,person,project}_name'
   source_key TEXT NOT NULL,
   target_key TEXT NOT NULL,
   UNIQUE (kind, source_key)

@@ -71,6 +71,9 @@ export interface Person {
   importPoolId?: string | null;
   /** Baseline (import-matched) name before a rename override — set by applyStructureOverrides, not persisted on this row. */
   importName?: string;
+  /** Discipline this person is grouped under — their role's discipline, unless a person_discipline
+   * override relocates them. Set by applyStructureOverrides, not persisted on this row. */
+  effectiveDisciplineId?: string | null;
 }
 
 /** Lets a pool's capacity vary over time (e.g. a hire lands in November). */
@@ -120,7 +123,7 @@ export interface PersonAssignmentAllocation {
  * no entity to look up, just a label to show.
  */
 export type StructureOverrideKind =
-  | 'person_pool' | 'pool_discipline' | 'pool_person_pool'
+  | 'person_pool' | 'pool_discipline' | 'pool_person_pool' | 'person_discipline'
   | 'discipline_name' | 'pool_name' | 'person_name' | 'project_name';
 
 /**

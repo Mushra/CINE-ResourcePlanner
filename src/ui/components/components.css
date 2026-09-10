@@ -58,6 +58,7 @@
 .pill-warning { background: var(--status-warning-bg); color: var(--status-warning); border-color: var(--status-warning-border); }
 .pill-info { background: var(--status-info-bg); color: var(--status-info); border-color: var(--status-info-border); }
 .pill-neutral { background: var(--status-healthy-bg); color: var(--status-healthy); border-color: var(--status-healthy-border); }
+.pill-gap-left { margin-left: 8px; }
 
 /* Toaster */
 .toaster {
@@ -250,6 +251,15 @@
   margin: 2px 0 0;
 }
 .field-hint-warning { color: var(--status-warning); }
+.field-hint-reset {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
 .field input, .field select, .field textarea {
   width: 100%;
 }

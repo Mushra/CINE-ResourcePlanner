@@ -17,11 +17,17 @@ function fromPool(pool?: ResourcePool, defaultDisciplineId?: string | null): Poo
 }
 
 export function PoolFormDrawer({
-  pool, disciplines, defaultDisciplineId, onClose, onSave,
+  pool, disciplines, defaultDisciplineId, otherPools, moveRule, onSetMoveRule, onClearMoveRule, onClose, onSave,
 }: {
   pool?: ResourcePool;
   disciplines: Discipline[];
   defaultDisciplineId?: string | null;
+  /** Other roles this role's people could be moved into en masse — only relevant when editing an existing role. */
+  otherPools?: ResourcePool[];
+  /** The active "move this whole role" rule sourced from this role, if any. */
+  moveRule?: { targetPoolId: string | null; targetPoolName: string } | null;
+  onSetMoveRule?: (targetPoolId: string) => void;
+  onClearMoveRule?: () => void;
   onClose: () => void;
   onSave: (value: PoolFormValue) => void;
 }) {
@@ -57,7 +63,8 @@ export function PoolFormDrawer({
           </select>
           {pool && pool.importDisciplineId !== pool.disciplineId && (
             <p className="field-hint field-hint-warning">
-              A remapping override currently controls this role's discipline and takes precedence — changing this field here has no visible effect until you clear that override in the Structure &amp; remapping section of Team.
+              A remapping override is active — this role was imported into a different discipline.{' '}
+              <button type="button" className="field-hint-reset" onClick={() => set('disciplineId', pool.importDisciplineId ?? null)}>Reset to imported discipline</button>
             </p>
           )}
         </div>
@@ -66,6 +73,26 @@ export function PoolFormDrawer({
           <input id="pool-color" type="color" value={value.color} onChange={(e) => set('color', e.target.value)} />
         </div>
       </div>
+
+      {pool && otherPools && otherPools.length > 0 && onSetMoveRule && onClearMoveRule && (
+        <div className="field">
+          <label htmlFor="pool-move-rule">Move everyone in this role to…</label>
+          {moveRule ? (
+            <p className="field-hint">
+              Everyone here is moved to <strong>{moveRule.targetPoolName}</strong>
+              {!moveRule.targetPoolId && <span className="pill pill-warning pill-gap-left">target missing</span>}
+              {' '}
+              <button type="button" className="field-hint-reset" onClick={onClearMoveRule}>Clear</button>
+            </p>
+          ) : (
+            <select id="pool-move-rule" value="" onChange={(e) => { if (e.target.value) onSetMoveRule(e.target.value); }}>
+              <option value="">— No standing rule —</option>
+              {otherPools.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )}
+          <p className="field-hint">A standing rule: everyone currently in this role moves to the target role. A person-level role override still wins over this rule.</p>
+        </div>
+      )}
 
       <div className="drawer-footer" style={{ margin: '4px -20px -18px', width: 'calc(100% + 40px)' }}>
         <Button variant="ghost" onClick={onClose}>Cancel</Button>

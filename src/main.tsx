@@ -11,7 +11,6 @@ import './ui/views/project-detail.css';
 import './ui/views/forecast.css';
 import './ui/views/people.css';
 import './ui/views/team.css';
-import './ui/views/structure.css';
 import './ui/timeline/timeline.css';
 import App from './App.tsx';
 

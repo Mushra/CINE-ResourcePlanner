@@ -135,10 +135,11 @@ export class PlanningEngine {
     return this.pools().filter((p) => (wantsUnassigned ? p.disciplineId === null : p.disciplineId === disciplineId));
   }
 
-  /** People whose role (pool) falls under a discipline, including peopleless-pool edge cases. */
+  /** People grouped under a discipline for display — follows each person's effectiveDisciplineId,
+   * so a person_discipline override relocates them here even though their role stays elsewhere. */
   peopleInDiscipline(disciplineId: string): Person[] {
-    const poolIds = new Set(this.poolsInDiscipline(disciplineId).map((p) => p.id));
-    return this.people().filter((person) => person.poolId !== null && poolIds.has(person.poolId));
+    const wantsUnassigned = disciplineId === UNASSIGNED_DISCIPLINE_ID;
+    return this.people().filter((person) => (wantsUnassigned ? person.effectiveDisciplineId == null : person.effectiveDisciplineId === disciplineId));
   }
 
   /** Capacity of a pool for a given period: sum of active people's FTE, or flat capacityFte if empty. */
@@ -184,6 +185,8 @@ export class PlanningEngine {
     return this.getCapacityGap(poolId, period) < -0.001;
   }
 
+  // Discipline capacity/required/assigned stay pool-based, deliberately not following
+  // person_discipline overrides — capacity belongs to the role, not a relocated person's display group.
   getDisciplineCapacity(disciplineId: string, period: Period): number {
     return round2(this.poolsInDiscipline(disciplineId).reduce((sum, p) => sum + this.getCapacity(p.id, period), 0));
   }
@@ -260,6 +263,16 @@ export class PlanningEngine {
     }
     lines.sort((a, b) => a.personName.localeCompare(b.personName));
     return { projectId, period, lines };
+  }
+
+  /** Distinct people with any FTE on this project at a period — the headcount shown on the Timeline bar. */
+  getProjectAssignedHeadcount(projectId: string, period: Period): number {
+    let count = 0;
+    for (const pa of this.personAssignmentsByProject.get(projectId) ?? []) {
+      if (pa.scenarioId !== this.scenarioId) continue;
+      if (this.personAllocationAt(pa.id, period) > 0.001) count += 1;
+    }
+    return count;
   }
 
   /** Aggregate staffing across a project's whole lifecycle (or requirement/assignment span if TBD). */

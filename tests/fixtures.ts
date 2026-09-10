@@ -9,6 +9,7 @@ import type {
   RequirementAllocation,
   ResourcePool,
   Scenario,
+  StructureOverride,
 } from '../src/domain/types';
 
 export const BASE_SCENARIO: Scenario = { id: 'base', name: 'Current Plan', isBase: true };
@@ -108,5 +109,16 @@ export function planningData(partial: Partial<PlanningData> = {}): PlanningData 
     requirementAllocations: partial.requirementAllocations ?? [],
     personAssignments: partial.personAssignments ?? [],
     personAssignmentAllocations: partial.personAssignmentAllocations ?? [],
+    structureOverrides: partial.structureOverrides ?? [],
+  };
+}
+
+export function structureOverride(overrides: Partial<StructureOverride> = {}): StructureOverride {
+  return {
+    id: nextId('sovr'),
+    kind: 'person_pool',
+    sourceKey: '',
+    targetKey: '',
+    ...overrides,
   };
 }

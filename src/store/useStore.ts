@@ -23,10 +23,14 @@ import { PlanningEngine, round2 } from '../engine/planning';
 import type { Discipline, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
 import { emptyPlanningData } from '../domain/types';
 import { applyStructureOverrides } from '../domain/overrides';
-import { normalizeKey, genericPoolName } from '../domain/identity';
+import { normalizeKey, genericPoolName, isGenericPoolName } from '../domain/identity';
 import { formatPeriodLabel } from '../domain/periods';
 
 export type ToastKind = 'success' | 'error' | 'info';
+
+/** 'overwrite' sets every specific role/month's requirement to the currently assigned FTE (including down to 0);
+ * 'fill-empty' only sets requirement where none is set yet, leaving existing requirements untouched. */
+export type FeedRequirementsMode = 'overwrite' | 'fill-empty';
 
 export interface Toast {
   id: string;
@@ -90,11 +94,15 @@ interface StoreState {
   setPersonAssignmentRange: (personId: string, projectId: string, periods: Period[], fte: number) => void;
   clearRequirementPool: (projectId: string, poolId: string) => void;
   clearPersonAssignment: (personId: string, projectId: string) => void;
+  feedRequirementsFromAssignments: (projectId: string, mode: FeedRequirementsMode) => void;
+  feedAllRequirementsFromAssignments: (mode: FeedRequirementsMode) => void;
 
   setPoolDiscipline: (poolName: string, disciplineName: string) => void;
   setPersonPool: (personName: string, poolName: string) => void;
   setPoolPersonPool: (sourcePoolName: string, targetPoolName: string) => void;
+  setPersonDiscipline: (personName: string, disciplineName: string) => void;
   clearOverride: (overrideId: string) => void;
+  clearOverrideByKey: (kind: StructureOverrideKind, sourceKey: string) => void;
 }
 
 function nextToastId(): string {
@@ -149,6 +157,26 @@ export const useStore = create<StoreState>((set, get) => {
       repoDeleteStructureOverrideByKey(db, kind, sourceKey);
     }
     return frozenName;
+  }
+
+  /**
+   * Copies current assignment FTE onto requirement FTE for a project's specific roles (never the
+   * discipline-level generic pools, so headcount minima aren't clobbered by a per-role sync).
+   * 'overwrite' mirrors assigned exactly, including down to 0; 'fill-empty' only touches role/months
+   * with no requirement set yet. Returns the number of role/month cells changed. Does not persist.
+   */
+  function feedProjectRequirements(db: PlannerDatabase, engine: PlanningEngine, projectId: string, mode: FeedRequirementsMode): number {
+    let changed = 0;
+    for (const period of engine.projectActivePeriods(projectId)) {
+      for (const line of engine.getProjectStaffing(projectId, period).lines) {
+        if (isGenericPoolName(line.poolName)) continue;
+        if (mode === 'fill-empty' ? line.required > 0.001 : Math.abs(line.required - line.assigned) < 0.001) continue;
+        const req = getOrCreateRequirement(db, projectId, line.poolId, BASE_SCENARIO_ID);
+        repoSetRequirementAllocation(db, req.id, period, line.assigned);
+        changed += 1;
+      }
+    }
+    return changed;
   }
 
   /** After a fresh assignment write, warns if the person is now over-allocated in any touched period (across all their projects, dispo included). */
@@ -483,6 +511,26 @@ export const useStore = create<StoreState>((set, get) => {
       if (asn) repoDeletePersonAssignment(db, asn.id);
       persist();
     },
+    feedRequirementsFromAssignments: (projectId, mode) => {
+      const db = get().db!;
+      const project = get().data.projects.find((p) => p.id === projectId);
+      const changed = feedProjectRequirements(db, get().engine, projectId, mode);
+      persist();
+      get().toast(changed > 0 ? 'success' : 'info', changed > 0
+        ? `${project?.name ?? 'Project'}: ${changed} requirement${changed === 1 ? '' : 's'} updated from assignments`
+        : `${project?.name ?? 'Project'}: requirements already match assignments`);
+    },
+    feedAllRequirementsFromAssignments: (mode) => {
+      const db = get().db!;
+      const engine = get().engine;
+      const projects = get().data.projects;
+      let changed = 0;
+      for (const project of projects) changed += feedProjectRequirements(db, engine, project.id, mode);
+      persist();
+      get().toast(changed > 0 ? 'success' : 'info', changed > 0
+        ? `${changed} requirement${changed === 1 ? '' : 's'} updated from assignments across ${projects.length} project${projects.length === 1 ? '' : 's'}`
+        : 'Requirements already match assignments everywhere');
+    },
 
     setPoolDiscipline: (poolName, disciplineName) => {
       const db = get().db!;
@@ -499,9 +547,19 @@ export const useStore = create<StoreState>((set, get) => {
       repoUpsertStructureOverride(db, 'pool_person_pool', normalizeKey(sourcePoolName), normalizeKey(targetPoolName));
       persist();
     },
+    setPersonDiscipline: (personName, disciplineName) => {
+      const db = get().db!;
+      repoUpsertStructureOverride(db, 'person_discipline', normalizeKey(personName), normalizeKey(disciplineName));
+      persist();
+    },
     clearOverride: (overrideId) => {
       const db = get().db!;
       repoDeleteStructureOverride(db, overrideId);
+      persist();
+    },
+    clearOverrideByKey: (kind, sourceKey) => {
+      const db = get().db!;
+      repoDeleteStructureOverrideByKey(db, kind, sourceKey);
       persist();
     },
   };

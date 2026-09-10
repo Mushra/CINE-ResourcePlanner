@@ -2,11 +2,15 @@ import { useState } from 'react';
 import { Drawer } from './Drawer';
 import { Button } from './Button';
 import { NumberField } from './NumberField';
-import type { Person, ResourcePool } from '../../domain/types';
+import type { Discipline, Person, ResourcePool } from '../../domain/types';
+
+const USE_ROLE_DISCIPLINE = '__use_role__';
 
 export interface PersonFormValue {
   name: string;
   poolId: string | null;
+  /** Effective discipline override; null means "use the role's discipline" (no override). */
+  disciplineId: string | null;
   capacityFte: number;
   active: boolean;
   notes: string;
@@ -14,26 +18,35 @@ export interface PersonFormValue {
   site: string;
 }
 
-function fromPerson(person?: Person, defaultPoolId?: string | null): PersonFormValue {
-  if (!person) return { name: '', poolId: defaultPoolId ?? null, capacityFte: 1, active: true, notes: '', team: '', site: '' };
+function fromPerson(person: Person | undefined, pools: ResourcePool[], defaultPoolId?: string | null): PersonFormValue {
+  if (!person) return { name: '', poolId: defaultPoolId ?? null, disciplineId: null, capacityFte: 1, active: true, notes: '', team: '', site: '' };
+  const nativeDisciplineId = pools.find((p) => p.id === person.poolId)?.disciplineId ?? null;
+  const effectiveDisciplineId = person.effectiveDisciplineId ?? null;
   return {
-    name: person.name, poolId: person.poolId, capacityFte: person.capacityFte, active: person.active,
-    notes: person.notes, team: person.team, site: person.site,
+    name: person.name,
+    poolId: person.poolId,
+    disciplineId: effectiveDisciplineId !== nativeDisciplineId ? effectiveDisciplineId : null,
+    capacityFte: person.capacityFte,
+    active: person.active,
+    notes: person.notes,
+    team: person.team,
+    site: person.site,
   };
 }
 
 export function PersonFormDrawer({
-  person, pools, defaultPoolId, teamOptions, siteOptions, onClose, onSave,
+  person, pools, disciplines, defaultPoolId, teamOptions, siteOptions, onClose, onSave,
 }: {
   person?: Person;
   pools: ResourcePool[];
+  disciplines: Discipline[];
   defaultPoolId?: string | null;
   teamOptions?: string[];
   siteOptions?: string[];
   onClose: () => void;
   onSave: (value: PersonFormValue) => void;
 }) {
-  const [value, setValue] = useState<PersonFormValue>(() => fromPerson(person, defaultPoolId));
+  const [value, setValue] = useState<PersonFormValue>(() => fromPerson(person, pools, defaultPoolId));
   const [initialSnapshot] = useState(() => JSON.stringify(value));
   const canSave = value.name.trim().length > 0;
   const dirty = JSON.stringify(value) !== initialSnapshot;
@@ -41,6 +54,9 @@ export function PersonFormDrawer({
   function set<K extends keyof PersonFormValue>(key: K, v: PersonFormValue[K]): void {
     setValue((prev) => ({ ...prev, [key]: v }));
   }
+
+  const nativeDisciplineId = pools.find((p) => p.id === value.poolId)?.disciplineId ?? null;
+  const nativeDisciplineName = disciplines.find((d) => d.id === nativeDisciplineId)?.name ?? 'Unassigned';
 
   return (
     <Drawer title={person ? 'Edit person' : 'New person'} onClose={onClose} dirty={dirty}>
@@ -61,7 +77,8 @@ export function PersonFormDrawer({
           </select>
           {person && person.importPoolId !== person.poolId && (
             <p className="field-hint field-hint-warning">
-              A remapping override or role rule currently controls this person's role and takes precedence — changing this field here has no visible effect until you clear it in the Structure &amp; remapping section of Team.
+              A remapping override is active — this person was imported into a different role.{' '}
+              <button type="button" className="field-hint-reset" onClick={() => set('poolId', person.importPoolId ?? null)}>Reset to imported role</button>
             </p>
           )}
         </div>
@@ -69,6 +86,24 @@ export function PersonFormDrawer({
           <label htmlFor="person-capacity">Capacity (FTE)</label>
           <NumberField value={value.capacityFte} onCommit={(v) => set('capacityFte', v)} step={0.1} min={0} />
         </div>
+      </div>
+
+      <div className="field">
+        <label htmlFor="person-discipline">Famille d'emplois</label>
+        <select
+          id="person-discipline"
+          value={value.disciplineId ?? USE_ROLE_DISCIPLINE}
+          onChange={(e) => set('disciplineId', e.target.value === USE_ROLE_DISCIPLINE ? null : e.target.value)}
+        >
+          <option value={USE_ROLE_DISCIPLINE}>— Use role's discipline ({nativeDisciplineName}) —</option>
+          {disciplines.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+        {value.disciplineId !== null && (
+          <p className="field-hint field-hint-warning">
+            Override active — this person keeps their role but is grouped under a different discipline.{' '}
+            <button type="button" className="field-hint-reset" onClick={() => set('disciplineId', null)}>Reset to role's discipline</button>
+          </p>
+        )}
       </div>
 
       <div className="field">

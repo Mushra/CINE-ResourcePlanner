@@ -11,6 +11,10 @@ import { normalizeKey } from './identity';
  *
  * Rename overrides (`*_name` kinds) are resolved last, after the structural remaps above, so those
  * remaps keep matching on the frozen, import-matched name rather than a display rename.
+ *
+ * `person_discipline` is independent of `person_pool`: a person keeps their effective role and is
+ * only regrouped under a different discipline for display (their role's own capacity/staffing stays
+ * with the role's native discipline).
  */
 export function applyStructureOverrides(data: PlanningData, overrides: PlanningData['structureOverrides']): PlanningData {
   const disciplineByKey = new Map(data.disciplines.map((d) => [normalizeKey(d.name), d] as const));
@@ -20,6 +24,7 @@ export function applyStructureOverrides(data: PlanningData, overrides: PlanningD
   const poolDisciplineOverride = new Map<string, string>();
   const personPoolOverride = new Map<string, string>();
   const poolPersonPoolOverride = new Map<string, string>();
+  const personDisciplineOverride = new Map<string, string>();
   const disciplineNameOverride = new Map<string, string>();
   const poolNameOverride = new Map<string, string>();
   const personNameOverride = new Map<string, string>();
@@ -28,6 +33,7 @@ export function applyStructureOverrides(data: PlanningData, overrides: PlanningD
     if (o.kind === 'pool_discipline') poolDisciplineOverride.set(o.sourceKey, o.targetKey);
     else if (o.kind === 'person_pool') personPoolOverride.set(o.sourceKey, o.targetKey);
     else if (o.kind === 'pool_person_pool') poolPersonPoolOverride.set(o.sourceKey, o.targetKey);
+    else if (o.kind === 'person_discipline') personDisciplineOverride.set(o.sourceKey, o.targetKey);
     else if (o.kind === 'discipline_name') disciplineNameOverride.set(o.sourceKey, o.targetKey);
     else if (o.kind === 'pool_name') poolNameOverride.set(o.sourceKey, o.targetKey);
     else if (o.kind === 'person_name') personNameOverride.set(o.sourceKey, o.targetKey);
@@ -49,14 +55,18 @@ export function applyStructureOverrides(data: PlanningData, overrides: PlanningD
     const renamed = poolNameOverride.get(normalizeKey(pool.name));
     return renamed ? { ...pool, importName: pool.name, name: renamed } : { ...pool, importName: pool.name };
   });
+  const poolByIdEffective = new Map(pools.map((p) => [p.id, p] as const));
 
   const peopleStructural: Person[] = data.people.map((person) => {
     const originalPool = person.poolId ? poolByIdOriginal.get(person.poolId) : undefined;
     const targetKey = personPoolOverride.get(normalizeKey(person.name))
       ?? (originalPool ? poolPersonPoolOverride.get(normalizeKey(originalPool.name)) : undefined);
-    if (!targetKey) return { ...person, importPoolId: person.poolId };
-    const targetPool = poolByKey.get(targetKey);
-    return { ...person, importPoolId: person.poolId, poolId: targetPool ? targetPool.id : person.poolId };
+    const effectivePoolId = targetKey ? (poolByKey.get(targetKey)?.id ?? person.poolId) : person.poolId;
+    const nativeDisciplineId = effectivePoolId ? (poolByIdEffective.get(effectivePoolId)?.disciplineId ?? null) : null;
+    const disciplineTargetKey = personDisciplineOverride.get(normalizeKey(person.name));
+    const targetDiscipline = disciplineTargetKey ? disciplineByKey.get(disciplineTargetKey) : undefined;
+    const effectiveDisciplineId = disciplineTargetKey ? (targetDiscipline ? targetDiscipline.id : nativeDisciplineId) : nativeDisciplineId;
+    return { ...person, importPoolId: person.poolId, poolId: effectivePoolId, effectiveDisciplineId };
   });
   const people: Person[] = peopleStructural.map((person) => {
     const renamed = personNameOverride.get(normalizeKey(person.name));
