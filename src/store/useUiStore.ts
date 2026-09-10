@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import type { GlobalFilter } from '../domain/filter';
 import { EMPTY_GLOBAL_FILTER } from '../domain/filter';
 
-export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'forecast' | 'availability' | 'project-detail' | 'structure';
+export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'forecast' | 'people' | 'project-detail';
+export type PeopleMode = 'availability' | 'assignments';
 export type TimelineZoom = 'compact' | 'comfortable' | 'wide';
 export type HorizonMonths = 3 | 6 | 12;
 
@@ -10,6 +11,7 @@ const COLLAPSE_STORAGE_KEY = 'cine-planner-collapse';
 const TIMELINE_FILTERS_KEY = 'cine-planner-timeline-filters';
 const GLOBAL_FILTER_KEY = 'cine-planner-global-filter';
 const BESOINS_PREFS_KEY = 'cine-planner-besoins-prefs';
+const PEOPLE_MODE_KEY = 'cine-planner-people-mode';
 
 function loadCollapsed(): Record<string, boolean> {
   try {
@@ -108,6 +110,14 @@ function saveBesoinsPrefs(prefs: BesoinsPrefs): void {
   localStorage.setItem(BESOINS_PREFS_KEY, JSON.stringify(prefs));
 }
 
+function loadPeopleMode(): PeopleMode {
+  try {
+    return localStorage.getItem(PEOPLE_MODE_KEY) === 'assignments' ? 'assignments' : 'availability';
+  } catch {
+    return 'availability';
+  }
+}
+
 interface UiState {
   view: ViewName;
   selectedProjectId: string | null;
@@ -131,11 +141,15 @@ interface UiState {
   setTimelineSearch: (search: string) => void;
   setTimelinePoolFilter: (poolFilter: string[] | null) => void;
 
-  /** Shared across Dashboard/Forecast/Team/Availability — recomputes the engine, not just row visibility. */
+  /** Shared across Dashboard/Forecast/Team/People — recomputes the engine, not just row visibility. */
   globalFilter: GlobalFilter;
   horizonMonths: HorizonMonths;
   setGlobalFilter: (filter: GlobalFilter) => void;
   setHorizonMonths: (months: HorizonMonths) => void;
+
+  /** Which of the two People sub-views (Availability / Assignments) is showing. */
+  peopleMode: PeopleMode;
+  setPeopleMode: (mode: PeopleMode) => void;
 
   besoinsMode: BesoinsMode;
   besoinsGranularity: BesoinsGranularity;
@@ -207,6 +221,12 @@ export const useUiStore = create<UiState>((set, get) => ({
   setHorizonMonths: (horizonMonths) => {
     saveGlobalFilterPrefs({ filter: get().globalFilter, horizonMonths });
     set({ horizonMonths });
+  },
+
+  peopleMode: loadPeopleMode(),
+  setPeopleMode: (mode) => {
+    localStorage.setItem(PEOPLE_MODE_KEY, mode);
+    set({ peopleMode: mode });
   },
 
   besoinsMode: initialBesoinsPrefs.mode,

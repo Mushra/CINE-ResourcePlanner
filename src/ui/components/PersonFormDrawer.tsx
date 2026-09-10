@@ -61,7 +61,7 @@ export function PersonFormDrawer({
           </select>
           {person && person.importPoolId !== person.poolId && (
             <p className="field-hint field-hint-warning">
-              A Structure override or role-remap rule currently controls this person's role and takes precedence — changing this field here has no visible effect until you clear it in Structure.
+              A remapping override or role rule currently controls this person's role and takes precedence — changing this field here has no visible effect until you clear it in the Structure &amp; remapping section of Team.
             </p>
           )}
         </div>

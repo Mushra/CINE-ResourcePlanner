@@ -1,8 +1,21 @@
-.structure-view {
-  max-width: 1180px;
+.structure-section {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  margin-top: 4px;
+}
+
+.structure-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.structure-section-sub {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 12.5px;
+  max-width: 640px;
 }
 
 .structure-card { padding: 16px; }

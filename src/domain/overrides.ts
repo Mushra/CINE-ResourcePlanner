@@ -4,8 +4,8 @@ import { normalizeKey } from './identity';
 /**
  * Applies name-keyed structure overrides on top of the raw imported/edited data, producing the
  * "effective" disciplines/pools/people/projects the rest of the app sees. Never writes
- * disciplineId/poolId/name back to the baseline — every edit view (Team, Structure, Projects)
- * edits this overlay — so overrides survive a re-import (which only ever matches/merges rows by
+ * disciplineId/poolId/name back to the baseline — every edit view (Team, its Structure & remapping
+ * section, Projects) edits this overlay — so overrides survive a re-import (which only ever matches/merges rows by
  * name, never touches structure_overrides). The pre-override value is preserved on
  * importDisciplineId/importPoolId/importName for "origine" display and for keying further renames.
  *

@@ -303,7 +303,7 @@ export function deletePersonAssignment(db: PlannerDatabase, personAssignmentId: 
 }
 
 // ---------------------------------------------------------------------------
-// Structure overrides — persistent, name-keyed overlay used by the Structure view
+// Structure overrides — persistent, name-keyed overlay used by Team's Structure & remapping section
 // ---------------------------------------------------------------------------
 
 export function upsertStructureOverride(db: PlannerDatabase, kind: StructureOverrideKind, sourceKey: string, targetKey: string): void {

@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS person_assignment_allocations (
   PRIMARY KEY (person_assignment_id, period)
 );
 
--- Persistent, name-keyed overrides layer for the Structure view. Never overwritten by import —
+-- Persistent, name-keyed overrides layer for Team's Structure & remapping section. Never overwritten by import —
 -- the RPM importer merges disciplines/pools/people by name, so an override keyed by the same
 -- normalized name re-applies automatically after a re-import.
 CREATE TABLE IF NOT EXISTS structure_overrides (

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
 import { UNASSIGNED_DISCIPLINE_ID } from '../../engine/planning';
@@ -13,6 +13,7 @@ import { ConfirmButton } from '../components/ConfirmButton';
 import { Collapsible } from '../components/Collapsible';
 import { Icon } from '../components/Icon';
 import { GlobalFilterBar } from '../components/GlobalFilterBar';
+import { StructureSection } from './StructureSection';
 import { DisciplineFormDrawer, type DisciplineFormValue } from '../components/DisciplineFormDrawer';
 import { PoolFormDrawer, type PoolFormValue } from '../components/PoolFormDrawer';
 import { PersonFormDrawer, type PersonFormValue } from '../components/PersonFormDrawer';
@@ -45,8 +46,15 @@ export function Team() {
   const [editingPerson, setEditingPerson] = useState<Person | null>(null);
 
   const setManyCollapsed = useUiStore((s) => s.setManyCollapsed);
+  const setCollapsed = useUiStore((s) => s.setCollapsed);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showBatchEdit, setShowBatchEdit] = useState(false);
+  const structureRef = useRef<HTMLDivElement>(null);
+
+  function jumpToStructure(): void {
+    setCollapsed('team:structure', false);
+    structureRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 
   const period = todayPeriod();
 
@@ -217,9 +225,14 @@ export function Team() {
                           <span className="pool-dot" style={{ background: pool.color }} />
                           <h3>{pool.name}</h3>
                           {poolOverridden && (
-                            <span className="team-override-flag" title="This role's discipline is set by a Structure override, which takes precedence over the Discipline field in Edit role.">
+                            <button
+                              type="button"
+                              className="team-override-flag"
+                              title="This role's discipline is set by a Structure override, which takes precedence over the Discipline field in Edit role. Click to review it below."
+                              onClick={(e) => { e.stopPropagation(); jumpToStructure(); }}
+                            >
                               <Icon name="structure" size={12} />
-                            </span>
+                            </button>
                           )}
                           <span className="team-role-capacity">{engine.getCapacity(pool.id, period)} FTE</span>
                           <div className="team-role-actions" onClick={(e) => e.stopPropagation()}>
@@ -268,9 +281,14 @@ export function Team() {
                                 <td>
                                   {person.name}
                                   {person.importPoolId !== person.poolId && (
-                                    <span className="team-override-flag" title="This person's role is set by a Structure override or role-remap rule, which takes precedence over the Role field in Edit person.">
+                                    <button
+                                      type="button"
+                                      className="team-override-flag"
+                                      title="This person's role is set by a Structure override or role-remap rule, which takes precedence over the Role field in Edit person. Click to review it below."
+                                      onClick={() => jumpToStructure()}
+                                    >
                                       <Icon name="structure" size={11} />
-                                    </span>
+                                    </button>
                                   )}
                                 </td>
                                 <td>{person.team || '—'}</td>
@@ -303,6 +321,17 @@ export function Team() {
         {groups.length === 0 && anyFilterActive && (
           <p className="empty-inline empty-inline-filtered">No discipline matches the current filters.</p>
         )}
+      </div>
+
+      <div ref={structureRef}>
+        <Collapsible
+          scopeKey="team:structure"
+          className="card"
+          defaultOpen={false}
+          summary={<h2>Structure &amp; remapping (advanced)</h2>}
+        >
+          <StructureSection disciplines={disciplines} />
+        </Collapsible>
       </div>
 
       {newDiscipline && (

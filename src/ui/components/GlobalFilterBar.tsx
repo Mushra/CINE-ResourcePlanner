@@ -5,7 +5,7 @@ import { Button } from './Button';
 import type { GlobalFilterOptions } from '../hooks/useFilteredEngine';
 
 /**
- * Shared filter bar for Dashboard/Forecast/Team/Availability: Site/Team/Discipline narrow which
+ * Shared filter bar for Dashboard/Forecast/Team/People: Site/Team/Discipline narrow which
  * people and pools the engine sees (see useFilteredEngine), and the horizon picks how many months
  * ahead the view looks. One filter, every view that renders this bar reacts the same way.
  */

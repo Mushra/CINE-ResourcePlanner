@@ -57,7 +57,7 @@ export function PoolFormDrawer({
           </select>
           {pool && pool.importDisciplineId !== pool.disciplineId && (
             <p className="field-hint field-hint-warning">
-              A Structure override currently controls this role's discipline and takes precedence — changing this field here has no visible effect until you clear that override in Structure.
+              A remapping override currently controls this role's discipline and takes precedence — changing this field here has no visible effect until you clear that override in the Structure &amp; remapping section of Team.
             </p>
           )}
         </div>

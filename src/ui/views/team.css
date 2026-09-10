@@ -48,9 +48,13 @@
   display: inline-flex;
   vertical-align: middle;
   margin-left: 5px;
+  padding: 0;
+  border: none;
+  background: none;
   color: var(--status-info);
-  cursor: help;
+  cursor: pointer;
 }
+.team-override-flag:hover { color: var(--accent); }
 
 .team-people-table td:first-child, .team-people-table th:first-child { width: 22px; }
 .team-select-checkbox { width: auto; margin: 0; }
