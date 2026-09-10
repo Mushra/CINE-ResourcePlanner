@@ -6,6 +6,8 @@ import type {
   PlanningData,
   Period,
   Project,
+  Requirement,
+  RequirementAllocation,
   ResourcePool,
 } from '../domain/types';
 import { periodRange, periodFromISODate, comparePeriod } from '../domain/periods';
@@ -60,7 +62,11 @@ export class PlanningEngine {
   private readonly peopleById: Map<string, Person>;
   private readonly peopleByPool: Map<string, Person[]>;
   private readonly personAssignmentsByProject: Map<string, PersonAssignment[]>;
+  private readonly personAssignmentsByPerson: Map<string, PersonAssignment[]>;
   private readonly personAllocationsByAssignmentId: Map<string, PersonAssignmentAllocation[]>;
+  private readonly requirementsByPool: Map<string, Requirement[]>;
+  private readonly requirementsByProject: Map<string, Requirement[]>;
+  private readonly requirementAllocationsByRequirementId: Map<string, RequirementAllocation[]>;
 
   constructor(data: PlanningData, scenarioId?: string) {
     this.data = data;
@@ -79,10 +85,15 @@ export class PlanningEngine {
     }
 
     this.personAssignmentsByProject = new Map();
+    this.personAssignmentsByPerson = new Map();
     for (const pa of data.personAssignments) {
-      const list = this.personAssignmentsByProject.get(pa.projectId) ?? [];
-      list.push(pa);
-      this.personAssignmentsByProject.set(pa.projectId, list);
+      const projectList = this.personAssignmentsByProject.get(pa.projectId) ?? [];
+      projectList.push(pa);
+      this.personAssignmentsByProject.set(pa.projectId, projectList);
+
+      const personList = this.personAssignmentsByPerson.get(pa.personId) ?? [];
+      personList.push(pa);
+      this.personAssignmentsByPerson.set(pa.personId, personList);
     }
 
     this.personAllocationsByAssignmentId = new Map();
@@ -90,6 +101,25 @@ export class PlanningEngine {
       const list = this.personAllocationsByAssignmentId.get(alloc.personAssignmentId) ?? [];
       list.push(alloc);
       this.personAllocationsByAssignmentId.set(alloc.personAssignmentId, list);
+    }
+
+    this.requirementsByPool = new Map();
+    this.requirementsByProject = new Map();
+    for (const req of data.requirements) {
+      const poolList = this.requirementsByPool.get(req.poolId) ?? [];
+      poolList.push(req);
+      this.requirementsByPool.set(req.poolId, poolList);
+
+      const projectList = this.requirementsByProject.get(req.projectId) ?? [];
+      projectList.push(req);
+      this.requirementsByProject.set(req.projectId, projectList);
+    }
+
+    this.requirementAllocationsByRequirementId = new Map();
+    for (const alloc of data.requirementAllocations) {
+      const list = this.requirementAllocationsByRequirementId.get(alloc.requirementId) ?? [];
+      list.push(alloc);
+      this.requirementAllocationsByRequirementId.set(alloc.requirementId, list);
     }
   }
 
@@ -152,9 +182,9 @@ export class PlanningEngine {
   /** Sum of required FTE for a pool at a period, across all projects in this scenario. */
   getRequiredCapacity(poolId: string, period: Period): number {
     let total = 0;
-    for (const req of this.data.requirements) {
-      if (req.poolId !== poolId || req.scenarioId !== this.scenarioId) continue;
-      total += this.allocationAt(this.data.requirementAllocations, 'requirementId', req.id, period);
+    for (const req of this.requirementsByPool.get(poolId) ?? []) {
+      if (req.scenarioId !== this.scenarioId) continue;
+      total += this.requirementAllocationAt(req.id, period);
     }
     return round2(total);
   }
@@ -162,11 +192,11 @@ export class PlanningEngine {
   /** Sum of assigned FTE for a pool at a period, across all projects in this scenario. */
   getAssignedCapacity(poolId: string, period: Period): number {
     let total = 0;
-    for (const pa of this.data.personAssignments) {
-      if (pa.scenarioId !== this.scenarioId) continue;
-      const person = this.peopleById.get(pa.personId);
-      if (!person || person.poolId !== poolId) continue;
-      total += this.personAllocationAt(pa.id, period);
+    for (const person of this.peopleByPool.get(poolId) ?? []) {
+      for (const pa of this.personAssignmentsByPerson.get(person.id) ?? []) {
+        if (pa.scenarioId !== this.scenarioId) continue;
+        total += this.personAllocationAt(pa.id, period);
+      }
     }
     return round2(total);
   }
@@ -202,8 +232,8 @@ export class PlanningEngine {
   /** Sum of a person's assigned FTE across all their project assignments at a period. */
   getPersonAssigned(personId: string, period: Period): number {
     let total = 0;
-    for (const pa of this.data.personAssignments) {
-      if (pa.personId !== personId || pa.scenarioId !== this.scenarioId) continue;
+    for (const pa of this.personAssignmentsByPerson.get(personId) ?? []) {
+      if (pa.scenarioId !== this.scenarioId) continue;
       total += this.personAllocationAt(pa.id, period);
     }
     return round2(total);
@@ -212,8 +242,8 @@ export class PlanningEngine {
   /** Like getPersonAssigned, but a person parked on an isDispo (bench) project doesn't count as assigned — for "who's actually free" views. */
   getPersonAssignedExcludingDispo(personId: string, period: Period): number {
     let total = 0;
-    for (const pa of this.data.personAssignments) {
-      if (pa.personId !== personId || pa.scenarioId !== this.scenarioId) continue;
+    for (const pa of this.personAssignmentsByPerson.get(personId) ?? []) {
+      if (pa.scenarioId !== this.scenarioId) continue;
       if (this.projectsById.get(pa.projectId)?.isDispo) continue;
       total += this.personAllocationAt(pa.id, period);
     }
@@ -224,9 +254,9 @@ export class PlanningEngine {
   getProjectStaffing(projectId: string, period: Period): ProjectStaffing {
     const pools = new Map<string, ProjectStaffingLine>();
 
-    for (const req of this.data.requirements) {
-      if (req.projectId !== projectId || req.scenarioId !== this.scenarioId) continue;
-      const fte = this.allocationAt(this.data.requirementAllocations, 'requirementId', req.id, period);
+    for (const req of this.requirementsByProject.get(projectId) ?? []) {
+      if (req.scenarioId !== this.scenarioId) continue;
+      const fte = this.requirementAllocationAt(req.id, period);
       const line = this.lineFor(pools, req.poolId);
       line.required += fte;
     }
@@ -304,10 +334,10 @@ export class PlanningEngine {
   /** Periods where this project actually has requirement/assignment allocations, regardless of its dates. */
   projectAllocatedPeriods(projectId: string): Period[] {
     const periods = new Set<string>();
-    for (const req of this.data.requirements) {
-      if (req.projectId !== projectId || req.scenarioId !== this.scenarioId) continue;
-      for (const a of this.data.requirementAllocations) {
-        if (a.requirementId === req.id) periods.add(a.period);
+    for (const req of this.requirementsByProject.get(projectId) ?? []) {
+      if (req.scenarioId !== this.scenarioId) continue;
+      for (const a of this.requirementAllocationsByRequirementId.get(req.id) ?? []) {
+        periods.add(a.period);
       }
     }
     for (const pa of this.personAssignmentsByProject.get(projectId) ?? []) {
@@ -322,8 +352,8 @@ export class PlanningEngine {
   /** Pool ids this project has a requirement and/or assignment for, in this scenario. */
   projectPoolIds(projectId: string): string[] {
     const ids = new Set<string>();
-    for (const req of this.data.requirements) {
-      if (req.projectId === projectId && req.scenarioId === this.scenarioId) ids.add(req.poolId);
+    for (const req of this.requirementsByProject.get(projectId) ?? []) {
+      if (req.scenarioId === this.scenarioId) ids.add(req.poolId);
     }
     for (const pa of this.personAssignmentsByProject.get(projectId) ?? []) {
       if (pa.scenarioId !== this.scenarioId) continue;
@@ -355,14 +385,9 @@ export class PlanningEngine {
     return line;
   }
 
-  private allocationAt<T extends { period: Period }>(
-    allocations: T[],
-    key: keyof T,
-    ownerId: string,
-    period: Period,
-  ): number {
-    const row = allocations.find((a) => a[key] === ownerId && a.period === period);
-    return (row as unknown as { fte: number } | undefined)?.fte ?? 0;
+  private requirementAllocationAt(requirementId: string, period: Period): number {
+    const rows = this.requirementAllocationsByRequirementId.get(requirementId);
+    return rows?.find((a) => a.period === period)?.fte ?? 0;
   }
 
   private personAllocationAt(personAssignmentId: string, period: Period): number {
