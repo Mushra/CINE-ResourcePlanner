@@ -5,7 +5,7 @@ import { getSanityChecks, type SanityCheck } from '../../engine/validation';
 import { getForecastWindowPeriods } from '../../engine/forecast';
 import { PlanningEngine, UNASSIGNED_DISCIPLINE_ID, round2 } from '../../engine/planning';
 import { addMonths, formatPeriodLabel, periodRange, todayPeriod } from '../../domain/periods';
-import type { Period } from '../../domain/types';
+import type { Period, Person } from '../../domain/types';
 import { Icon } from '../components/Icon';
 import { StatusPill } from '../components/StatusPill';
 import { EmptyState } from '../components/EmptyState';
@@ -106,6 +106,9 @@ export function Dashboard() {
         <ProjectCapacity engine={engine} />
       </div>
 
+      <TeamTensionHeatmap engine={engine} periods={trendPeriods} />
+      <NamedAvailability engine={engine} periods={trendPeriods} />
+
       <div className="dashboard-grid">
         <DisciplineCapacity engine={engine} />
 
@@ -135,7 +138,7 @@ export function Dashboard() {
                           <button
                             type="button"
                             className="issue-message"
-                            onClick={() => (check.projectId ? openProject(check.projectId) : navigate('forecast'))}
+                            onClick={() => (check.projectId ? openProject(check.projectId) : navigate('people'))}
                           >
                             {check.message}
                           </button>
@@ -159,7 +162,7 @@ export function Dashboard() {
 function ProjectMix({ engine, periods }: { engine: PlanningEngine; periods: Period[] }) {
   const [highlighted, setHighlighted] = useState<Set<string>>(new Set());
 
-  const projects = useMemo(() => engine.projects().filter((p) => !p.isDispo), [engine]);
+  const projects = useMemo(() => engine.projects(), [engine]);
 
   const monthly = useMemo(() => periods.map((p) => {
     const rows = projects
@@ -188,7 +191,7 @@ function ProjectMix({ engine, periods }: { engine: PlanningEngine; periods: Peri
       <div className="panel-header">
         <div className="panel-header-title">
           <h2>Répartition de la capacité par projet</h2>
-          <span className="panel-sub">Lecture mensuelle en FTE staffé, par projet</span>
+          <span className="panel-sub">Lecture mensuelle en FTE staffé, par projet · dispo incluse</span>
         </div>
       </div>
 
@@ -236,13 +239,17 @@ function ProjectMix({ engine, periods }: { engine: PlanningEngine; periods: Peri
 
 type ProjectMetric = 'staffed' | 'occupancy';
 type ProjectCapacityMonths = 12 | 24 | 36;
+type ProjectCapacityScope = 'global' | 'projects';
 
-/** Per-project staffed FTE or occupancy (staffed ÷ requis, %), ranked or as a multi-line timeline
- * (one line per project). Mirrors DisciplineCapacity's controls, grouped by project instead. */
+/** Global org-wide occupancy timeline by default (capacity vs. real staffing, or the resulting
+ * %), with a switch to the per-project multi-line breakdown (clickable legend, same highlight/dim
+ * as ProjectMix) and a non-timeline per-project ranking. */
 function ProjectCapacity({ engine }: { engine: PlanningEngine }) {
   const [metric, setMetric] = useState<ProjectMetric>('staffed');
   const [timeline, setTimeline] = useState(true);
+  const [scope, setScope] = useState<ProjectCapacityScope>('global');
   const [months, setMonths] = useState<ProjectCapacityMonths>(24);
+  const [highlighted, setHighlighted] = useState<Set<string>>(new Set());
 
   const periods = useMemo(() => {
     const start = todayPeriod();
@@ -275,19 +282,59 @@ function ProjectCapacity({ engine }: { engine: PlanningEngine }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [projects, periods, metric, engine]);
 
+  const globalSeries = useMemo(() => {
+    if (metric === 'staffed') {
+      return [
+        { id: '__capacity', label: 'Capacité totale', color: 'var(--border-strong)', values: periods.map((p) => round2(engine.getTotalCapacity(p))) },
+        { id: '__staffed', label: 'Staffé total', color: 'var(--accent)', values: periods.map((p) => round2(engine.getTotalAssignedExcludingDispo(p))) },
+      ];
+    }
+    return [{
+      id: '__occupancy',
+      label: 'Occupation globale',
+      color: 'var(--accent)',
+      values: periods.map((p) => {
+        const capacity = engine.getTotalCapacity(p);
+        const staffed = engine.getTotalAssignedExcludingDispo(p);
+        return capacity > 0.001 ? round2((100 * staffed) / capacity) : 0;
+      }),
+    }];
+  }, [engine, periods, metric]);
+
+  const globalYMax = metric === 'occupancy' ? Math.max(100, ...globalSeries[0].values) : undefined;
   const maxRank = Math.max(1, ...ranked.map((p) => p.value));
   const unit = metric === 'staffed' ? 'FTE' : '%';
+
+  function toggleHighlight(id: string) {
+    setHighlighted((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  const subtitle = !timeline
+    ? `${metric === 'staffed' ? 'FTE staffé moyen' : 'Staffé ÷ requis'} par projet · ${months} mois`
+    : scope === 'global'
+      ? `${metric === 'staffed' ? 'Capacité totale vs staffé' : 'Staffé ÷ capacité, org entière'} · ${months} mois`
+      : `${metric === 'staffed' ? 'FTE staffé' : 'Staffé ÷ requis'} par projet · ${months} mois`;
 
   return (
     <section className="card panel">
       <div className="panel-header panel-header-align-start">
         <div className="panel-header-title">
           <h2>Taux d'occupation</h2>
-          <span className="panel-sub">{metric === 'staffed' ? 'FTE staffé moyen' : 'Staffé ÷ requis'} · {months} mois</span>
+          <span className="panel-sub">{subtitle}</span>
         </div>
         <div className="widget-controls">
+          {timeline && (
+            <div className="segmented">
+              <button type="button" className={scope === 'global' ? 'active' : ''} onClick={() => setScope('global')}>Globale</button>
+              <button type="button" className={scope === 'projects' ? 'active' : ''} onClick={() => setScope('projects')}>Par projet</button>
+            </div>
+          )}
           <div className="segmented">
-            <button type="button" className={metric === 'staffed' ? 'active' : ''} onClick={() => setMetric('staffed')}>Staffé moyen</button>
+            <button type="button" className={metric === 'staffed' ? 'active' : ''} onClick={() => setMetric('staffed')}>FTE staffé</button>
             <button type="button" className={metric === 'occupancy' ? 'active' : ''} onClick={() => setMetric('occupancy')}>Taux d'occupation</button>
           </div>
           <label className="widget-toggle">
@@ -302,36 +349,207 @@ function ProjectCapacity({ engine }: { engine: PlanningEngine }) {
         </div>
       </div>
 
-      {ranked.length === 0 ? (
+      {!timeline ? (
+        ranked.length === 0 ? (
+          <EmptyState icon="projects" title="No data" description="No projects with assignments in this window." />
+        ) : (
+          <div className="rank-list">
+            {ranked.map((p) => (
+              <div key={p.id} className="rank">
+                <div className="rank-head">
+                  <span><span className="pool-dot" style={{ background: p.color }} /> {p.name}</span>
+                  <strong>{p.value}{unit === '%' ? '%' : ' FTE'}</strong>
+                </div>
+                <div className="rank-track">
+                  <div className="rank-fill" style={{ width: `${(100 * p.value) / maxRank}%`, background: p.color }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      ) : scope === 'global' ? (
+        <>
+          <LineChart
+            series={globalSeries}
+            labels={periods.map((p) => formatPeriodLabel(p, { withYear: false }))}
+            unit={unit}
+            yMax={globalYMax}
+            showArea={metric === 'occupancy'}
+          />
+          {metric === 'staffed' && (
+            <div className="mix-legend">
+              {globalSeries.map((s) => (
+                <span key={s.id} className="mix-legend-item">
+                  <i className="mix-legend-dot" style={{ background: s.color }} />
+                  {s.label}
+                </span>
+              ))}
+            </div>
+          )}
+        </>
+      ) : series.length === 0 ? (
         <EmptyState icon="projects" title="No data" description="No projects with assignments in this window." />
-      ) : timeline ? (
+      ) : (
         <>
           <LineChart
             series={series}
             labels={periods.map((p) => formatPeriodLabel(p, { withYear: false }))}
             unit={unit}
             yMax={metric === 'occupancy' ? 100 : undefined}
+            highlightedIds={highlighted}
           />
           <div className="mix-legend">
-            {projects.filter((p) => series.some((s) => s.id === p.id)).map((p) => (
-              <span key={p.id} className="mix-legend-item">
-                <i className="mix-legend-dot" style={{ background: colorForKey(p.id) }} />
-                {p.name}
-              </span>
-            ))}
+            {projects.filter((p) => series.some((s) => s.id === p.id)).map((p) => {
+              const cls = highlighted.size ? (highlighted.has(p.id) ? ' active' : ' dimmed') : '';
+              return (
+                <button key={p.id} type="button" className={`mix-legend-item${cls}`} onClick={() => toggleHighlight(p.id)}>
+                  <i className="mix-legend-dot" style={{ background: colorForKey(p.id) }} />
+                  {p.name}
+                </button>
+              );
+            })}
           </div>
         </>
+      )}
+    </section>
+  );
+}
+
+/** Team × month tension heatmap — grouped by "site · team" (free-text, independent of the pool
+ * hierarchy). Cell = real staffing ÷ team capacity that month; redder = less slack. */
+function TeamTensionHeatmap({ engine, periods }: { engine: PlanningEngine; periods: Period[] }) {
+  const teams = useMemo(() => {
+    const people = engine.people().filter((p) => p.active && p.capacityFte > 0.001);
+    const map = new Map<string, { label: string; people: Person[] }>();
+    for (const person of people) {
+      const label = `${person.site.trim() || '—'} · ${person.team.trim() || '—'}`;
+      if (!map.has(label)) map.set(label, { label, people: [] });
+      map.get(label)!.people.push(person);
+    }
+    return [...map.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }, [engine]);
+
+  function tierClass(rate: number | null): string {
+    if (rate === null) return 'hcell-empty';
+    if (rate < 0.75) return 'hcell-low';
+    if (rate < 0.9) return 'hcell-mid';
+    if (rate < 0.98) return 'hcell-high';
+    return 'hcell-crit';
+  }
+
+  return (
+    <section className="card panel">
+      <div className="panel-header">
+        <div className="panel-header-title">
+          <h2>Carte de tension des équipes</h2>
+          <span className="panel-sub">Plus une cellule est rouge, moins l'équipe conserve de marge de manœuvre</span>
+        </div>
+      </div>
+      {teams.length === 0 ? (
+        <EmptyState icon="team" title="No teams" description="No active people with a team/site assigned." />
       ) : (
-        <div className="rank-list">
-          {ranked.map((p) => (
-            <div key={p.id} className="rank">
-              <div className="rank-head">
-                <span><span className="pool-dot" style={{ background: p.color }} /> {p.name}</span>
-                <strong>{p.value}{unit === '%' ? '%' : ' FTE'}</strong>
-              </div>
-              <div className="rank-track">
-                <div className="rank-fill" style={{ width: `${(100 * p.value) / maxRank}%`, background: p.color }} />
-              </div>
+        <div className="heat-wrap">
+          <table className="heat">
+            <thead>
+              <tr>
+                <th>Équipe</th>
+                {periods.map((p) => <th key={p}>{formatPeriodLabel(p, { withYear: false })}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {teams.map((t) => {
+                const cap = round2(t.people.reduce((sum, p) => sum + p.capacityFte, 0));
+                return (
+                  <tr key={t.label}>
+                    <td className="heat-team">{t.label}</td>
+                    {periods.map((period) => {
+                      const staffed = round2(t.people.reduce((sum, p) => sum + engine.getPersonAssignedExcludingDispo(p.id, period), 0));
+                      const rate = cap > 0.001 ? staffed / cap : null;
+                      return (
+                        <td key={period} className={`hcell ${tierClass(rate)}`} title={`${staffed} / ${cap} FTE`}>
+                          {rate === null ? '—' : `${Math.round(rate * 100)}%`}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+interface AvailabilityRun {
+  personId: string;
+  personName: string;
+  role: string;
+  teamLabel: string;
+  start: Period;
+  end: Period;
+  months: number;
+}
+
+/** Continuous windows where a person carries no real (non-dispo) staffing — either explicitly
+ * parked on a "dispo" project or simply unassigned that month. */
+function NamedAvailability({ engine, periods }: { engine: PlanningEngine; periods: Period[] }) {
+  const runs = useMemo(() => {
+    const people = engine.people().filter((p) => p.active && p.capacityFte > 0.001);
+    const result: AvailabilityRun[] = [];
+    for (const person of people) {
+      const pool = person.poolId ? engine.pool(person.poolId) : undefined;
+      const teamLabel = `${person.site.trim() || '—'} · ${person.team.trim() || '—'}`;
+      let runStart: Period | null = null;
+      let runLen = 0;
+      for (let i = 0; i < periods.length; i++) {
+        const period = periods[i];
+        const isAvailable = engine.getPersonAssignedExcludingDispo(person.id, period) < 0.001;
+        if (isAvailable) {
+          if (runStart === null) runStart = period;
+          runLen += 1;
+        }
+        const isLastPeriod = i === periods.length - 1;
+        if ((!isAvailable || isLastPeriod) && runStart !== null) {
+          const end = isAvailable ? period : periods[i - 1];
+          result.push({ personId: person.id, personName: person.name, role: pool?.name ?? '—', teamLabel, start: runStart, end, months: runLen });
+          runStart = null;
+          runLen = 0;
+        }
+      }
+    }
+    return result.sort((a, b) => b.months - a.months || (a.start < b.start ? -1 : 1)).slice(0, 80);
+  }, [engine, periods]);
+
+  return (
+    <section className="card panel">
+      <div className="panel-header">
+        <div className="panel-header-title">
+          <h2>Disponibilités nominatives</h2>
+          <span className="panel-sub">Fenêtres continues où la personne n'est sur aucun projet réel</span>
+        </div>
+      </div>
+      {runs.length === 0 ? (
+        <EmptyState icon="team" title="No availability" description="No continuous availability windows in this horizon." />
+      ) : (
+        <div className="scroll">
+          <div className="availability-row head">
+            <span>Personne</span>
+            <span>Métier</span>
+            <span>Équipe</span>
+            <span>Début</span>
+            <span>Fin</span>
+            <span>Durée</span>
+          </div>
+          {runs.map((r, i) => (
+            <div key={`${r.personId}-${i}`} className="availability-row">
+              <span>{r.personName}</span>
+              <span>{r.role}</span>
+              <span>{r.teamLabel}</span>
+              <span>{formatPeriodLabel(r.start, { withYear: false })}</span>
+              <span>{formatPeriodLabel(r.end, { withYear: false })}</span>
+              <span><span className="pill pill-avail">{r.months} mois</span></span>
             </div>
           ))}
         </div>

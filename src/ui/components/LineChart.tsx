@@ -17,6 +17,7 @@ export function LineChart({
   unit = 'FTE',
   showArea = false,
   height = 220,
+  highlightedIds,
 }: {
   series: LineChartSeries[];
   labels: string[];
@@ -24,6 +25,8 @@ export function LineChart({
   unit?: '%' | 'FTE';
   showArea?: boolean;
   height?: number;
+  /** When non-empty, series not in this set render dimmed — same highlight/dim behavior as the legend dots elsewhere. */
+  highlightedIds?: Set<string>;
 }) {
   const width = 600;
   const pad = 30;
@@ -64,8 +67,9 @@ export function LineChart({
         const pts = pointsFor(s.values);
         const path = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0]},${p[1]}`).join(' ');
         const area = `${path} L${pts.at(-1)![0]},${pad + innerH} L${pts[0][0]},${pad + innerH} Z`;
+        const dimmed = !!highlightedIds && highlightedIds.size > 0 && !highlightedIds.has(s.id);
         return (
-          <g key={s.id}>
+          <g key={s.id} style={{ opacity: dimmed ? 0.18 : 1, transition: 'opacity 0.15s' }}>
             {showArea && <path d={area} className="line-chart-area" style={{ fill: s.color }} />}
             <path d={path} className="line-chart-line" style={{ stroke: s.color }} />
             {pts.map((p, i) => (

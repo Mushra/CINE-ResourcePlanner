@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { GlobalFilter } from '../domain/filter';
 import { EMPTY_GLOBAL_FILTER } from '../domain/filter';
 
-export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'forecast' | 'people' | 'project-detail';
+export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'people' | 'project-detail';
 export type PeopleMode = 'availability' | 'assignments';
 export type TimelineZoom = 'compact' | 'comfortable' | 'wide';
 export type HorizonMonths = 3 | 6 | 12;
@@ -141,7 +141,7 @@ interface UiState {
   setTimelineSearch: (search: string) => void;
   setTimelinePoolFilter: (poolFilter: string[] | null) => void;
 
-  /** Shared across Dashboard/Forecast/Team/People — recomputes the engine, not just row visibility. */
+  /** Shared across Dashboard/Team/People — recomputes the engine, not just row visibility. */
   globalFilter: GlobalFilter;
   horizonMonths: HorizonMonths;
   setGlobalFilter: (filter: GlobalFilter) => void;

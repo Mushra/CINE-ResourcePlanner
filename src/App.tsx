@@ -8,7 +8,6 @@ import { Timeline } from './ui/timeline/Timeline';
 import { Projects } from './ui/views/Projects';
 import { ProjectDetail } from './ui/views/ProjectDetail';
 import { Team } from './ui/views/Team';
-import { Forecast } from './ui/views/Forecast';
 import { People } from './ui/views/People';
 
 function App() {
@@ -48,7 +47,6 @@ function App() {
         {view === 'projects' && <Projects />}
         {view === 'project-detail' && selectedProjectId && <ProjectDetail projectId={selectedProjectId} />}
         {view === 'team' && <Team />}
-        {view === 'forecast' && <Forecast />}
         {view === 'people' && <People />}
       </AppShell>
       <Toaster />

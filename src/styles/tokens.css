@@ -35,6 +35,10 @@
   --status-info-bg: #e8f1fb;
   --status-info-border: #bcdaf3;
 
+  /* Tension heatmap — a 4th tier (elevated) between warning and critical */
+  --tension-elevated: #b8590a;
+  --tension-elevated-bg: #fbe4cf;
+
   /* Certainty */
   --certainty-confirmed: #3457d5;
   --certainty-estimated: #8a9099;
@@ -85,6 +89,9 @@
   --status-info-bg: #182a3d;
   --status-info-border: #234160;
 
+  --tension-elevated: #e0893f;
+  --tension-elevated-bg: #3a2712;
+
   --certainty-confirmed: #7590f5;
   --certainty-estimated: #a7adb8;
   --certainty-tbd: #575e6c;
@@ -128,6 +135,9 @@
     --status-info: #6badf0;
     --status-info-bg: #182a3d;
     --status-info-border: #234160;
+
+    --tension-elevated: #e0893f;
+    --tension-elevated-bg: #3a2712;
 
     --certainty-confirmed: #7590f5;
     --certainty-estimated: #a7adb8;

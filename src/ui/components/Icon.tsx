@@ -1,7 +1,7 @@
 import type { SVGProps } from 'react';
 
 export type IconName =
-  | 'dashboard' | 'timeline' | 'projects' | 'team' | 'forecast'
+  | 'dashboard' | 'timeline' | 'projects' | 'team'
   | 'plus' | 'chevron-right' | 'chevron-down' | 'chevron-left' | 'close'
   | 'warning' | 'critical' | 'check' | 'info'
   | 'sun' | 'moon' | 'save' | 'folder-open' | 'file-plus' | 'download'
@@ -12,7 +12,6 @@ const PATHS: Record<IconName, React.ReactNode> = {
   timeline: <><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /><rect x="5" y="4.5" width="5" height="3" rx="0.8" fill="currentColor" stroke="none" /><rect x="10" y="10.5" width="7" height="3" rx="0.8" fill="currentColor" stroke="none" /><rect x="6" y="16.5" width="4" height="3" rx="0.8" fill="currentColor" stroke="none" /></>,
   projects: <><rect x="3" y="4" width="18" height="16" rx="1.5" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="8" y1="4" x2="8" y2="9" /></>,
   team: <><circle cx="9" cy="8" r="3" /><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0" /><circle cx="17" cy="9" r="2.3" /><path d="M15.5 19.5a4.5 4.5 0 0 1 6.2-4.1" /></>,
-  forecast: <><polyline points="3,18 9,10 13,14 21,5" /><polyline points="15,5 21,5 21,11" /></>,
   plus: <><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></>,
   'chevron-right': <polyline points="9,5 16,12 9,19" />,
   'chevron-down': <polyline points="5,9 12,16 19,9" />,

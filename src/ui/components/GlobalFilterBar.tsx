@@ -5,11 +5,12 @@ import { Button } from './Button';
 import type { GlobalFilterOptions } from '../hooks/useFilteredEngine';
 
 /**
- * Shared filter bar for Dashboard/Forecast/Team/People: Site/Team/Discipline narrow which
+ * Shared filter bar for Dashboard/Team/People: Site/Team/Discipline narrow which
  * people and pools the engine sees (see useFilteredEngine), and the horizon picks how many months
  * ahead the view looks. One filter, every view that renders this bar reacts the same way.
+ * `showHorizon` hides the "Next X months" select for views (Team) that don't read horizonMonths at all.
  */
-export function GlobalFilterBar({ options }: { options: GlobalFilterOptions }) {
+export function GlobalFilterBar({ options, showHorizon = true }: { options: GlobalFilterOptions; showHorizon?: boolean }) {
   const globalFilter = useUiStore((s) => s.globalFilter);
   const setGlobalFilter = useUiStore((s) => s.setGlobalFilter);
   const horizonMonths = useUiStore((s) => s.horizonMonths);
@@ -42,15 +43,17 @@ export function GlobalFilterBar({ options }: { options: GlobalFilterOptions }) {
           Clear
         </Button>
       )}
-      <select
-        className="range-select"
-        value={horizonMonths}
-        onChange={(e) => setHorizonMonths(Number(e.target.value) as HorizonMonths)}
-      >
-        <option value={3}>Next 3 months</option>
-        <option value={6}>Next 6 months</option>
-        <option value={12}>Next 12 months</option>
-      </select>
+      {showHorizon && (
+        <select
+          className="range-select"
+          value={horizonMonths}
+          onChange={(e) => setHorizonMonths(Number(e.target.value) as HorizonMonths)}
+        >
+          <option value={3}>Next 3 months</option>
+          <option value={6}>Next 6 months</option>
+          <option value={12}>Next 12 months</option>
+        </select>
+      )}
     </div>
   );
 }

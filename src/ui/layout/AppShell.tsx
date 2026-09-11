@@ -11,7 +11,6 @@ const NAV: { view: ViewName; label: string; icon: IconName }[] = [
   { view: 'timeline', label: 'Timeline', icon: 'timeline' },
   { view: 'projects', label: 'Projects', icon: 'projects' },
   { view: 'team', label: 'Teams', icon: 'team' },
-  { view: 'forecast', label: 'Forecast', icon: 'forecast' },
   { view: 'people', label: 'People', icon: 'calendar' },
 ];
 

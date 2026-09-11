@@ -203,7 +203,7 @@ export function Team() {
         <Button variant="primary" icon="plus" onClick={() => setNewDiscipline(true)}>New discipline</Button>
       </div>
 
-      <GlobalFilterBar options={options} />
+      <GlobalFilterBar options={options} showHorizon={false} />
 
       <div className="team-toolbar">
         {visibleCollapseKeys.length > 0 && (

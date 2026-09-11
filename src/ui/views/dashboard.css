@@ -2,7 +2,6 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-width: 1180px;
 }
 
 .dashboard-topbar {
@@ -260,6 +259,68 @@
   cursor: pointer;
 }
 
+/* Widget — Carte de tension des équipes */
+.heat-wrap { overflow-x: auto; }
+table.heat {
+  border-collapse: separate;
+  border-spacing: 3px;
+  width: 100%;
+  font-size: 11.5px;
+}
+.heat th {
+  text-align: center;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  padding: 0 2px 4px;
+  white-space: nowrap;
+}
+.heat th:first-child { text-align: left; min-width: 150px; }
+.heat-team { font-weight: 600; white-space: nowrap; padding-right: 10px; }
+.hcell {
+  text-align: center;
+  min-width: 52px;
+  padding: 5px 4px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.hcell-empty { background: var(--surface-2); color: var(--text-tertiary); font-weight: 400; }
+.hcell-low { background: var(--status-healthy-bg); color: var(--status-healthy); }
+.hcell-mid { background: var(--status-warning-bg); color: var(--status-warning); }
+.hcell-high { background: var(--tension-elevated-bg); color: var(--tension-elevated); }
+.hcell-crit { background: var(--status-critical-bg); color: var(--status-critical); }
+
+/* Widget — Disponibilités nominatives */
+.scroll { max-height: 470px; overflow: auto; }
+.availability-row {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr 75px 75px 70px;
+  gap: 8px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  align-items: center;
+}
+.availability-row.head {
+  position: sticky;
+  top: 0;
+  background: var(--surface-1);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  z-index: 1;
+}
+.pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pill-avail { background: var(--accent-soft); color: var(--accent); }
+
 @media (max-width: 1000px) {
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
   .dashboard-grid { grid-template-columns: 1fr; }
@@ -269,4 +330,6 @@
   .month-stack-row { grid-template-columns: 40px 1fr; }
   .panel-header.panel-header-align-start { flex-direction: column; align-items: stretch; }
   .widget-controls { flex-wrap: wrap; }
+  .availability-row { grid-template-columns: 1fr 1fr; grid-auto-rows: auto; row-gap: 2px; }
+  .availability-row.head { display: none; }
 }
