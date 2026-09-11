@@ -2,16 +2,19 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
 import { getSanityChecks, type SanityCheck } from '../../engine/validation';
-import { getForecastWindowPeriods, utilizationStatus } from '../../engine/forecast';
-import { round2 } from '../../engine/planning';
-import { todayPeriod, formatPeriodLabel } from '../../domain/periods';
+import { getForecastWindowPeriods } from '../../engine/forecast';
+import { PlanningEngine, UNASSIGNED_DISCIPLINE_ID, round2 } from '../../engine/planning';
+import { addMonths, formatPeriodLabel, periodRange, todayPeriod } from '../../domain/periods';
+import type { Period } from '../../domain/types';
 import { Icon } from '../components/Icon';
 import { StatusPill } from '../components/StatusPill';
 import { EmptyState } from '../components/EmptyState';
 import { Button } from '../components/Button';
 import { Collapsible } from '../components/Collapsible';
 import { GlobalFilterBar } from '../components/GlobalFilterBar';
+import { LineChart } from '../components/LineChart';
 import { useFilteredEngine } from '../hooks/useFilteredEngine';
+import { colorForKey } from '../lib/colors';
 import type { ImportReport } from '../../import/rpmImport';
 
 export function Dashboard() {
@@ -26,13 +29,6 @@ export function Dashboard() {
   const checks = useMemo(() => getSanityChecks(engine), [engine]);
   const period = todayPeriod();
   const trendPeriods = useMemo(() => getForecastWindowPeriods(engine, horizonMonths), [engine, horizonMonths]);
-  const trend = useMemo(() => trendPeriods.map((p) => {
-    const pools = engine.pools();
-    const capacity = pools.reduce((sum, pool) => sum + engine.getCapacity(pool.id, p), 0);
-    const required = pools.reduce((sum, pool) => sum + engine.getRequiredCapacity(pool.id, p), 0);
-    const pct = capacity > 0 ? round2((required / capacity) * 100) : required > 0 ? 999 : 0;
-    return { period: p, pct, status: utilizationStatus(pct) };
-  }), [engine, trendPeriods]);
 
   if (projects.length === 0) {
     return (
@@ -46,7 +42,7 @@ export function Dashboard() {
   }
 
   const activeProjects = projects.filter((p) => p.status === 'active' || p.status === 'planned');
-  const totalCapacity = engine.pools().reduce((sum, p) => sum + engine.getCapacity(p.id, period), 0);
+  const totalCapacity = engine.getTotalCapacity(period);
   const critical = checks.filter((c) => c.severity === 'critical');
   const warnings = checks.filter((c) => c.severity === 'warning');
   const overCapacityNow = checks.filter((c) => c.category === 'over_capacity' && c.period === period);
@@ -105,56 +101,11 @@ export function Dashboard() {
         />
       </div>
 
-      <section className="card panel trend-panel">
-        <div className="panel-header">
-          <h2>Occupation dans le temps</h2>
-          <span className="panel-sub">Required demand as a share of total capacity, per month</span>
-        </div>
-        <div className="utilization-list">
-          {trend.map((t) => (
-            <div key={t.period} className="utilization-row">
-              <div className="utilization-label">{formatPeriodLabel(t.period, { withYear: false })}</div>
-              <div className="utilization-track">
-                <div className={`utilization-fill fill-${t.status}`} style={{ width: `${Math.min(100, t.pct)}%` }} />
-                {t.pct > 100 && <div className="utilization-overflow" style={{ left: '100%' }} />}
-              </div>
-              <div className="utilization-pct">{t.pct}%</div>
-            </div>
-          ))}
-        </div>
-      </section>
+      <ProjectMix engine={engine} periods={trendPeriods} />
+      <OccupancyTrend engine={engine} periods={trendPeriods} />
 
       <div className="dashboard-grid">
-        <section className="card panel">
-          <div className="panel-header">
-            <h2>Portfolio health — {formatPeriodLabel(period)}</h2>
-            <span className="panel-sub">Required demand as a share of capacity, this month</span>
-          </div>
-          <div className="utilization-list">
-            {engine.pools().map((pool) => {
-              const capacity = engine.getCapacity(pool.id, period);
-              const required = engine.getRequiredCapacity(pool.id, period);
-              const pct = capacity > 0 ? round2((required / capacity) * 100) : required > 0 ? 999 : 0;
-              const status = utilizationStatus(pct);
-              return (
-                <div key={pool.id} className="utilization-row">
-                  <div className="utilization-label">
-                    <span className="pool-dot" style={{ background: pool.color }} />
-                    {pool.name}
-                  </div>
-                  <div className="utilization-track">
-                    <div
-                      className={`utilization-fill fill-${status}`}
-                      style={{ width: `${Math.min(100, pct)}%` }}
-                    />
-                    {pct > 100 && <div className="utilization-overflow" style={{ left: '100%' }} />}
-                  </div>
-                  <div className="utilization-pct">{pct}%</div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
+        <DisciplineCapacity engine={engine} />
 
         <section className="card panel">
           <div className="panel-header">
@@ -198,6 +149,231 @@ export function Dashboard() {
         </section>
       </div>
     </div>
+  );
+}
+
+/** Monthly stacked breakdown of assigned FTE per project — segment width = share of that month's
+ * total. "Mettre en avant" narrows attention to a subset of projects without losing the others. */
+function ProjectMix({ engine, periods }: { engine: PlanningEngine; periods: Period[] }) {
+  const [highlighted, setHighlighted] = useState<Set<string>>(new Set());
+
+  const projects = useMemo(() => engine.projects().filter((p) => !p.isDispo), [engine]);
+
+  const monthly = useMemo(() => periods.map((p) => {
+    const rows = projects
+      .map((project) => ({ project, value: engine.getProjectAssigned(project.id, p) }))
+      .filter((r) => r.value > 0.001)
+      .sort((a, b) => b.value - a.value);
+    const total = rows.reduce((sum, r) => sum + r.value, 0);
+    return { period: p, rows, total };
+  }), [engine, projects, periods]);
+
+  const activeProjects = useMemo(() => {
+    const ids = new Set(monthly.flatMap((m) => m.rows.map((r) => r.project.id)));
+    return projects.filter((p) => ids.has(p.id));
+  }, [monthly, projects]);
+
+  function toggleHighlight(id: string) {
+    setHighlighted((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    <section className="card panel">
+      <div className="panel-header panel-header-align-start">
+        <div className="panel-header-title">
+          <h2>Répartition de la capacité par projet</h2>
+          <span className="panel-sub">Lecture mensuelle en FTE staffé, par projet</span>
+        </div>
+        {activeProjects.length > 0 && (
+          <details className="project-highlight">
+            <summary>
+              Mettre en avant · {highlighted.size > 0 ? `${highlighted.size} projet${highlighted.size > 1 ? 's' : ''}` : 'Tous'}
+            </summary>
+            <div className="highlight-menu">
+              <button type="button" className="highlight-clear" onClick={() => setHighlighted(new Set())}>Tout afficher</button>
+              {activeProjects.map((p) => (
+                <label key={p.id} className="highlight-option">
+                  <input type="checkbox" checked={highlighted.has(p.id)} onChange={() => toggleHighlight(p.id)} />
+                  <span>{p.name}</span>
+                </label>
+              ))}
+            </div>
+          </details>
+        )}
+      </div>
+
+      {activeProjects.length === 0 ? (
+        <EmptyState icon="projects" title="No assignments yet" description="Assign people to projects to see the monthly breakdown." />
+      ) : (
+        <>
+          <div className="month-stack-list">
+            {monthly.map((m) => (
+              <div key={m.period} className="month-stack-row">
+                <div className="month-stack-label">{formatPeriodLabel(m.period, { withYear: false })}</div>
+                <div className="month-stack">
+                  {m.rows.map((r) => {
+                    const cls = highlighted.size ? (highlighted.has(r.project.id) ? ' highlighted' : ' dimmed') : '';
+                    return (
+                      <div
+                        key={r.project.id}
+                        className={`mix-seg${cls}`}
+                        data-tip={`${r.project.name} · ${round2(r.value)} FTE`}
+                        style={{ width: `${m.total > 0 ? (100 * r.value) / m.total : 0}%`, background: colorForKey(r.project.id) }}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mix-legend">
+            {activeProjects.map((p) => {
+              const cls = highlighted.size ? (highlighted.has(p.id) ? ' active' : ' dimmed') : '';
+              return (
+                <button key={p.id} type="button" className={`mix-legend-item${cls}`} onClick={() => toggleHighlight(p.id)}>
+                  <i className="mix-legend-dot" style={{ background: colorForKey(p.id) }} />
+                  {p.name}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+/** Plan-wide occupancy burndown: FTE staffed on real work (excludes "dispo"/bench) over total
+ * capacity, per month. Reacts only to the shared Site/Team/Discipline filter bar above. */
+function OccupancyTrend({ engine, periods }: { engine: PlanningEngine; periods: Period[] }) {
+  const values = useMemo(() => periods.map((p) => {
+    const capacity = engine.getTotalCapacity(p);
+    const assigned = engine.getTotalAssignedExcludingDispo(p);
+    return capacity > 0 ? round2((assigned / capacity) * 100) : 0;
+  }), [engine, periods]);
+
+  return (
+    <section className="card panel">
+      <div className="panel-header">
+        <h2>Taux d'occupation</h2>
+        <span className="panel-sub">FTE staffé (hors dispo) / capacité, par mois</span>
+      </div>
+      <LineChart
+        series={[{ id: 'occupancy', label: 'Occupation', color: 'var(--accent)', values }]}
+        labels={periods.map((p) => formatPeriodLabel(p, { withYear: false }))}
+        yMax={100}
+        unit="%"
+        showArea
+      />
+    </section>
+  );
+}
+
+type CapacityMetric = 'staffed' | 'capacity';
+type CapacityMonths = 12 | 24 | 36;
+
+/** Ranked (or, in Timeline mode, per-month) capacity by discipline — "métier" in this app's own
+ * vocabulary means role/pool, but this widget mirrors the reference's job-family view, which groups
+ * by discipline ("famille d'emplois"), per the user's explicit choice. */
+function DisciplineCapacity({ engine }: { engine: PlanningEngine }) {
+  const [metric, setMetric] = useState<CapacityMetric>('staffed');
+  const [timeline, setTimeline] = useState(false);
+  const [months, setMonths] = useState<CapacityMonths>(24);
+
+  const periods = useMemo(() => {
+    const start = todayPeriod();
+    return periodRange(start, addMonths(start, months - 1));
+  }, [months]);
+
+  const groups = useMemo(() => {
+    const list = engine.disciplines().map((d) => ({ id: d.id, name: d.name, color: d.color }));
+    if (engine.pools().some((p) => p.disciplineId === null)) {
+      list.push({ id: UNASSIGNED_DISCIPLINE_ID, name: 'Unassigned', color: '#9ca3af' });
+    }
+    return list;
+  }, [engine]);
+
+  function valueAt(disciplineId: string, p: Period): number {
+    return metric === 'staffed' ? engine.getDisciplineAssignedCapacity(disciplineId, p) : engine.getDisciplineCapacity(disciplineId, p);
+  }
+
+  const ranked = useMemo(() => {
+    return groups
+      .map((g) => {
+        const avg = periods.length ? periods.reduce((sum, p) => sum + valueAt(g.id, p), 0) / periods.length : 0;
+        return { ...g, value: round2(avg) };
+      })
+      .filter((g) => g.value > 0.001)
+      .sort((a, b) => b.value - a.value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups, periods, metric, engine]);
+
+  const series = useMemo(() => groups
+    .map((g) => ({ id: g.id, label: g.name, color: g.color, values: periods.map((p) => round2(valueAt(g.id, p))) }))
+    .filter((s) => s.values.some((v) => v > 0.001)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [groups, periods, metric, engine]);
+
+  const maxRank = Math.max(1, ...ranked.map((g) => g.value));
+
+  return (
+    <section className="card panel">
+      <div className="panel-header panel-header-align-start">
+        <div className="panel-header-title">
+          <h2>Capacité moyenne par métier</h2>
+          <span className="panel-sub">{metric === 'staffed' ? 'FTE staffé moyen' : 'Capacité moyenne'} · {months} mois</span>
+        </div>
+        <div className="widget-controls">
+          <div className="segmented">
+            <button type="button" className={metric === 'staffed' ? 'active' : ''} onClick={() => setMetric('staffed')}>Staffé moyen</button>
+            <button type="button" className={metric === 'capacity' ? 'active' : ''} onClick={() => setMetric('capacity')}>Capacité moyenne</button>
+          </div>
+          <label className="widget-toggle">
+            <input type="checkbox" checked={timeline} onChange={(e) => setTimeline(e.target.checked)} />
+            Timeline
+          </label>
+          <select className="range-select" value={months} onChange={(e) => setMonths(Number(e.target.value) as CapacityMonths)}>
+            <option value={12}>12 mois</option>
+            <option value={24}>24 mois</option>
+            <option value={36}>36 mois</option>
+          </select>
+        </div>
+      </div>
+
+      {ranked.length === 0 ? (
+        <EmptyState icon="team" title="No capacity" description="No disciplines with capacity in this window." />
+      ) : timeline ? (
+        <>
+          <LineChart series={series} labels={periods.map((p) => formatPeriodLabel(p, { withYear: false }))} unit="FTE" />
+          <div className="mix-legend">
+            {groups.filter((g) => series.some((s) => s.id === g.id)).map((g) => (
+              <span key={g.id} className="mix-legend-item">
+                <i className="mix-legend-dot" style={{ background: g.color }} />
+                {g.name}
+              </span>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="rank-list">
+          {ranked.map((g) => (
+            <div key={g.id} className="rank">
+              <div className="rank-head">
+                <span><span className="pool-dot" style={{ background: g.color }} /> {g.name}</span>
+                <strong>{g.value} FTE</strong>
+              </div>
+              <div className="rank-track">
+                <div className="rank-fill" style={{ width: `${(100 * g.value) / maxRank}%`, background: g.color }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

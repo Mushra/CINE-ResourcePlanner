@@ -85,30 +85,165 @@
   gap: 10px;
   margin-bottom: 14px;
 }
+.panel-header.panel-header-align-start { align-items: flex-start; flex-wrap: wrap; }
 .panel-header h2 { margin: 0; font-size: 13.5px; font-weight: 600; }
+.panel-header-title { display: flex; flex-direction: column; gap: 2px; }
 .panel-sub { font-size: 11.5px; color: var(--text-tertiary); white-space: nowrap; }
 
-.utilization-list { display: flex; flex-direction: column; gap: 11px; }
-.utilization-row {
-  display: grid;
-  grid-template-columns: 108px 1fr 44px;
-  align-items: center;
-  gap: 10px;
+.pool-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+
+/* Widget 1 — Répartition de la capacité par projet */
+.project-highlight { position: relative; flex-shrink: 0; }
+.project-highlight summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
-.utilization-label { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500; }
-.pool-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.utilization-track {
+.project-highlight summary::-webkit-details-marker { display: none; }
+.project-highlight[open] summary { border-color: var(--border-strong); }
+.highlight-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 220px;
+  max-height: 280px;
+  overflow: auto;
+  background: var(--surface-0);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.highlight-clear {
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 5px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+.highlight-option {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.highlight-option:hover { background: var(--surface-2); }
+
+.month-stack-list { display: flex; flex-direction: column; gap: 8px; }
+.month-stack-row { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 10px; }
+.month-stack-label { font-size: 11.5px; color: var(--text-tertiary); }
+.month-stack {
+  display: flex;
+  height: 16px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.mix-seg { position: relative; height: 100%; transition: opacity 0.15s; }
+.mix-seg.dimmed { opacity: 0.22; }
+.mix-seg:hover:after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  padding: 3px 7px;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.mix-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 14px; }
+.mix-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.mix-legend-item:hover { color: var(--text-primary); }
+.mix-legend-item.active { color: var(--text-primary); font-weight: 600; }
+.mix-legend-item.dimmed { opacity: 0.4; }
+.mix-legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+
+/* Widget 2 — Taux d'occupation (burndown) + Widget 3 timeline mode */
+.line-chart-svg { width: 100%; height: auto; overflow: visible; }
+.line-chart-axis { stroke: var(--border); stroke-width: 1; }
+.line-chart-tick { font-size: 8px; fill: var(--text-tertiary); }
+.line-chart-line { fill: none; stroke-width: 2; }
+.line-chart-area { opacity: 0.14; }
+.line-chart-pt { opacity: 0; }
+.line-chart-x-label { font-size: 8px; fill: var(--text-tertiary); }
+.line-chart-empty { padding: 30px 0; text-align: center; color: var(--text-tertiary); font-size: 12.5px; }
+
+/* Widget 3 — Capacité moyenne par métier */
+.widget-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.segmented { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.segmented button {
+  background: var(--surface-1);
+  border: none;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.segmented button + button { border-left: 1px solid var(--border); }
+.segmented button.active { background: var(--accent-soft); color: var(--accent); }
+.widget-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.rank-list { display: flex; flex-direction: column; gap: 11px; }
+.rank { display: flex; flex-direction: column; gap: 5px; }
+.rank-head { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; }
+.rank-head span { display: flex; align-items: center; gap: 7px; font-weight: 500; }
+.rank-head strong { font-weight: 600; font-variant-numeric: tabular-nums; }
+.rank-track {
   position: relative;
   height: 8px;
   background: var(--surface-2);
   border-radius: 4px;
   overflow: hidden;
 }
-.utilization-fill { height: 100%; border-radius: 4px; transition: width 0.2s; }
-.fill-healthy { background: var(--status-healthy); }
-.fill-warning { background: var(--status-warning); }
-.fill-critical { background: var(--status-critical); }
-.utilization-pct { font-size: 12px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.rank-fill { height: 100%; border-radius: 4px; background: var(--accent); transition: width 0.2s; }
 
 .issue-groups { display: flex; flex-direction: column; gap: 4px; max-height: 460px; overflow: auto; }
 .issue-group { padding: 0; }

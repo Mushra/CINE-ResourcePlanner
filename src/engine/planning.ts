@@ -206,6 +206,26 @@ export class PlanningEngine {
     return round2(this.getCapacity(poolId, period) - this.getAssignedCapacity(poolId, period));
   }
 
+  /** Total capacity across every pool at a period — the denominator for plan-wide occupancy. */
+  getTotalCapacity(period: Period): number {
+    return round2(this.data.pools.reduce((sum, p) => sum + this.getCapacity(p.id, period), 0));
+  }
+
+  /** Total FTE staffed on real projects (excludes "dispo"/bench placeholders) across every person. */
+  getTotalAssignedExcludingDispo(period: Period): number {
+    return round2(this.data.people.reduce((sum, p) => sum + this.getPersonAssignedExcludingDispo(p.id, period), 0));
+  }
+
+  /** Sum of a project's assigned FTE across all its person assignments at a period. */
+  getProjectAssigned(projectId: string, period: Period): number {
+    let total = 0;
+    for (const pa of this.personAssignmentsByProject.get(projectId) ?? []) {
+      if (pa.scenarioId !== this.scenarioId) continue;
+      total += this.personAllocationAt(pa.id, period);
+    }
+    return round2(total);
+  }
+
   /** capacity - required. Negative means demand exceeds capacity ("over capacity"). */
   getCapacityGap(poolId: string, period: Period): number {
     return round2(this.getCapacity(poolId, period) - this.getRequiredCapacity(poolId, period));

@@ -300,3 +300,56 @@ describe('PlanningEngine — disciplines & people', () => {
     expect(engine.getPersonAssigned(alice.id, '2026-09')).toBe(0.8);
   });
 });
+
+describe('PlanningEngine — plan-wide aggregates (Dashboard widgets)', () => {
+  it('sums a project\'s assigned FTE across every person staffed on it', () => {
+    const animation = pool();
+    const alice = person({ poolId: animation.id });
+    const bob = person({ poolId: animation.id });
+    const p1 = project({ name: 'Alpha' });
+    const a1 = personAssignment(alice.id, p1.id, { '2026-09': 0.5 });
+    const a2 = personAssignment(bob.id, p1.id, { '2026-09': 0.3 });
+
+    const engine = new PlanningEngine(
+      planningData({
+        pools: [animation],
+        people: [alice, bob],
+        projects: [p1],
+        personAssignments: [a1.personAssignment, a2.personAssignment],
+        personAssignmentAllocations: [...a1.allocations, ...a2.allocations],
+      }),
+    );
+
+    expect(engine.getProjectAssigned(p1.id, '2026-09')).toBe(0.8);
+  });
+
+  it('sums capacity across every pool for total plan-wide capacity', () => {
+    const animation = pool({ capacityFte: 8 });
+    const vfx = pool({ capacityFte: 4 });
+    const alice = person({ poolId: animation.id, capacityFte: 2 });
+    const engine = new PlanningEngine(planningData({ pools: [animation, vfx], people: [alice] }));
+    expect(engine.getTotalCapacity('2026-09')).toBe(6);
+  });
+
+  it('sums assigned FTE across every person, excluding assignments to isDispo projects', () => {
+    const animation = pool();
+    const alice = person({ poolId: animation.id });
+    const bob = person({ poolId: animation.id });
+    const realProject = project({ name: 'Alpha' });
+    const dispoProject = project({ name: 'Bench', isDispo: true });
+    const a1 = personAssignment(alice.id, realProject.id, { '2026-09': 0.6 });
+    const a2 = personAssignment(bob.id, dispoProject.id, { '2026-09': 1 });
+
+    const engine = new PlanningEngine(
+      planningData({
+        pools: [animation],
+        people: [alice, bob],
+        projects: [realProject, dispoProject],
+        personAssignments: [a1.personAssignment, a2.personAssignment],
+        personAssignmentAllocations: [...a1.allocations, ...a2.allocations],
+      }),
+    );
+
+    expect(engine.getTotalAssignedExcludingDispo('2026-09')).toBe(0.6);
+  });
+});
