@@ -49,7 +49,6 @@ export function GlobalFilterBar({ options, showHorizon = true }: { options: Glob
           value={horizonMonths}
           onChange={(e) => setHorizonMonths(Number(e.target.value) as HorizonMonths)}
         >
-          <option value={3}>Next 3 months</option>
           <option value={6}>Next 6 months</option>
           <option value={12}>Next 12 months</option>
         </select>

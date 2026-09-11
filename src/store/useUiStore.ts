@@ -5,7 +5,7 @@ import { EMPTY_GLOBAL_FILTER } from '../domain/filter';
 export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'people' | 'project-detail';
 export type PeopleMode = 'availability' | 'assignments';
 export type TimelineZoom = 'compact' | 'comfortable' | 'wide';
-export type HorizonMonths = 3 | 6 | 12;
+export type HorizonMonths = 6 | 12;
 
 const COLLAPSE_STORAGE_KEY = 'cine-planner-collapse';
 const TIMELINE_FILTERS_KEY = 'cine-planner-timeline-filters';
@@ -69,7 +69,7 @@ function loadGlobalFilterPrefs(): GlobalFilterPrefs {
       teams: Array.isArray(f?.teams) ? f.teams : null,
       disciplineIds: Array.isArray(f?.disciplineIds) ? f.disciplineIds : null,
     };
-    const horizonMonths: HorizonMonths = parsed.horizonMonths === 3 || parsed.horizonMonths === 12 ? parsed.horizonMonths : 6;
+    const horizonMonths: HorizonMonths = parsed.horizonMonths === 12 ? parsed.horizonMonths : 6;
     return { filter, horizonMonths };
   } catch {
     return fallback;
