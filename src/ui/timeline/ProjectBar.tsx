@@ -2,39 +2,49 @@ import { useRef, useState } from 'react';
 import type { Project } from '../../domain/types';
 import { isoAddDays, isoDiffDays, xForIsoDate } from './timelineMath';
 import { periodFromISODate } from '../../domain/periods';
+import { formatNum } from './AllocationCell';
 import type { Period } from '../../domain/types';
 
 type DragMode = 'move' | 'resize-start' | 'resize-end';
 
-/** Change points only — a marker per period where the headcount differs from the previous period (0 before the project starts). */
-function headcountMarkers(
-  window: Period[], pxPerDay: number, barLeft: number, startDate: string, endDate: string, headcountByPeriod: Map<Period, number>,
-): { x: number; count: number }[] {
+/** Portions the bar into contiguous runs of stable assigned FTE, so the total for a stretch of
+ * months reads as one block instead of a sparse marker at each change point. */
+function assignedSegments(
+  window: Period[], pxPerDay: number, barLeft: number, barRight: number, startDate: string, endDate: string, assignedByPeriod: Map<Period, number>,
+): { x: number; width: number; fte: number }[] {
   const startPeriod = periodFromISODate(startDate);
   const endPeriod = periodFromISODate(endDate);
   if (!startPeriod || !endPeriod) return [];
-  const markers: { x: number; count: number }[] = [];
-  let prev = 0;
+  const segments: { x: number; width: number; fte: number }[] = [];
+  let run: { x: number; fte: number } | null = null;
+
+  function flush(endX: number) {
+    if (run) segments.push({ x: run.x, width: Math.max(0, endX - run.x), fte: run.fte });
+    run = null;
+  }
+
   for (const period of window) {
     if (period < startPeriod || period > endPeriod) continue;
-    const count = headcountByPeriod.get(period) ?? 0;
-    if (count !== prev) {
-      markers.push({ x: Math.max(2, xForIsoDate(`${period}-01`, window, pxPerDay) - barLeft), count });
-      prev = count;
+    const fte = Math.round((assignedByPeriod.get(period) ?? 0) * 100) / 100;
+    const x = Math.max(0, xForIsoDate(`${period}-01`, window, pxPerDay) - barLeft);
+    if (!run || run.fte !== fte) {
+      flush(x);
+      if (fte > 0.001) run = { x, fte };
     }
   }
-  return markers;
+  flush(barRight - barLeft);
+  return segments;
 }
 
 export function ProjectBar({
-  project, window, pxPerDay, onDatesChange, onClick, headcountByPeriod,
+  project, window, pxPerDay, onDatesChange, onClick, assignedByPeriod,
 }: {
   project: Project;
   window: Period[];
   pxPerDay: number;
   onDatesChange: (startDate: string, endDate: string) => void;
   onClick: () => void;
-  headcountByPeriod: Map<Period, number>;
+  assignedByPeriod: Map<Period, number>;
 }) {
   const [preview, setPreview] = useState<{ start: string; end: string } | null>(null);
   const dragRef = useRef<{ mode: DragMode; startX: number; origStart: string; origEnd: string } | null>(null);
@@ -47,7 +57,7 @@ export function ProjectBar({
   const left = xForIsoDate(start, window, pxPerDay);
   const right = xForIsoDate(isoAddDays(end, 1), window, pxPerDay);
   const width = Math.max(pxPerDay * 3, right - left);
-  const markers = preview ? [] : headcountMarkers(window, pxPerDay, left, project.startDate, project.endDate, headcountByPeriod);
+  const segments = preview ? [] : assignedSegments(window, pxPerDay, left, left + width, project.startDate, project.endDate, assignedByPeriod);
 
   function beginDrag(mode: DragMode, e: React.PointerEvent): void {
     e.preventDefault();
@@ -113,8 +123,15 @@ export function ProjectBar({
         {project.name}
       </button>
       <span className="bar-handle bar-handle-right" onPointerDown={(e) => beginDrag('resize-end', e)} />
-      {markers.map((m) => (
-        <span key={m.x} className="bar-count" style={{ left: m.x }} title={`${m.count} assigned`}>{m.count}</span>
+      {segments.map((seg) => (
+        <span
+          key={seg.x}
+          className={`bar-seg ${seg.width < 26 ? 'bar-seg-compact' : ''}`}
+          style={{ left: seg.x, width: seg.width }}
+          title={`${formatNum(seg.fte)} FTE alloué`}
+        >
+          {seg.width >= 26 && `${formatNum(seg.fte)} FTE`}
+        </span>
       ))}
     </div>
   );

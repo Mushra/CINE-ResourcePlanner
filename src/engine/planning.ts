@@ -226,6 +226,16 @@ export class PlanningEngine {
     return round2(total);
   }
 
+  /** Sum of a project's required FTE across all its requirements at a period — the denominator for per-project occupancy. */
+  getProjectRequired(projectId: string, period: Period): number {
+    let total = 0;
+    for (const req of this.requirementsByProject.get(projectId) ?? []) {
+      if (req.scenarioId !== this.scenarioId) continue;
+      total += this.requirementAllocationAt(req.id, period);
+    }
+    return round2(total);
+  }
+
   /** capacity - required. Negative means demand exceeds capacity ("over capacity"). */
   getCapacityGap(poolId: string, period: Period): number {
     return round2(this.getCapacity(poolId, period) - this.getRequiredCapacity(poolId, period));
@@ -313,16 +323,6 @@ export class PlanningEngine {
     }
     lines.sort((a, b) => a.personName.localeCompare(b.personName));
     return { projectId, period, lines };
-  }
-
-  /** Distinct people with any FTE on this project at a period — the headcount shown on the Timeline bar. */
-  getProjectAssignedHeadcount(projectId: string, period: Period): number {
-    let count = 0;
-    for (const pa of this.personAssignmentsByProject.get(projectId) ?? []) {
-      if (pa.scenarioId !== this.scenarioId) continue;
-      if (this.personAllocationAt(pa.id, period) > 0.001) count += 1;
-    }
-    return count;
   }
 
   /** Aggregate staffing across a project's whole lifecycle (or requirement/assignment span if TBD). */

@@ -188,7 +188,7 @@
 .tl-project-name:hover { color: var(--accent); }
 .tl-priority-badge { flex-shrink: 0; transform: scale(0.85); }
 
-.tl-lane { position: relative; height: 34px; flex-shrink: 0; }
+.tl-lane { position: relative; height: 48px; flex-shrink: 0; }
 
 .tl-pool-row { display: flex; }
 .tl-pool-row:nth-of-type(even) { background: var(--surface-0); }
@@ -291,20 +291,23 @@
 .bar-handle-right { border-radius: 0 5px 5px 0; }
 .bar-handle:hover { background: rgba(255,255,255,0.35); }
 
-.bar-count {
+/* Portioned assigned-FTE strip below the project bar — one block per stable-FTE date range. */
+.bar-seg {
   position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  min-width: 13px;
+  top: 100%;
+  margin-top: 2px;
   height: 13px;
-  padding: 0 2px;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.28);
-  color: rgba(255, 255, 255, 0.92);
+  box-sizing: border-box;
+  border-left: 1px solid var(--border-strong);
+  padding: 0 3px;
   font-size: 9.5px;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 13px;
   text-align: center;
-  pointer-events: none;
-  z-index: 1;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
 }
+.bar-seg-compact { border-left-color: var(--border); }

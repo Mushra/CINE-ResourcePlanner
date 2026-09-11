@@ -275,7 +275,7 @@ export function Timeline() {
                 .sort((a, b) => (disciplineOrder.get(a.discId) ?? Infinity) - (disciplineOrder.get(b.discId) ?? Infinity));
               const collapseKey = `timeline:proj:${project.id}`;
               const projectCollapsed = collapsed[collapseKey] === true;
-              const headcountByPeriod = new Map(window.map((period) => [period, engine.getProjectAssignedHeadcount(project.id, period)] as const));
+              const assignedByPeriod = new Map(window.map((period) => [period, engine.getProjectAssigned(project.id, period)] as const));
               return (
                 <div key={project.id} className="tl-project-group">
                   <div className="tl-project-header-row">
@@ -298,7 +298,7 @@ export function Timeline() {
                         pxPerDay={pxPerDay}
                         onClick={() => openProject(project.id)}
                         onDatesChange={(start, end) => updateProject({ ...project, startDate: start, endDate: end })}
-                        headcountByPeriod={headcountByPeriod}
+                        assignedByPeriod={assignedByPeriod}
                       />
                     </div>
                   </div>

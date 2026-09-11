@@ -352,4 +352,29 @@ describe('PlanningEngine — plan-wide aggregates (Dashboard widgets)', () => {
 
     expect(engine.getTotalAssignedExcludingDispo('2026-09')).toBe(0.6);
   });
+
+  it('sums a project\'s required FTE across every requirement it has', () => {
+    const animation = pool();
+    const vfx = pool();
+    const p1 = project({ name: 'Alpha' });
+    const r1 = requirement(p1.id, animation.id, { '2026-09': 2 });
+    const r2 = requirement(p1.id, vfx.id, { '2026-09': 1.5 });
+
+    const engine = new PlanningEngine(
+      planningData({
+        pools: [animation, vfx],
+        projects: [p1],
+        requirements: [r1.requirement, r2.requirement],
+        requirementAllocations: [...r1.allocations, ...r2.allocations],
+      }),
+    );
+
+    expect(engine.getProjectRequired(p1.id, '2026-09')).toBe(3.5);
+  });
+
+  it('returns 0 for a project with no requirement allocations', () => {
+    const p1 = project({ name: 'Alpha' });
+    const engine = new PlanningEngine(planningData({ projects: [p1] }));
+    expect(engine.getProjectRequired(p1.id, '2026-09')).toBe(0);
+  });
 });
