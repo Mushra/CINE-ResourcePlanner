@@ -37,6 +37,7 @@ export function People() {
   const horizonMonths = useUiStore((s) => s.horizonMonths);
   const mode = useUiStore((s) => s.peopleMode);
   const setMode = useUiStore((s) => s.setPeopleMode);
+  const openPerson = useUiStore((s) => s.openPerson);
   const periods = useMemo(() => getForecastWindowPeriods(engine, horizonMonths), [engine, horizonMonths]);
 
   return (
@@ -56,12 +57,12 @@ export function People() {
         </div>
       </div>
       <GlobalFilterBar options={options} />
-      {mode === 'availability' ? <AvailabilityPanel engine={engine} periods={periods} /> : <AssignmentsPanel engine={engine} periods={periods} />}
+      {mode === 'availability' ? <AvailabilityPanel engine={engine} periods={periods} openPerson={openPerson} /> : <AssignmentsPanel engine={engine} periods={periods} openPerson={openPerson} />}
     </div>
   );
 }
 
-function AvailabilityPanel({ engine, periods }: { engine: ReturnType<typeof useFilteredEngine>['engine']; periods: string[] }) {
+function AvailabilityPanel({ engine, periods, openPerson }: { engine: ReturnType<typeof useFilteredEngine>['engine']; periods: string[]; openPerson: (personId: string) => void }) {
   const rows = useMemo<AvailabilityRow[]>(() => {
     const result: AvailabilityRow[] = [];
     for (const person of engine.people()) {
@@ -101,7 +102,7 @@ function AvailabilityPanel({ engine, periods }: { engine: ReturnType<typeof useF
         <tbody>
           {rows.map((row) => (
             <tr key={row.personId}>
-              <td className="cell-name">{row.personName}</td>
+              <td className="cell-name"><button type="button" className="person-name-link" onClick={() => openPerson(row.personId)}>{row.personName}</button></td>
               <td>{row.poolName}</td>
               <td>{row.site}</td>
               {periods.map((p) => {
@@ -120,7 +121,7 @@ function AvailabilityPanel({ engine, periods }: { engine: ReturnType<typeof useF
   );
 }
 
-function AssignmentsPanel({ engine, periods }: { engine: ReturnType<typeof useFilteredEngine>['engine']; periods: string[] }) {
+function AssignmentsPanel({ engine, periods, openPerson }: { engine: ReturnType<typeof useFilteredEngine>['engine']; periods: string[]; openPerson: (personId: string) => void }) {
   const [search, setSearch] = useState('');
 
   const allRows = useMemo<AssignmentRow[]>(() => {
@@ -201,7 +202,7 @@ function AssignmentsPanel({ engine, periods }: { engine: ReturnType<typeof useFi
             <tbody>
               {rows.map((r, i) => (
                 <tr key={`${r.personId}-${r.projectId}-${r.period}-${i}`}>
-                  <td className="cell-name">{r.personName}</td>
+                  <td className="cell-name"><button type="button" className="person-name-link" onClick={() => openPerson(r.personId)}>{r.personName}</button></td>
                   <td>{r.poolName}</td>
                   <td>{r.site}</td>
                   <td>{r.projectName}</td>

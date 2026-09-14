@@ -5,7 +5,7 @@ import { periodFromISODate } from '../../domain/periods';
 import { formatNum } from './AllocationCell';
 import type { Period } from '../../domain/types';
 
-type DragMode = 'move' | 'resize-start' | 'resize-end';
+export type DragMode = 'move' | 'resize-start' | 'resize-end';
 
 /** Portions the bar into contiguous runs of stable assigned FTE, so the total for a stretch of
  * months reads as one block instead of a sparse marker at each change point. */
@@ -42,7 +42,7 @@ export function ProjectBar({
   project: Project;
   window: Period[];
   pxPerDay: number;
-  onDatesChange: (startDate: string, endDate: string) => void;
+  onDatesChange: (startDate: string, endDate: string, mode: DragMode, origStart: string, origEnd: string) => void;
   onClick: () => void;
   assignedByPeriod: Map<Period, number>;
 }) {
@@ -92,7 +92,7 @@ export function ProjectBar({
     const drag = dragRef.current;
     dragRef.current = null;
     if (drag && preview && (preview.start !== drag.origStart || preview.end !== drag.origEnd)) {
-      onDatesChange(preview.start, preview.end);
+      onDatesChange(preview.start, preview.end, drag.mode, drag.origStart, drag.origEnd);
     }
     setPreview(null);
   }

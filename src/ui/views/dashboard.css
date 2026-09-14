@@ -93,7 +93,7 @@
 .pool-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
 
 /* Widget 1 — Répartition de la capacité par projet */
-.month-stack-list { display: flex; flex-direction: column; gap: 8px; }
+.month-stack-list { position: relative; display: flex; flex-direction: column; gap: 8px; }
 .month-stack-row {
   position: relative;
   display: grid;
@@ -109,14 +109,11 @@
   overflow: hidden;
   background: var(--surface-2);
 }
-.mix-seg { position: relative; height: 100%; transition: opacity 0.15s; }
+.mix-seg { position: relative; height: 100%; transition: opacity 0.15s; cursor: pointer; }
 .mix-seg.dimmed { opacity: 0.22; }
-.mix-seg:hover:after {
-  content: attr(data-tip);
+.mix-tooltip {
   position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -100%);
   background: var(--surface-3);
   border: 1px solid var(--border-strong);
   color: var(--text-primary);

@@ -1,10 +1,15 @@
 import { create } from 'zustand';
 import type { GlobalFilter } from '../domain/filter';
 import { EMPTY_GLOBAL_FILTER } from '../domain/filter';
+import type { Period } from '../domain/types';
 
 export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'people' | 'project-detail' | 'person-detail';
 export type PeopleMode = 'availability' | 'assignments';
-export type TimelineZoom = 'compact' | 'comfortable' | 'wide';
+/** Percentage zoom level, 10-200. 100 = the previous "Compact" scale (3px/day). */
+export type TimelineZoom = number;
+export const TIMELINE_ZOOM_MIN = 10;
+export const TIMELINE_ZOOM_MAX = 200;
+export const TIMELINE_ZOOM_DEFAULT = 100;
 export type HorizonMonths = 6 | 12;
 
 const COLLAPSE_STORAGE_KEY = 'cine-planner-collapse';
@@ -28,19 +33,27 @@ interface TimelineFilters {
   zoom: TimelineZoom;
   search: string;
   poolFilter: string[] | null;
+  /** null = auto-computed window (today ± data padding). Set = user-picked manual bounds. */
+  from: Period | null;
+  to: Period | null;
 }
 
 function loadTimelineFilters(): TimelineFilters {
-  const fallback: TimelineFilters = { zoom: 'comfortable', search: '', poolFilter: null };
+  const fallback: TimelineFilters = { zoom: TIMELINE_ZOOM_DEFAULT, search: '', poolFilter: null, from: null, to: null };
   try {
     const raw = localStorage.getItem(TIMELINE_FILTERS_KEY);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) return fallback;
+    const zoom = typeof parsed.zoom === 'number' && parsed.zoom >= TIMELINE_ZOOM_MIN && parsed.zoom <= TIMELINE_ZOOM_MAX
+      ? parsed.zoom
+      : TIMELINE_ZOOM_DEFAULT;
     return {
-      zoom: parsed.zoom === 'compact' || parsed.zoom === 'wide' ? parsed.zoom : 'comfortable',
+      zoom,
       search: typeof parsed.search === 'string' ? parsed.search : '',
       poolFilter: Array.isArray(parsed.poolFilter) ? parsed.poolFilter : null,
+      from: typeof parsed.from === 'string' ? parsed.from : null,
+      to: typeof parsed.to === 'string' ? parsed.to : null,
     };
   } catch {
     return fallback;
@@ -140,9 +153,13 @@ interface UiState {
   timelineSearch: string;
   /** null = show all pools. Pool IDs regenerate on a "replace" RPM re-import, so a stale filter falls back to "all". */
   timelinePoolFilter: string[] | null;
+  /** null = auto-computed window. Set = user override via the From/To pickers. */
+  timelineFrom: Period | null;
+  timelineTo: Period | null;
   setTimelineZoom: (zoom: TimelineZoom) => void;
   setTimelineSearch: (search: string) => void;
   setTimelinePoolFilter: (poolFilter: string[] | null) => void;
+  setTimelineWindow: (from: Period | null, to: Period | null) => void;
 
   /** Shared across Dashboard/Team/People — recomputes the engine, not just row visibility. */
   globalFilter: GlobalFilter;
@@ -202,20 +219,28 @@ export const useUiStore = create<UiState>((set, get) => ({
   timelineZoom: initialTimelineFilters.zoom,
   timelineSearch: initialTimelineFilters.search,
   timelinePoolFilter: initialTimelineFilters.poolFilter,
+  timelineFrom: initialTimelineFilters.from,
+  timelineTo: initialTimelineFilters.to,
   setTimelineZoom: (zoom) => {
-    const filters = { zoom, search: get().timelineSearch, poolFilter: get().timelinePoolFilter };
+    const clamped = Math.min(TIMELINE_ZOOM_MAX, Math.max(TIMELINE_ZOOM_MIN, zoom));
+    const filters = { zoom: clamped, search: get().timelineSearch, poolFilter: get().timelinePoolFilter, from: get().timelineFrom, to: get().timelineTo };
     saveTimelineFilters(filters);
-    set({ timelineZoom: zoom });
+    set({ timelineZoom: clamped });
   },
   setTimelineSearch: (search) => {
-    const filters = { zoom: get().timelineZoom, search, poolFilter: get().timelinePoolFilter };
+    const filters = { zoom: get().timelineZoom, search, poolFilter: get().timelinePoolFilter, from: get().timelineFrom, to: get().timelineTo };
     saveTimelineFilters(filters);
     set({ timelineSearch: search });
   },
   setTimelinePoolFilter: (poolFilter) => {
-    const filters = { zoom: get().timelineZoom, search: get().timelineSearch, poolFilter };
+    const filters = { zoom: get().timelineZoom, search: get().timelineSearch, poolFilter, from: get().timelineFrom, to: get().timelineTo };
     saveTimelineFilters(filters);
     set({ timelinePoolFilter: poolFilter });
+  },
+  setTimelineWindow: (from, to) => {
+    const filters = { zoom: get().timelineZoom, search: get().timelineSearch, poolFilter: get().timelinePoolFilter, from, to };
+    saveTimelineFilters(filters);
+    set({ timelineFrom: from, timelineTo: to });
   },
 
   globalFilter: initialGlobalFilterPrefs.filter,

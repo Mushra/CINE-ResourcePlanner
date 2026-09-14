@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Drawer } from './Drawer';
 import { Button } from './Button';
+import { pickContrastingColor } from '../lib/colors';
 import type { Discipline, ResourcePool } from '../../domain/types';
 
 export interface PoolFormValue {
@@ -9,19 +10,19 @@ export interface PoolFormValue {
   color: string;
 }
 
-const DEFAULT_COLOR = '#4f7cff';
-
-function fromPool(pool?: ResourcePool, defaultDisciplineId?: string | null): PoolFormValue {
-  if (!pool) return { name: '', disciplineId: defaultDisciplineId ?? null, color: DEFAULT_COLOR };
+function fromPool(pool: ResourcePool | undefined, defaultDisciplineId: string | null | undefined, existingColors: string[]): PoolFormValue {
+  if (!pool) return { name: '', disciplineId: defaultDisciplineId ?? null, color: pickContrastingColor(existingColors) };
   return { name: pool.name, disciplineId: pool.disciplineId, color: pool.color };
 }
 
 export function PoolFormDrawer({
-  pool, disciplines, defaultDisciplineId, otherPools, moveRule, onSetMoveRule, onClearMoveRule, onClose, onSave,
+  pool, disciplines, defaultDisciplineId, existingColors = [], otherPools, moveRule, onSetMoveRule, onClearMoveRule, onClose, onSave,
 }: {
   pool?: ResourcePool;
   disciplines: Discipline[];
   defaultDisciplineId?: string | null;
+  /** Sibling roles' colors, so a new role's default color contrasts with them. Ignored when editing. */
+  existingColors?: string[];
   /** Other roles this role's people could be moved into en masse — only relevant when editing an existing role. */
   otherPools?: ResourcePool[];
   /** The active "move this whole role" rule sourced from this role, if any. */
@@ -31,7 +32,7 @@ export function PoolFormDrawer({
   onClose: () => void;
   onSave: (value: PoolFormValue) => void;
 }) {
-  const [value, setValue] = useState<PoolFormValue>(() => fromPool(pool, defaultDisciplineId));
+  const [value, setValue] = useState<PoolFormValue>(() => fromPool(pool, defaultDisciplineId, existingColors));
   const [initialSnapshot] = useState(() => JSON.stringify(value));
   const canSave = value.name.trim().length > 0;
   const dirty = JSON.stringify(value) !== initialSnapshot;

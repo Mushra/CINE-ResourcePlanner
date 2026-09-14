@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
 import { getSanityChecks, type SanityCheck } from '../../engine/validation';
@@ -15,7 +15,7 @@ import { Collapsible } from '../components/Collapsible';
 import { GlobalFilterBar } from '../components/GlobalFilterBar';
 import { LineChart } from '../components/LineChart';
 import { useFilteredEngine } from '../hooks/useFilteredEngine';
-import { colorForKey } from '../lib/colors';
+import { colorForProject } from '../lib/colors';
 import type { ImportReport } from '../../import/rpmImport';
 
 export function Dashboard() {
@@ -24,6 +24,7 @@ export function Dashboard() {
   const lastImportReport = useStore((s) => s.lastImportReport);
   const navigate = useUiStore((s) => s.navigate);
   const openProject = useUiStore((s) => s.openProject);
+  const openPerson = useUiStore((s) => s.openPerson);
   const newDatabase = useStore((s) => s.newDatabase);
   const horizonMonths = useUiStore((s) => s.horizonMonths);
 
@@ -106,12 +107,12 @@ export function Dashboard() {
       </div>
 
       <div className="dashboard-grid dashboard-grid-projects">
-        <ProjectMix engine={engine} periods={trendPeriods} />
+        <ProjectMix engine={engine} periods={trendPeriods} openProject={openProject} />
         <ProjectCapacity engine={engine} />
       </div>
 
       <TeamTensionHeatmap engine={engine} periods={trendPeriods} />
-      <NamedAvailability engine={engine} periods={trendPeriods} />
+      <NamedAvailability engine={engine} periods={trendPeriods} openPerson={openPerson} />
 
       <div className="dashboard-grid">
         <DisciplineCapacity engine={engine} />
@@ -163,10 +164,29 @@ export function Dashboard() {
 
 /** Monthly stacked breakdown of assigned FTE per project — segment width = share of that month's
  * total. "Mettre en avant" narrows attention to a subset of projects without losing the others. */
-function ProjectMix({ engine, periods }: { engine: PlanningEngine; periods: Period[] }) {
+function ProjectMix({ engine, periods, openProject }: { engine: PlanningEngine; periods: Period[]; openProject: (projectId: string) => void }) {
   const [highlighted, setHighlighted] = useState<Set<string>>(new Set());
+  const [hover, setHover] = useState<{ top: number; centerX: number; label: string } | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!hover || !tipRef.current || !listRef.current) return;
+    const half = tipRef.current.offsetWidth / 2;
+    const width = listRef.current.clientWidth;
+    const clampedX = Math.min(width - half, Math.max(half, hover.centerX));
+    tipRef.current.style.left = `${clampedX}px`;
+  }, [hover]);
+
+  function showTip(e: React.MouseEvent<HTMLDivElement>, label: string): void {
+    const segRect = e.currentTarget.getBoundingClientRect();
+    const listRect = listRef.current!.getBoundingClientRect();
+    setHover({ top: segRect.top - listRect.top, centerX: segRect.left + segRect.width / 2 - listRect.left, label });
+  }
 
   const projects = useMemo(() => engine.projects(), [engine]);
+  /** Stable id order (by sortOrder) so each project's color spread stays consistent across widgets. */
+  const orderedIds = useMemo(() => projects.map((p) => p.id), [projects]);
 
   const monthly = useMemo(() => periods.map((p) => {
     const rows = projects
@@ -203,7 +223,7 @@ function ProjectMix({ engine, periods }: { engine: PlanningEngine; periods: Peri
         <EmptyState icon="projects" title="No assignments yet" description="Assign people to projects to see the monthly breakdown." />
       ) : (
         <>
-          <div className="month-stack-list">
+          <div className="month-stack-list" ref={listRef}>
             {monthly.map((m) => (
               <div key={m.period} className="month-stack-row">
                 <div className="month-stack-label">{formatPeriodLabel(m.period, { withYear: false })}</div>
@@ -213,9 +233,14 @@ function ProjectMix({ engine, periods }: { engine: PlanningEngine; periods: Peri
                     return (
                       <div
                         key={r.project.id}
+                        role="button"
+                        tabIndex={0}
                         className={`mix-seg${cls}`}
-                        data-tip={`${r.project.name} · ${round2(r.value)} FTE`}
-                        style={{ width: `${m.total > 0 ? (100 * r.value) / m.total : 0}%`, background: colorForKey(r.project.id) }}
+                        style={{ width: `${m.total > 0 ? (100 * r.value) / m.total : 0}%`, background: colorForProject(r.project.id, orderedIds) }}
+                        onMouseEnter={(e) => showTip(e, `${r.project.name} · ${round2(r.value)} FTE`)}
+                        onMouseLeave={() => setHover(null)}
+                        onClick={() => openProject(r.project.id)}
+                        onKeyDown={(e) => e.key === 'Enter' && openProject(r.project.id)}
                       />
                     );
                   })}
@@ -223,13 +248,18 @@ function ProjectMix({ engine, periods }: { engine: PlanningEngine; periods: Peri
                 <div className="month-stack-total">Total · {round2(m.total)} FTE</div>
               </div>
             ))}
+            {hover && (
+              <div ref={tipRef} className="mix-tooltip" style={{ top: hover.top - 6, left: hover.centerX }}>
+                {hover.label}
+              </div>
+            )}
           </div>
           <div className="mix-legend">
             {activeProjects.map((p) => {
               const cls = highlighted.size ? (highlighted.has(p.id) ? ' active' : ' dimmed') : '';
               return (
                 <button key={p.id} type="button" className={`mix-legend-item${cls}`} onClick={() => toggleHighlight(p.id)}>
-                  <i className="mix-legend-dot" style={{ background: colorForKey(p.id) }} />
+                  <i className="mix-legend-dot" style={{ background: colorForProject(p.id, orderedIds) }} />
                   {p.name}
                 </button>
               );
@@ -261,6 +291,8 @@ function ProjectCapacity({ engine }: { engine: PlanningEngine }) {
   }, [months]);
 
   const projects = useMemo(() => engine.projects().filter((p) => !p.isDispo), [engine]);
+  /** Unfiltered order so a project's color spread matches ProjectMix even though dispo projects are excluded here. */
+  const orderedIds = useMemo(() => engine.projects().map((p) => p.id), [engine]);
 
   function valueAt(projectId: string, p: Period): number {
     if (metric === 'staffed') return engine.getProjectAssigned(projectId, p);
@@ -273,7 +305,7 @@ function ProjectCapacity({ engine }: { engine: PlanningEngine }) {
     return projects
       .map((p) => {
         const avg = periods.length ? periods.reduce((sum, period) => sum + valueAt(p.id, period), 0) / periods.length : 0;
-        return { id: p.id, name: p.name, color: colorForKey(p.id), value: round2(avg) };
+        return { id: p.id, name: p.name, color: colorForProject(p.id, orderedIds), value: round2(avg) };
       })
       .filter((p) => p.value > 0.001)
       .sort((a, b) => b.value - a.value);
@@ -281,7 +313,7 @@ function ProjectCapacity({ engine }: { engine: PlanningEngine }) {
   }, [projects, periods, metric, engine]);
 
   const series = useMemo(() => projects
-    .map((p) => ({ id: p.id, label: p.name, color: colorForKey(p.id), values: periods.map((period) => round2(valueAt(p.id, period))) }))
+    .map((p) => ({ id: p.id, label: p.name, color: colorForProject(p.id, orderedIds), values: periods.map((period) => round2(valueAt(p.id, period))) }))
     .filter((s) => s.values.some((v) => v > 0.001)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [projects, periods, metric, engine]);
@@ -338,8 +370,8 @@ function ProjectCapacity({ engine }: { engine: PlanningEngine }) {
             </div>
           )}
           <div className="segmented">
-            <button type="button" className={metric === 'staffed' ? 'active' : ''} onClick={() => setMetric('staffed')}>FTE staffé</button>
-            <button type="button" className={metric === 'occupancy' ? 'active' : ''} onClick={() => setMetric('occupancy')}>Taux d'occupation</button>
+            <button type="button" className={metric === 'staffed' ? 'active' : ''} onClick={() => setMetric('staffed')}>FTE</button>
+            <button type="button" className={metric === 'occupancy' ? 'active' : ''} onClick={() => setMetric('occupancy')}>%</button>
           </div>
           <label className="widget-toggle">
             <input type="checkbox" checked={timeline} onChange={(e) => setTimeline(e.target.checked)} />
@@ -407,7 +439,7 @@ function ProjectCapacity({ engine }: { engine: PlanningEngine }) {
               const cls = highlighted.size ? (highlighted.has(p.id) ? ' active' : ' dimmed') : '';
               return (
                 <button key={p.id} type="button" className={`mix-legend-item${cls}`} onClick={() => toggleHighlight(p.id)}>
-                  <i className="mix-legend-dot" style={{ background: colorForKey(p.id) }} />
+                  <i className="mix-legend-dot" style={{ background: colorForProject(p.id, orderedIds) }} />
                   {p.name}
                 </button>
               );
@@ -498,7 +530,7 @@ interface AvailabilityRun {
 
 /** Continuous windows where a person carries no real (non-dispo) staffing — either explicitly
  * parked on a "dispo" project or simply unassigned that month. */
-function NamedAvailability({ engine, periods }: { engine: PlanningEngine; periods: Period[] }) {
+function NamedAvailability({ engine, periods, openPerson }: { engine: PlanningEngine; periods: Period[]; openPerson: (personId: string) => void }) {
   const runs = useMemo(() => {
     const people = engine.people().filter((p) => p.active && p.capacityFte > 0.001);
     const result: AvailabilityRun[] = [];
@@ -548,7 +580,7 @@ function NamedAvailability({ engine, periods }: { engine: PlanningEngine; period
           </div>
           {runs.map((r, i) => (
             <div key={`${r.personId}-${i}`} className="availability-row">
-              <span>{r.personName}</span>
+              <span><button type="button" className="person-name-link" onClick={() => openPerson(r.personId)}>{r.personName}</button></span>
               <span>{r.role}</span>
               <span>{r.teamLabel}</span>
               <span>{formatPeriodLabel(r.start, { withYear: false })}</span>

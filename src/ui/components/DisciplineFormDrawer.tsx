@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Drawer } from './Drawer';
 import { Button } from './Button';
+import { pickContrastingColor } from '../lib/colors';
 import type { Discipline } from '../../domain/types';
 
 export interface DisciplineFormValue {
@@ -8,21 +9,21 @@ export interface DisciplineFormValue {
   color: string;
 }
 
-const DEFAULT_COLOR = '#6b7280';
-
-function fromDiscipline(discipline?: Discipline): DisciplineFormValue {
-  if (!discipline) return { name: '', color: DEFAULT_COLOR };
+function fromDiscipline(discipline: Discipline | undefined, existingColors: string[]): DisciplineFormValue {
+  if (!discipline) return { name: '', color: pickContrastingColor(existingColors) };
   return { name: discipline.name, color: discipline.color };
 }
 
 export function DisciplineFormDrawer({
-  discipline, onClose, onSave,
+  discipline, existingColors = [], onClose, onSave,
 }: {
   discipline?: Discipline;
+  /** Sibling disciplines' colors, so a new discipline's default color contrasts with them. Ignored when editing. */
+  existingColors?: string[];
   onClose: () => void;
   onSave: (value: DisciplineFormValue) => void;
 }) {
-  const [value, setValue] = useState<DisciplineFormValue>(() => fromDiscipline(discipline));
+  const [value, setValue] = useState<DisciplineFormValue>(() => fromDiscipline(discipline, existingColors));
   const [initialSnapshot] = useState(() => JSON.stringify(value));
   const canSave = value.name.trim().length > 0;
   const dirty = JSON.stringify(value) !== initialSnapshot;

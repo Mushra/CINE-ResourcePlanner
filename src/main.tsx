@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './styles/global.css';
 import './ui/components/components.css';
 import './ui/components/drawer.css';
+import './ui/components/confirm-dialog.css';
 import './ui/components/table.css';
 import './ui/layout/layout.css';
 import './ui/views/views.css';

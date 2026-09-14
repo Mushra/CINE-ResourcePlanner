@@ -9,6 +9,7 @@ import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
 import { ConfirmButton } from '../components/ConfirmButton';
 import { PersonFormDrawer, type PersonFormValue } from '../components/PersonFormDrawer';
+import { RangePanel } from '../components/RangePanel';
 import { usePersonSave } from '../hooks/usePersonSave';
 
 const MONTH_W = 34;
@@ -20,6 +21,8 @@ export function PersonDetail({ personId }: { personId: string }) {
   const disciplines = useStore((s) => s.data.disciplines);
   const projects = useStore((s) => s.data.projects);
   const deletePerson = useStore((s) => s.deletePerson);
+  const setPersonAssignment = useStore((s) => s.setPersonAssignment);
+  const setPersonAssignmentRange = useStore((s) => s.setPersonAssignmentRange);
   const backToTeam = useUiStore((s) => s.backToTeam);
   const openProject = useUiStore((s) => s.openProject);
   const { savePersonEdit } = usePersonSave();
@@ -56,6 +59,11 @@ export function PersonDetail({ personId }: { personId: string }) {
   const projectRows = [...rows.entries()]
     .filter(([, r]) => r.fte.some((v) => Math.abs(v) > 0.001))
     .sort((a, b) => a[1].name.localeCompare(b[1].name));
+
+  // Window offered when adding a *new* assignment — every known period (not just this person's
+  // existing allocations), so any project can be picked and staffed going forward.
+  const addWindow = buildTimelineWindow(engine.allKnownPeriods());
+  const assignableProjects = projects.filter((p) => !rows.has(p.id)).sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <div className="person-detail-view">
@@ -127,6 +135,28 @@ export function PersonDetail({ personId }: { personId: string }) {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {assignableProjects.length > 0 && (
+          <div className="person-add-assignment">
+            <select
+              className="person-add-select"
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) setPersonAssignment(person.id, e.target.value, addWindow[0] ?? todayPeriod(), 1);
+                e.target.value = '';
+              }}
+            >
+              <option value="" disabled>+ Add project assignment…</option>
+              {assignableProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <RangePanel
+              options={assignableProjects.map((p) => ({ id: p.id, label: p.name }))}
+              months={addWindow}
+              fteLabel="FTE"
+              onApply={(projectId, periods, fte) => setPersonAssignmentRange(person.id, projectId, periods, fte)}
+            />
           </div>
         )}
       </div>

@@ -1,7 +1,7 @@
-import { Fragment, useRef, useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
-import { addMonths, formatPeriodLabel, periodFromISODate, periodRange, todayPeriod } from '../../domain/periods';
+import { addMonths, comparePeriod, formatPeriodLabel, periodFromISODate, periodRange, todayPeriod } from '../../domain/periods';
 import { getSanityChecks } from '../../engine/validation';
 import { isGenericPoolName } from '../../domain/identity';
 import type { Period } from '../../domain/types';
@@ -13,6 +13,7 @@ import { ConfirmButton } from '../components/ConfirmButton';
 import { Collapsible } from '../components/Collapsible';
 import { ProjectFormDrawer, type ProjectFormValue } from '../components/ProjectFormDrawer';
 import { RequirementTimeline, type RequirementGroup, type RequirementLane } from '../components/RequirementTimeline';
+import { RangePanel } from '../components/RangePanel';
 import { deriveProjectStatus, STATUS_LABEL } from '../../domain/projectStatus';
 
 const CERTAINTY_LABEL: Record<string, string> = { confirmed: 'Confirmed', estimated: 'Estimated', tbd: 'TBD' };
@@ -87,9 +88,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
   const explicitLifecycle = periodRange(periodFromISODate(project.startDate), periodFromISODate(project.endDate));
   const allocatedPeriods = engine.projectAllocatedPeriods(project.id);
-  const months = explicitLifecycle.length > 0
-    ? explicitLifecycle
-    : (allocatedPeriods.length > 0 ? allocatedPeriods : periodRange(todayPeriod(), addMonths(todayPeriod(), 3)));
+  // Editable window = the project's lifecycle unioned with any already-allocated months, padded 6
+  // months past the later of the two — so the grid/drag editors always offer room to plan ahead of
+  // the recorded end date, rather than locking editing to the current start/end.
+  const combinedPeriods = [...explicitLifecycle, ...allocatedPeriods];
+  const months = combinedPeriods.length > 0
+    ? periodRange(
+        combinedPeriods.reduce((min, p) => (comparePeriod(p, min) < 0 ? p : min), combinedPeriods[0]),
+        addMonths(combinedPeriods.reduce((max, p) => (comparePeriod(p, max) > 0 ? p : max), combinedPeriods[0]), 6),
+      )
+    : periodRange(todayPeriod(), addMonths(todayPeriod(), 3));
 
   const requirementPoolIds = new Set(requirements.filter((r) => r.projectId === project.id).map((r) => r.poolId));
   const requirementPools = pools.filter((p) => requirementPoolIds.has(p.id));
@@ -223,9 +231,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <h2>Besoins</h2>
           <span className="panel-sub">What the project needs, by role and month</span>
           <div className="panel-header-toggles">
-            <Button variant="ghost" size="sm" onClick={() => feedRequirementsFromAssignments(project.id, 'fill-empty')}>Fill empty from assignments</Button>
+            <Button variant="ghost" size="sm" onClick={() => feedRequirementsFromAssignments(project.id, 'fill-empty')}>Fill empty needs from assignments</Button>
             <ConfirmButton
-              label="= assignments"
+              label="Overwrite needs from assignments"
               confirmLabel="Overwrite"
               icon="download"
               onConfirm={() => feedRequirementsFromAssignments(project.id, 'overwrite')}
@@ -546,48 +554,3 @@ function AllocCell({ value, onCommit, onFillRight, highlightShort, mixed }: {
   );
 }
 
-/** Bulk-entry panel: pick a target (pool or person), a month range and an FTE, apply to every month at once. */
-function RangePanel({ options, months, onApply, fteLabel = 'FTE' }: {
-  options: { id: string; label: string }[];
-  months: Period[];
-  onApply: (targetId: string, periods: Period[], fte: number) => void;
-  fteLabel?: string;
-}) {
-  const targetRef = useRef<HTMLSelectElement>(null);
-  const fromRef = useRef<HTMLSelectElement>(null);
-  const toRef = useRef<HTMLSelectElement>(null);
-  const fteRef = useRef<HTMLInputElement>(null);
-
-  if (options.length === 0) return null;
-
-  return (
-    <div className="range-panel">
-      <select ref={targetRef} className="range-panel-select" defaultValue={options[0].id}>
-        {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-      </select>
-      <span className="range-panel-label">from</span>
-      <select ref={fromRef} defaultValue="0">
-        {months.map((m, i) => <option key={m} value={i}>{formatPeriodLabel(m, { withYear: false })}</option>)}
-      </select>
-      <span className="range-panel-label">to</span>
-      <select ref={toRef} defaultValue={String(months.length - 1)}>
-        {months.map((m, i) => <option key={m} value={i}>{formatPeriodLabel(m, { withYear: false })}</option>)}
-      </select>
-      <input ref={fteRef} type="number" step={0.5} min={0} defaultValue={1} className="num-input range-panel-fte" title={fteLabel} />
-      <Button
-        variant="secondary"
-        size="sm"
-        onClick={() => {
-          const targetId = targetRef.current!.value;
-          const fromIdx = Number(fromRef.current!.value);
-          const toIdx = Number(toRef.current!.value);
-          const fte = parseFloat(fteRef.current!.value ?? '') || 0;
-          if (!targetId || fromIdx > toIdx) return;
-          onApply(targetId, months.slice(fromIdx, toIdx + 1), fte);
-        }}
-      >
-        Apply
-      </Button>
-    </div>
-  );
-}

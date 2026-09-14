@@ -12,7 +12,7 @@
 // touching exceljs itself.
 import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
-import { comparePeriod } from '../domain/periods';
+import { comparePeriod, isoFirstDayOfPeriod, isoLastDayOfPeriod } from '../domain/periods';
 import { round2 } from '../engine/planning';
 import type { ImportReport, NormalizedAssignmentGroup, NormalizedDiscipline, NormalizedImport, NormalizedPerson, NormalizedPool, NormalizedProject } from './rpmImport';
 import { parseRpmWorkbook } from './rpmImport';
@@ -27,16 +27,6 @@ const ASSIGNMENTS_SHEET = 'Assignments_DB';
 
 const DISPO_ACTIVITY_TYPES = new Set(['availability', 'available', 'vacation', 'leave']);
 const DISPO_PROJECT_NAMES = new Set(['available', 'vacation']);
-
-function isoFirstDayOfPeriod(period: string): string {
-  return `${period}-01`;
-}
-
-function isoLastDayOfPeriod(period: string): string {
-  const [y, m] = period.split('-').map(Number);
-  const lastDay = new Date(y, m, 0).getDate();
-  return `${period}-${String(lastDay).padStart(2, '0')}`;
-}
 
 /** Rewrites worksheet .rels entries so exceljs can resolve this workbook's Table parts. See header comment. */
 async function loadPatchedWorkbook(buffer: ArrayBuffer): Promise<ExcelJS.Workbook> {

@@ -40,6 +40,13 @@ export function comparePeriod(a: Period, b: Period): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+/** Whole-month difference `b - a`, e.g. `monthsBetween('2025-01', '2025-04') === 3`. */
+export function monthsBetween(a: Period, b: Period): number {
+  const pa = parsePeriod(a);
+  const pb = parsePeriod(b);
+  return (pb.year - pa.year) * 12 + (pb.month0 - pa.month0);
+}
+
 /** Inclusive list of periods from start to end. Empty if either is null or end < start. */
 export function periodRange(start: Period | null, end: Period | null): Period[] {
   if (!start || !end || comparePeriod(start, end) > 0) return [];
@@ -52,6 +59,16 @@ export function periodRange(start: Period | null, end: Period | null): Period[] 
     guard += 1;
   }
   return result;
+}
+
+export function isoFirstDayOfPeriod(period: Period): string {
+  return `${period}-01`;
+}
+
+export function isoLastDayOfPeriod(period: Period): string {
+  const { year, month0 } = parsePeriod(period);
+  const lastDay = new Date(year, month0 + 1, 0).getDate();
+  return `${period}-${String(lastDay).padStart(2, '0')}`;
 }
 
 export function formatPeriodLabel(period: Period, opts: { withYear?: boolean } = {}): string {

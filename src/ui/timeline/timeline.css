@@ -28,15 +28,20 @@
 
 .pool-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 
-.tl-zoom { display: flex; align-items: center; gap: 8px; }
-.zoom-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 26px; height: 26px; border-radius: 6px;
-  border: 1px solid var(--border); background: var(--surface-0); color: var(--text-secondary);
-  cursor: pointer;
+.tl-zoom { display: flex; align-items: center; gap: 6px; color: var(--text-tertiary); }
+.tl-zoom-slider { width: 110px; accent-color: var(--accent); cursor: pointer; }
+.zoom-label { font-size: 11.5px; color: var(--text-tertiary); min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+
+.tl-window { display: flex; align-items: center; gap: 6px; }
+.tl-window-select {
+  font-size: 12px;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-0);
+  color: var(--text-primary);
 }
-.zoom-btn:hover { background: var(--surface-1); }
-.zoom-label { font-size: 11.5px; color: var(--text-tertiary); min-width: 48px; text-align: center; }
+.tl-window-arrow { color: var(--text-tertiary); font-size: 12px; }
 
 /* Unscheduled panel */
 .tl-unscheduled {
@@ -202,6 +207,7 @@
 .tl-pool-row-nested .tl-pool-label { padding-left: 40px; }
 .tl-person-row { min-height: 26px; }
 .tl-person-label { padding-left: 56px; font-size: 11px; color: var(--text-tertiary); }
+.tl-person-label .person-name-link { font-size: 11px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; }
 
 .tl-cell-readonly { cursor: default; }
 .tl-cell-readonly:hover { outline: none; }

@@ -1,8 +1,8 @@
-import { Fragment, useMemo, useState, type CSSProperties } from 'react';
+import { Fragment, useMemo, useState, type CSSProperties, type WheelEvent } from 'react';
 import { useStore } from '../../store/useStore';
-import { useUiStore } from '../../store/useUiStore';
+import { useUiStore, TIMELINE_ZOOM_MIN, TIMELINE_ZOOM_MAX } from '../../store/useUiStore';
 import { buildTimelineWindow, monthWidthPx, timelineLabelColumnWidth, totalWindowWidth, xForIsoDate } from './timelineMath';
-import { formatPeriodLabel, todayPeriod } from '../../domain/periods';
+import { addMonths, comparePeriod, formatPeriodLabel, monthsBetween, periodFromISODate, periodRange, todayPeriod } from '../../domain/periods';
 import { ProjectBar } from './ProjectBar';
 import { AllocationCell, formatNum, hexToRgba } from './AllocationCell';
 import { UnscheduledPanel } from './UnscheduledPanel';
@@ -10,10 +10,10 @@ import { Icon } from '../components/Icon';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
 import { ProjectFormDrawer, type ProjectFormValue } from '../components/ProjectFormDrawer';
+import { useConfirmDialog } from '../components/ConfirmDialog';
 import { PoolFilterMenu } from './PoolFilterMenu';
 import { round2, UNASSIGNED_DISCIPLINE_ID } from '../../engine/planning';
 import { isGenericPoolName } from '../../domain/identity';
-import type { TimelineZoom } from '../../store/useUiStore';
 import type { PlanningEngine } from '../../engine/planning';
 import type { Period } from '../../domain/types';
 
@@ -57,13 +57,14 @@ function PersonCell({ width, fte }: { width: number; fte: number }) {
 
 /** One assigned person's row under a pool, with their FTE for each period in the window. */
 function PersonRows({
-  engine, projectId, poolId, window, pxPerDay,
+  engine, projectId, poolId, window, pxPerDay, openPerson,
 }: {
   engine: PlanningEngine;
   projectId: string;
   poolId: string;
   window: Period[];
   pxPerDay: number;
+  openPerson: (personId: string) => void;
 }) {
   const names = new Map<string, string>();
   const fteByPersonPeriod = new Map<string, Map<Period, number>>();
@@ -89,7 +90,9 @@ function PersonRows({
     <>
       {personIds.map((personId) => (
         <div key={personId} className="tl-pool-row tl-person-row">
-          <div className="tl-label-cell tl-person-label">{names.get(personId)}</div>
+          <div className="tl-label-cell tl-person-label">
+            <button type="button" className="person-name-link" onClick={() => openPerson(personId)}>{names.get(personId)}</button>
+          </div>
           <div className="tl-cells-row">
             {window.map((period) => (
               <PersonCell key={period} width={monthWidthPx(period, pxPerDay)} fte={fteByPersonPeriod.get(personId)?.get(period) ?? 0} />
@@ -101,15 +104,17 @@ function PersonRows({
   );
 }
 
-const PX_PER_DAY: Record<TimelineZoom, number> = { compact: 3, comfortable: 5, wide: 9 };
-
 export function Timeline() {
   const engine = useStore((s) => s.engine);
   const projects = useStore((s) => s.data.projects);
   const updateProject = useStore((s) => s.updateProject);
   const createProject = useStore((s) => s.createProject);
   const setRequirement = useStore((s) => s.setRequirement);
+  const shiftProjectAllocations = useStore((s) => s.shiftProjectAllocations);
+  const autofillProjectExtension = useStore((s) => s.autofillProjectExtension);
+  const { confirm, dialog } = useConfirmDialog();
   const openProject = useUiStore((s) => s.openProject);
+  const openPerson = useUiStore((s) => s.openPerson);
   const collapsed = useUiStore((s) => s.collapsed);
   const toggleCollapse = useUiStore((s) => s.toggleCollapse);
   const zoom = useUiStore((s) => s.timelineZoom);
@@ -118,13 +123,28 @@ export function Timeline() {
   const setSearch = useUiStore((s) => s.setTimelineSearch);
   const storedPoolFilter = useUiStore((s) => s.timelinePoolFilter);
   const setStoredPoolFilter = useUiStore((s) => s.setTimelinePoolFilter);
+  const timelineFrom = useUiStore((s) => s.timelineFrom);
+  const timelineTo = useUiStore((s) => s.timelineTo);
+  const setTimelineWindow = useUiStore((s) => s.setTimelineWindow);
 
   const [showNew, setShowNew] = useState(false);
   const poolFilter = storedPoolFilter ? new Set(storedPoolFilter) : null;
   const setPoolFilter = (next: Set<string> | null) => setStoredPoolFilter(next ? Array.from(next) : null);
 
-  const pxPerDay = PX_PER_DAY[zoom];
-  const window = useMemo(() => buildTimelineWindow(engine.allKnownPeriods()), [engine]);
+  const pxPerDay = 3 * (zoom / 100);
+  const autoWindow = useMemo(() => buildTimelineWindow(engine.allKnownPeriods()), [engine]);
+  const window = useMemo(
+    () => (timelineFrom && timelineTo ? periodRange(timelineFrom, timelineTo) : autoWindow),
+    [autoWindow, timelineFrom, timelineTo],
+  );
+  /** Month options for the From/To pickers — the auto window padded a further year on each side. */
+  const windowOptions = useMemo(() => {
+    if (autoWindow.length === 0) return [] as Period[];
+    return periodRange(addMonths(autoWindow[0], -12), addMonths(autoWindow[autoWindow.length - 1], 12));
+  }, [autoWindow]);
+  const effectiveFrom = timelineFrom ?? autoWindow[0];
+  const effectiveTo = timelineTo ?? autoWindow[autoWindow.length - 1];
+  const isManualWindow = timelineFrom !== null && timelineTo !== null;
   const totalWidth = totalWindowWidth(window, pxPerDay);
   const todayX = xForIsoDate(`${todayPeriod()}-01`, window, pxPerDay) + (new Date().getDate() - 1) * pxPerDay;
 
@@ -223,9 +243,46 @@ export function Timeline() {
           onChange={setPoolFilter}
         />
         <div className="tl-zoom">
-          <button type="button" className="zoom-btn" onClick={() => setZoom(zoom === 'wide' ? 'comfortable' : 'compact')} aria-label="Zoom out"><Icon name="zoom-out" size={14} /></button>
-          <span className="zoom-label">{zoom === 'compact' ? 'Compact' : zoom === 'wide' ? 'Wide' : 'Comfortable'}</span>
-          <button type="button" className="zoom-btn" onClick={() => setZoom(zoom === 'compact' ? 'comfortable' : 'wide')} aria-label="Zoom in"><Icon name="zoom-in" size={14} /></button>
+          <Icon name="zoom-out" size={13} />
+          <input
+            type="range"
+            className="tl-zoom-slider"
+            min={TIMELINE_ZOOM_MIN}
+            max={TIMELINE_ZOOM_MAX}
+            step={5}
+            value={zoom}
+            onChange={(e) => setZoom(Number(e.target.value))}
+            aria-label="Zoom level"
+            title="Ctrl+scroll over the timeline also zooms"
+          />
+          <Icon name="zoom-in" size={13} />
+          <span className="zoom-label">{zoom}%</span>
+        </div>
+        <div className="tl-window">
+          <select
+            className="tl-window-select"
+            aria-label="Window start"
+            value={effectiveFrom}
+            onChange={(e) => setTimelineWindow(e.target.value as Period, effectiveTo)}
+          >
+            {windowOptions.filter((p) => comparePeriod(p, effectiveTo) <= 0).map((p) => (
+              <option key={p} value={p}>{formatPeriodLabel(p)}</option>
+            ))}
+          </select>
+          <span className="tl-window-arrow">→</span>
+          <select
+            className="tl-window-select"
+            aria-label="Window end"
+            value={effectiveTo}
+            onChange={(e) => setTimelineWindow(effectiveFrom, e.target.value as Period)}
+          >
+            {windowOptions.filter((p) => comparePeriod(p, effectiveFrom) >= 0).map((p) => (
+              <option key={p} value={p}>{formatPeriodLabel(p)}</option>
+            ))}
+          </select>
+          {isManualWindow && (
+            <Button variant="ghost" size="sm" onClick={() => setTimelineWindow(null, null)}>Auto</Button>
+          )}
         </div>
         {visibleCollapseKeys.length > 0 && (
           <>
@@ -239,7 +296,14 @@ export function Timeline() {
         <UnscheduledPanel projects={unscheduled} engine={engine} onOpen={openProject} onSetDates={(p, start, end) => updateProject({ ...p, startDate: start, startCertainty: 'estimated', endDate: end, endCertainty: 'estimated' })} />
       )}
 
-      <div className="tl-scroll">
+      <div
+        className="tl-scroll"
+        onWheel={(e: WheelEvent<HTMLDivElement>) => {
+          if (!e.ctrlKey) return;
+          e.preventDefault();
+          setZoom(zoom - e.deltaY * 0.2);
+        }}
+      >
         <div className="tl-scroll-inner" style={{ width: labelWidth + totalWidth, '--tl-label-w': `${labelWidth}px` } as CSSProperties}>
           <div className="tl-today-line" style={{ left: labelWidth + todayX }} title="Today" />
 
@@ -248,7 +312,7 @@ export function Timeline() {
             <div className="tl-months-row">
               {window.map((period) => (
                 <div key={period} className="tl-month-header" style={{ width: monthWidthPx(period, pxPerDay) }}>
-                  {formatPeriodLabel(period, { withYear: zoom !== 'compact' })}
+                  {formatPeriodLabel(period, { withYear: zoom >= 130 })}
                 </div>
               ))}
             </div>
@@ -297,7 +361,28 @@ export function Timeline() {
                         window={window}
                         pxPerDay={pxPerDay}
                         onClick={() => openProject(project.id)}
-                        onDatesChange={(start, end) => updateProject({ ...project, startDate: start, endDate: end })}
+                        onDatesChange={async (start, end, mode, origStart, origEnd) => {
+                          updateProject({ ...project, startDate: start, endDate: end });
+                          if (mode === 'move') {
+                            const origP = periodFromISODate(origStart);
+                            const newP = periodFromISODate(start);
+                            const monthDelta = origP && newP ? monthsBetween(origP, newP) : 0;
+                            if (monthDelta !== 0 && await confirm('Déplacer aussi les ressources et besoins avec le projet ?')) {
+                              shiftProjectAllocations(project.id, monthDelta);
+                            }
+                          } else if (mode === 'resize-end') {
+                            const origEndP = periodFromISODate(origEnd);
+                            const newEndP = periodFromISODate(end);
+                            if (origEndP && newEndP && comparePeriod(newEndP, origEndP) > 0) {
+                              const fromPeriod = addMonths(origEndP, 1);
+                              const okNeeds = await confirm('Reporter les besoins sur les nouveaux mois ?');
+                              const okAssignments = await confirm('Reporter les assignations sur les nouveaux mois ?');
+                              if (okNeeds || okAssignments) {
+                                autofillProjectExtension(project.id, fromPeriod, newEndP, { needs: okNeeds, assignments: okAssignments });
+                              }
+                            }
+                          }
+                        }}
                         assignedByPeriod={assignedByPeriod}
                       />
                     </div>
@@ -397,7 +482,7 @@ export function Timeline() {
                                   </div>
                                 </div>
                                 {peopleShown && (
-                                  <PersonRows engine={engine} projectId={project.id} poolId={poolId} window={window} pxPerDay={pxPerDay} />
+                                  <PersonRows engine={engine} projectId={project.id} poolId={poolId} window={window} pxPerDay={pxPerDay} openPerson={openPerson} />
                                 )}
                               </Fragment>
                             );
@@ -422,6 +507,7 @@ export function Timeline() {
           }}
         />
       )}
+      {dialog}
     </div>
   );
 }

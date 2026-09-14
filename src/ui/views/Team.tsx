@@ -167,6 +167,7 @@ export function Team() {
         />
         {newDiscipline && (
           <DisciplineFormDrawer
+            existingColors={disciplines.map((d) => d.color)}
             onClose={() => setNewDiscipline(false)}
             onSave={(v: DisciplineFormValue) => { createDiscipline(v); setNewDiscipline(false); }}
           />
@@ -377,6 +378,7 @@ export function Team() {
 
       {newDiscipline && (
         <DisciplineFormDrawer
+          existingColors={disciplines.map((d) => d.color)}
           onClose={() => setNewDiscipline(false)}
           onSave={(v: DisciplineFormValue) => { createDiscipline(v); setNewDiscipline(false); }}
         />
@@ -392,6 +394,7 @@ export function Team() {
         <PoolFormDrawer
           disciplines={disciplines}
           defaultDisciplineId={newPoolDisciplineId}
+          existingColors={pools.filter((p) => p.disciplineId === newPoolDisciplineId).map((p) => p.color)}
           onClose={() => setShowNewPool(false)}
           onSave={(v: PoolFormValue) => { savePoolEdit(undefined, v); setShowNewPool(false); }}
         />

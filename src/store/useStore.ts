@@ -24,7 +24,8 @@ import type { Discipline, PlanningData, Period, Person, Project, ResourcePool, S
 import { emptyPlanningData } from '../domain/types';
 import { applyStructureOverrides } from '../domain/overrides';
 import { normalizeKey, genericPoolName, isGenericPoolName } from '../domain/identity';
-import { formatPeriodLabel } from '../domain/periods';
+import { addMonths, comparePeriod, formatPeriodLabel, isoFirstDayOfPeriod, isoLastDayOfPeriod, periodFromISODate, periodRange } from '../domain/periods';
+import { spreadHue } from '../ui/lib/colors';
 
 export type ToastKind = 'success' | 'error' | 'info';
 
@@ -97,6 +98,13 @@ interface StoreState {
   feedRequirementsFromAssignments: (projectId: string, mode: FeedRequirementsMode) => void;
   feedAllRequirementsFromAssignments: (mode: FeedRequirementsMode) => void;
 
+  /** Shifts every requirement/assignment allocation of a project by `monthDelta` months — used when the
+   * user drags a project bar to move it and chooses to bring its resources along. */
+  shiftProjectAllocations: (projectId: string, monthDelta: number) => void;
+  /** Fills newly-added months (when a project's end is dragged later) from the last recorded value at
+   * each pool/person, for needs and/or assignments per the user's choice. */
+  autofillProjectExtension: (projectId: string, fromPeriod: Period, toPeriod: Period, opts: { needs: boolean; assignments: boolean }) => void;
+
   setPoolDiscipline: (poolName: string, disciplineName: string) => void;
   setPersonPool: (personName: string, poolName: string) => void;
   setPoolPersonPool: (sourcePoolName: string, targetPoolName: string) => void;
@@ -109,8 +117,38 @@ function nextToastId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
+const LEGACY_DISCIPLINE_COLOR = '#6b7280';
+
+/**
+ * Recolors any discipline still on the legacy uniform grey, or sharing a color with another
+ * discipline, using the golden-angle hue spread — guarantees sibling disciplines are visually
+ * distinct. Deliberate manual colors (unique, non-grey) are left untouched, so this is safe to
+ * run on every reload rather than only once.
+ */
+function normalizeDisciplineColors(db: PlannerDatabase): void {
+  const raw = loadPlanningData(db);
+  const ordered = [...raw.disciplines].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+  const usedColors = new Set<string>();
+  let index = 0;
+  for (const d of ordered) {
+    if (d.color === LEGACY_DISCIPLINE_COLOR || usedColors.has(d.color)) {
+      let color = spreadHue(index);
+      while (usedColors.has(color)) {
+        index += 1;
+        color = spreadHue(index);
+      }
+      repoUpdateDiscipline(db, { ...d, color });
+      usedColors.add(color);
+    } else {
+      usedColors.add(d.color);
+    }
+    index += 1;
+  }
+}
+
 export const useStore = create<StoreState>((set, get) => {
   function reload(db: PlannerDatabase): void {
+    normalizeDisciplineColors(db);
     const raw = loadPlanningData(db);
     const data = applyStructureOverrides(raw, raw.structureOverrides);
     const engine = new PlanningEngine(data, BASE_SCENARIO_ID);
@@ -191,6 +229,36 @@ export const useStore = create<StoreState>((set, get) => {
         return;
       }
     }
+  }
+
+  /**
+   * When a requirement/assignment write lands outside the project's current lifecycle, grows the
+   * project's start/end to cover it and marks the grown edge "estimated" — so editing needs or
+   * assignments is never blocked by dates set before the plan changed. A no-op for a zero/negative
+   * fte (clearing a cell should never grow the project).
+   */
+  function extendProjectDatesToCover(db: PlannerDatabase, projectId: string, periods: Period[], fte: number): void {
+    if (fte <= 0.001 || periods.length === 0) return;
+    const project = get().data.projects.find((p) => p.id === projectId);
+    if (!project) return;
+    let minPeriod = periods[0];
+    let maxPeriod = periods[0];
+    for (const p of periods) {
+      if (comparePeriod(p, minPeriod) < 0) minPeriod = p;
+      if (comparePeriod(p, maxPeriod) > 0) maxPeriod = p;
+    }
+    const patch: Partial<Project> = {};
+    const endPeriod = periodFromISODate(project.endDate);
+    if (!endPeriod || comparePeriod(maxPeriod, endPeriod) > 0) {
+      patch.endDate = isoLastDayOfPeriod(maxPeriod);
+      patch.endCertainty = 'estimated';
+    }
+    const startPeriod = periodFromISODate(project.startDate);
+    if (!startPeriod || comparePeriod(minPeriod, startPeriod) < 0) {
+      patch.startDate = isoFirstDayOfPeriod(minPeriod);
+      patch.startCertainty = 'estimated';
+    }
+    if (Object.keys(patch).length > 0) repoUpdateProject(db, { ...project, ...patch });
   }
 
   return {
@@ -456,6 +524,7 @@ export const useStore = create<StoreState>((set, get) => {
       const clamped = Math.max(0, fte);
       const req = getOrCreateRequirement(db, projectId, poolId, BASE_SCENARIO_ID);
       repoSetRequirementAllocation(db, req.id, period, clamped);
+      extendProjectDatesToCover(db, projectId, [period], clamped);
       persist();
     },
     setRequirementRange: (projectId, poolId, periods, fte) => {
@@ -463,6 +532,7 @@ export const useStore = create<StoreState>((set, get) => {
       const clamped = Math.max(0, fte);
       const req = getOrCreateRequirement(db, projectId, poolId, BASE_SCENARIO_ID);
       repoSetRequirementAllocations(db, req.id, periods, clamped);
+      extendProjectDatesToCover(db, projectId, periods, clamped);
       persist();
     },
     setDisciplineRequirement: (projectId, disciplineId, period, fte) => {
@@ -472,6 +542,7 @@ export const useStore = create<StoreState>((set, get) => {
       const clamped = Math.max(0, fte);
       const req = getOrCreateRequirement(db, projectId, poolId, BASE_SCENARIO_ID);
       repoSetRequirementAllocation(db, req.id, period, clamped);
+      extendProjectDatesToCover(db, projectId, [period], clamped);
       persist();
     },
     setDisciplineRequirementRange: (projectId, disciplineId, periods, fte) => {
@@ -481,6 +552,7 @@ export const useStore = create<StoreState>((set, get) => {
       const clamped = Math.max(0, fte);
       const req = getOrCreateRequirement(db, projectId, poolId, BASE_SCENARIO_ID);
       repoSetRequirementAllocations(db, req.id, periods, clamped);
+      extendProjectDatesToCover(db, projectId, periods, clamped);
       persist();
     },
     setPersonAssignment: (personId, projectId, period, fte) => {
@@ -488,6 +560,7 @@ export const useStore = create<StoreState>((set, get) => {
       const clamped = Math.max(0, fte);
       const asn = getOrCreatePersonAssignment(db, personId, projectId, BASE_SCENARIO_ID);
       repoSetPersonAssignmentAllocation(db, asn.id, period, clamped);
+      extendProjectDatesToCover(db, projectId, [period], clamped);
       persist();
       warnIfOverAllocated(personId, [period]);
     },
@@ -496,6 +569,7 @@ export const useStore = create<StoreState>((set, get) => {
       const clamped = Math.max(0, fte);
       const asn = getOrCreatePersonAssignment(db, personId, projectId, BASE_SCENARIO_ID);
       repoSetPersonAssignmentAllocations(db, asn.id, periods, clamped);
+      extendProjectDatesToCover(db, projectId, periods, clamped);
       persist();
       warnIfOverAllocated(personId, periods);
     },
@@ -530,6 +604,63 @@ export const useStore = create<StoreState>((set, get) => {
       get().toast(changed > 0 ? 'success' : 'info', changed > 0
         ? `${changed} requirement${changed === 1 ? '' : 's'} updated from assignments across ${projects.length} project${projects.length === 1 ? '' : 's'}`
         : 'Requirements already match assignments everywhere');
+    },
+
+    shiftProjectAllocations: (projectId, monthDelta) => {
+      if (monthDelta === 0) return;
+      const db = get().db!;
+      const data = get().data;
+      let changed = 0;
+
+      for (const req of data.requirements.filter((r) => r.projectId === projectId && r.scenarioId === BASE_SCENARIO_ID)) {
+        const allocs = data.requirementAllocations.filter((a) => a.requirementId === req.id && Math.abs(a.fte) > 0.001);
+        if (allocs.length === 0) continue;
+        const shifted = allocs.map((a) => ({ period: addMonths(a.period, monthDelta), fte: a.fte }));
+        for (const a of allocs) repoSetRequirementAllocation(db, req.id, a.period, 0);
+        for (const s of shifted) repoSetRequirementAllocation(db, req.id, s.period, s.fte);
+        changed += allocs.length;
+      }
+      for (const asn of data.personAssignments.filter((a) => a.projectId === projectId && a.scenarioId === BASE_SCENARIO_ID)) {
+        const allocs = data.personAssignmentAllocations.filter((a) => a.personAssignmentId === asn.id && Math.abs(a.fte) > 0.001);
+        if (allocs.length === 0) continue;
+        const shifted = allocs.map((a) => ({ period: addMonths(a.period, monthDelta), fte: a.fte }));
+        for (const a of allocs) repoSetPersonAssignmentAllocation(db, asn.id, a.period, 0);
+        for (const s of shifted) repoSetPersonAssignmentAllocation(db, asn.id, s.period, s.fte);
+        changed += allocs.length;
+      }
+      persist();
+      get().toast(changed > 0 ? 'success' : 'info', changed > 0
+        ? `Moved ${changed} allocation${changed === 1 ? '' : 's'} with the project`
+        : 'Nothing to move — the project had no allocations');
+    },
+    autofillProjectExtension: (projectId, fromPeriod, toPeriod, opts) => {
+      const db = get().db!;
+      const data = get().data;
+      const addedPeriods = periodRange(fromPeriod, toPeriod);
+      if (addedPeriods.length === 0) return;
+      const lastPeriod = addMonths(fromPeriod, -1);
+      let changed = 0;
+
+      if (opts.needs) {
+        for (const req of data.requirements.filter((r) => r.projectId === projectId && r.scenarioId === BASE_SCENARIO_ID)) {
+          const last = data.requirementAllocations.find((a) => a.requirementId === req.id && a.period === lastPeriod);
+          if (!last || last.fte <= 0.001) continue;
+          repoSetRequirementAllocations(db, req.id, addedPeriods, last.fte);
+          changed += addedPeriods.length;
+        }
+      }
+      if (opts.assignments) {
+        for (const asn of data.personAssignments.filter((a) => a.projectId === projectId && a.scenarioId === BASE_SCENARIO_ID)) {
+          const last = data.personAssignmentAllocations.find((a) => a.personAssignmentId === asn.id && a.period === lastPeriod);
+          if (!last || last.fte <= 0.001) continue;
+          repoSetPersonAssignmentAllocations(db, asn.id, addedPeriods, last.fte);
+          changed += addedPeriods.length;
+        }
+      }
+      persist();
+      get().toast(changed > 0 ? 'success' : 'info', changed > 0
+        ? `Autofilled ${changed} cell${changed === 1 ? '' : 's'} from ${formatPeriodLabel(lastPeriod)}`
+        : `Nothing to autofill from ${formatPeriodLabel(lastPeriod)}`);
     },
 
     setPoolDiscipline: (poolName, disciplineName) => {
