@@ -231,7 +231,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <h2>Besoins</h2>
           <span className="panel-sub">What the project needs, by role and month</span>
           <div className="panel-header-toggles">
-            <Button variant="ghost" size="sm" onClick={() => feedRequirementsFromAssignments(project.id, 'fill-empty')}>Fill empty needs from assignments</Button>
+            <Button variant="ghost" size="sm" icon="download" onClick={() => feedRequirementsFromAssignments(project.id, 'fill-empty')}>Fill empty needs from assignments</Button>
             <ConfirmButton
               label="Overwrite needs from assignments"
               confirmLabel="Overwrite"

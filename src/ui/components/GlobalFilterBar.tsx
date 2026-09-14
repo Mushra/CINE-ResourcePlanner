@@ -1,4 +1,4 @@
-import { useUiStore, type HorizonMonths } from '../../store/useUiStore';
+import { useUiStore } from '../../store/useUiStore';
 import { isGlobalFilterActive } from '../../domain/filter';
 import { FilterMenu } from './FilterMenu';
 import { Button } from './Button';
@@ -6,15 +6,12 @@ import type { GlobalFilterOptions } from '../hooks/useFilteredEngine';
 
 /**
  * Shared filter bar for Dashboard/Team/People: Site/Team/Discipline narrow which
- * people and pools the engine sees (see useFilteredEngine), and the horizon picks how many months
- * ahead the view looks. One filter, every view that renders this bar reacts the same way.
- * `showHorizon` hides the "Next X months" select for views (Team) that don't read horizonMonths at all.
+ * people and pools the engine sees (see useFilteredEngine). One filter, every view that renders
+ * this bar reacts the same way.
  */
-export function GlobalFilterBar({ options, showHorizon = true }: { options: GlobalFilterOptions; showHorizon?: boolean }) {
+export function GlobalFilterBar({ options }: { options: GlobalFilterOptions }) {
   const globalFilter = useUiStore((s) => s.globalFilter);
   const setGlobalFilter = useUiStore((s) => s.setGlobalFilter);
-  const horizonMonths = useUiStore((s) => s.horizonMonths);
-  const setHorizonMonths = useUiStore((s) => s.setHorizonMonths);
 
   const isActive = isGlobalFilterActive(globalFilter);
 
@@ -42,16 +39,6 @@ export function GlobalFilterBar({ options, showHorizon = true }: { options: Glob
         <Button variant="ghost" size="sm" onClick={() => setGlobalFilter({ sites: null, teams: null, disciplineIds: null })}>
           Clear
         </Button>
-      )}
-      {showHorizon && (
-        <select
-          className="range-select"
-          value={horizonMonths}
-          onChange={(e) => setHorizonMonths(Number(e.target.value) as HorizonMonths)}
-        >
-          <option value={6}>Next 6 months</option>
-          <option value={12}>Next 12 months</option>
-        </select>
       )}
     </div>
   );

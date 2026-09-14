@@ -31,14 +31,13 @@ interface AssignmentRow {
 }
 
 /** Who's free and who's on what — two views of the same person x time data, toggled rather than
- * split across separate nav items since they share the filtered engine, horizon, and chrome. */
+ * split across separate nav items since they share the filtered engine and chrome. */
 export function People() {
   const { engine, options } = useFilteredEngine();
-  const horizonMonths = useUiStore((s) => s.horizonMonths);
   const mode = useUiStore((s) => s.peopleMode);
   const setMode = useUiStore((s) => s.setPeopleMode);
   const openPerson = useUiStore((s) => s.openPerson);
-  const periods = useMemo(() => getForecastWindowPeriods(engine, horizonMonths), [engine, horizonMonths]);
+  const periods = useMemo(() => getForecastWindowPeriods(engine, 12), [engine]);
 
   return (
     <div className="people-view">

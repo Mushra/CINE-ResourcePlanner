@@ -186,7 +186,7 @@ export function Team() {
         <Button variant="primary" icon="plus" onClick={() => setNewDiscipline(true)}>New discipline</Button>
       </div>
 
-      <GlobalFilterBar options={options} showHorizon={false} />
+      <GlobalFilterBar options={options} />
 
       <div className="team-toolbar">
         {visibleCollapseKeys.length > 0 && (
@@ -284,6 +284,7 @@ export function Team() {
                       {rolePeople.length === 0 ? (
                         <p className="empty-inline">No people in this role yet.</p>
                       ) : (
+                        <div className="table-scroll">
                         <table className="data-table team-people-table">
                           <thead>
                             <tr>
@@ -363,6 +364,7 @@ export function Team() {
                             })}
                           </tbody>
                         </table>
+                        </div>
                       )}
                     </Collapsible>
                   );

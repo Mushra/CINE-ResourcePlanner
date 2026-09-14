@@ -1,8 +1,8 @@
 import { Fragment, useMemo, useState, type CSSProperties, type WheelEvent } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore, TIMELINE_ZOOM_MIN, TIMELINE_ZOOM_MAX } from '../../store/useUiStore';
-import { buildTimelineWindow, monthWidthPx, timelineLabelColumnWidth, totalWindowWidth, xForIsoDate } from './timelineMath';
-import { addMonths, comparePeriod, formatPeriodLabel, monthsBetween, periodFromISODate, periodRange, todayPeriod } from '../../domain/periods';
+import { buildTimelineWindow, isoDiffDays, monthWidthPx, timelineLabelColumnWidth, totalWindowWidth, xForIsoDate } from './timelineMath';
+import { addMonths, comparePeriod, formatPeriodLabel, periodFromISODate, periodRange, todayPeriod } from '../../domain/periods';
 import { ProjectBar } from './ProjectBar';
 import { AllocationCell, formatNum, hexToRgba } from './AllocationCell';
 import { UnscheduledPanel } from './UnscheduledPanel';
@@ -112,7 +112,7 @@ export function Timeline() {
   const setRequirement = useStore((s) => s.setRequirement);
   const shiftProjectAllocations = useStore((s) => s.shiftProjectAllocations);
   const autofillProjectExtension = useStore((s) => s.autofillProjectExtension);
-  const { confirm, dialog } = useConfirmDialog();
+  const { confirm, confirm3, dialog } = useConfirmDialog();
   const openProject = useUiStore((s) => s.openProject);
   const openPerson = useUiStore((s) => s.openPerson);
   const collapsed = useUiStore((s) => s.collapsed);
@@ -364,11 +364,14 @@ export function Timeline() {
                         onDatesChange={async (start, end, mode, origStart, origEnd) => {
                           updateProject({ ...project, startDate: start, endDate: end });
                           if (mode === 'move') {
-                            const origP = periodFromISODate(origStart);
-                            const newP = periodFromISODate(start);
-                            const monthDelta = origP && newP ? monthsBetween(origP, newP) : 0;
-                            if (monthDelta !== 0 && await confirm('Déplacer aussi les ressources et besoins avec le projet ?')) {
-                              shiftProjectAllocations(project.id, monthDelta);
+                            const monthDelta = Math.round(isoDiffDays(origStart, start) / 30.44);
+                            if (monthDelta !== 0) {
+                              const choice = await confirm3('Déplacer aussi les ressources et besoins avec le projet ?');
+                              if (choice === 'yes') {
+                                shiftProjectAllocations(project.id, monthDelta);
+                              } else if (choice === 'cancel') {
+                                updateProject({ ...project, startDate: origStart, endDate: origEnd });
+                              }
                             }
                           } else if (mode === 'resize-end') {
                             const origEndP = periodFromISODate(origEnd);

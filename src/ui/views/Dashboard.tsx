@@ -21,16 +21,15 @@ import type { ImportReport } from '../../import/rpmImport';
 export function Dashboard() {
   const { engine, options } = useFilteredEngine();
   const projects = useStore((s) => s.data.projects);
+  const people = useStore((s) => s.data.people);
   const lastImportReport = useStore((s) => s.lastImportReport);
   const navigate = useUiStore((s) => s.navigate);
   const openProject = useUiStore((s) => s.openProject);
   const openPerson = useUiStore((s) => s.openPerson);
   const newDatabase = useStore((s) => s.newDatabase);
-  const horizonMonths = useUiStore((s) => s.horizonMonths);
-
   const checks = useMemo(() => getSanityChecks(engine), [engine]);
   const period = todayPeriod();
-  const trendPeriods = useMemo(() => getForecastWindowPeriods(engine, horizonMonths), [engine, horizonMonths]);
+  const trendPeriods = useMemo(() => getForecastWindowPeriods(engine, 12), [engine]);
 
   if (projects.length === 0) {
     return (
@@ -43,19 +42,27 @@ export function Dashboard() {
     );
   }
 
-  const activeProjects = projects.filter((p) => {
-    const status = deriveProjectStatus(p);
-    return status === 'active' || status === 'planned';
-  });
+  const activeProjectsNow = projects.filter((p) => deriveProjectStatus(p) === 'active');
   const totalCapacity = engine.getTotalCapacity(period);
   const critical = checks.filter((c) => c.severity === 'critical');
   const warnings = checks.filter((c) => c.severity === 'warning');
   const overCapacityNow = checks.filter((c) => c.category === 'over_capacity' && c.period === period);
-  const understaffedProjectIds = new Set(
-    checks.filter((c) => c.category === 'understaffed_project' || c.category === 'unstaffed_requirement').map((c) => c.projectId),
+  const understaffedProjectIdsNow = new Set(
+    checks
+      .filter((c) => c.category === 'understaffed_project' && c.period === period)
+      .map((c) => c.projectId)
+      .concat(
+        checks
+          .filter((c) => c.category === 'unstaffed_requirement' && c.projectId && engine.projectActivePeriods(c.projectId).includes(period))
+          .map((c) => c.projectId),
+      ),
   );
-  const overAllocatedProjectIds = new Set(checks.filter((c) => c.category === 'over_allocated').map((c) => c.projectId));
-  const unstaffedPeople = checks.filter((c) => c.category === 'unstaffed_person');
+  const overAllocatedProjectIdsNow = new Set(
+    checks.filter((c) => c.category === 'over_allocated' && c.period === period).map((c) => c.projectId),
+  );
+  const unstaffedPeopleNow = people.filter(
+    (p) => p.active && p.capacityFte > 0.001 && engine.getPersonAssigned(p.id, period) <= 0.001,
+  );
 
   const groupedChecks: { id: string; name: string; checks: SanityCheck[] }[] = [];
   {
@@ -77,7 +84,7 @@ export function Dashboard() {
       </div>
 
       <div className="kpi-row">
-        <KpiTile label="Active projects" value={String(activeProjects.length)} icon="projects" />
+        <KpiTile label="Active projects" value={String(activeProjectsNow.length)} icon="projects" sub={formatPeriodLabel(period)} />
         <KpiTile label="Total capacity" value={`${round2(totalCapacity)} FTE`} icon="team" sub={formatPeriodLabel(period)} />
         <KpiTile
           label="Capacity conflicts"
@@ -88,21 +95,24 @@ export function Dashboard() {
         />
         <KpiTile
           label="Understaffed projects"
-          value={String(understaffedProjectIds.size)}
+          value={String(understaffedProjectIdsNow.size)}
           icon="warning"
-          tone={understaffedProjectIds.size > 0 ? 'warning' : 'neutral'}
+          tone={understaffedProjectIdsNow.size > 0 ? 'warning' : 'neutral'}
+          sub={formatPeriodLabel(period)}
         />
         <KpiTile
           label="Over-allocated projects"
-          value={String(overAllocatedProjectIds.size)}
+          value={String(overAllocatedProjectIdsNow.size)}
           icon="warning"
-          tone={overAllocatedProjectIds.size > 0 ? 'warning' : 'neutral'}
+          tone={overAllocatedProjectIdsNow.size > 0 ? 'warning' : 'neutral'}
+          sub={formatPeriodLabel(period)}
         />
         <KpiTile
           label="Unstaffed people"
-          value={String(unstaffedPeople.length)}
+          value={String(unstaffedPeopleNow.length)}
           icon="team"
-          tone={unstaffedPeople.length > 0 ? 'warning' : 'neutral'}
+          tone={unstaffedPeopleNow.length > 0 ? 'warning' : 'neutral'}
+          sub={formatPeriodLabel(period)}
         />
       </div>
 
@@ -230,13 +240,17 @@ function ProjectMix({ engine, periods, openProject }: { engine: PlanningEngine; 
                 <div className="month-stack">
                   {m.rows.map((r) => {
                     const cls = highlighted.size ? (highlighted.has(r.project.id) ? ' highlighted' : ' dimmed') : '';
+                    const dispoCls = r.project.isDispo ? ' mix-seg-dispo' : '';
                     return (
                       <div
                         key={r.project.id}
                         role="button"
                         tabIndex={0}
-                        className={`mix-seg${cls}`}
-                        style={{ width: `${m.total > 0 ? (100 * r.value) / m.total : 0}%`, background: colorForProject(r.project.id, orderedIds) }}
+                        className={`mix-seg${dispoCls}${cls}`}
+                        style={{
+                          width: `${m.total > 0 ? (100 * r.value) / m.total : 0}%`,
+                          ...(r.project.isDispo ? {} : { background: colorForProject(r.project.id, orderedIds) }),
+                        }}
                         onMouseEnter={(e) => showTip(e, `${r.project.name} · ${round2(r.value)} FTE`)}
                         onMouseLeave={() => setHover(null)}
                         onClick={() => openProject(r.project.id)}
@@ -259,7 +273,10 @@ function ProjectMix({ engine, periods, openProject }: { engine: PlanningEngine; 
               const cls = highlighted.size ? (highlighted.has(p.id) ? ' active' : ' dimmed') : '';
               return (
                 <button key={p.id} type="button" className={`mix-legend-item${cls}`} onClick={() => toggleHighlight(p.id)}>
-                  <i className="mix-legend-dot" style={{ background: colorForProject(p.id, orderedIds) }} />
+                  <i
+                    className={`mix-legend-dot${p.isDispo ? ' mix-seg-dispo' : ''}`}
+                    style={p.isDispo ? undefined : { background: colorForProject(p.id, orderedIds) }}
+                  />
                   {p.name}
                 </button>
               );

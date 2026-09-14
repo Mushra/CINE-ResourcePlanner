@@ -66,6 +66,7 @@ export function Projects() {
           action={<Button variant="primary" icon="plus" onClick={() => setShowNew(true)}>New project</Button>}
         />
       ) : (
+        <div className="table-scroll">
         <table className="data-table">
           <thead>
             <tr>
@@ -98,6 +99,7 @@ export function Projects() {
             })}
           </tbody>
         </table>
+        </div>
       )}
 
       {showNew && (

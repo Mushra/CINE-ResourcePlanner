@@ -10,7 +10,6 @@ export type TimelineZoom = number;
 export const TIMELINE_ZOOM_MIN = 10;
 export const TIMELINE_ZOOM_MAX = 200;
 export const TIMELINE_ZOOM_DEFAULT = 100;
-export type HorizonMonths = 6 | 12;
 
 const COLLAPSE_STORAGE_KEY = 'cine-planner-collapse';
 const TIMELINE_FILTERS_KEY = 'cine-planner-timeline-filters';
@@ -66,11 +65,10 @@ function saveTimelineFilters(filters: TimelineFilters): void {
 
 interface GlobalFilterPrefs {
   filter: GlobalFilter;
-  horizonMonths: HorizonMonths;
 }
 
 function loadGlobalFilterPrefs(): GlobalFilterPrefs {
-  const fallback: GlobalFilterPrefs = { filter: EMPTY_GLOBAL_FILTER, horizonMonths: 6 };
+  const fallback: GlobalFilterPrefs = { filter: EMPTY_GLOBAL_FILTER };
   try {
     const raw = localStorage.getItem(GLOBAL_FILTER_KEY);
     if (!raw) return fallback;
@@ -82,8 +80,7 @@ function loadGlobalFilterPrefs(): GlobalFilterPrefs {
       teams: Array.isArray(f?.teams) ? f.teams : null,
       disciplineIds: Array.isArray(f?.disciplineIds) ? f.disciplineIds : null,
     };
-    const horizonMonths: HorizonMonths = parsed.horizonMonths === 12 ? parsed.horizonMonths : 6;
-    return { filter, horizonMonths };
+    return { filter };
   } catch {
     return fallback;
   }
@@ -163,9 +160,7 @@ interface UiState {
 
   /** Shared across Dashboard/Team/People — recomputes the engine, not just row visibility. */
   globalFilter: GlobalFilter;
-  horizonMonths: HorizonMonths;
   setGlobalFilter: (filter: GlobalFilter) => void;
-  setHorizonMonths: (months: HorizonMonths) => void;
 
   /** Which of the two People sub-views (Availability / Assignments) is showing. */
   peopleMode: PeopleMode;
@@ -244,14 +239,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
 
   globalFilter: initialGlobalFilterPrefs.filter,
-  horizonMonths: initialGlobalFilterPrefs.horizonMonths,
   setGlobalFilter: (filter) => {
-    saveGlobalFilterPrefs({ filter, horizonMonths: get().horizonMonths });
+    saveGlobalFilterPrefs({ filter });
     set({ globalFilter: filter });
-  },
-  setHorizonMonths: (horizonMonths) => {
-    saveGlobalFilterPrefs({ filter: get().globalFilter, horizonMonths });
-    set({ horizonMonths });
   },
 
   peopleMode: loadPeopleMode(),
