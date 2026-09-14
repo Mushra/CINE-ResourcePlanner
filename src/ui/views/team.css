@@ -59,3 +59,13 @@
 .team-people-table td:first-child, .team-people-table th:first-child { width: 22px; }
 .team-select-checkbox { width: auto; margin: 0; }
 .empty-inline-filtered { color: var(--text-tertiary); }
+
+.person-name-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text-primary);
+  font-weight: 500;
+  cursor: pointer;
+}
+.person-name-link:hover { color: var(--accent); text-decoration: underline; }

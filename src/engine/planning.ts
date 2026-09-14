@@ -42,6 +42,14 @@ export interface ProjectPersonStaffing {
   lines: ProjectPersonStaffingLine[];
 }
 
+export interface PersonProjectStaffingLine {
+  personAssignmentId: string;
+  projectId: string;
+  projectName: string;
+  projectStatus: Project['status'];
+  fte: number;
+}
+
 /**
  * Pure, DB/UI-free calculation engine over a PlanningData snapshot. All reads are scoped to a
  * single scenario (defaulting to the base scenario) so future what-if scenarios are just a
@@ -269,12 +277,16 @@ export class PlanningEngine {
     return round2(total);
   }
 
-  /** Like getPersonAssigned, but a person parked on an isDispo (bench) project doesn't count as assigned — for "who's actually free" views. */
+  /**
+   * Like getPersonAssigned, but a person parked on an isDispo (bench) project, or on a project
+   * that's been manually cancelled, doesn't count as assigned — for "who's actually free" views.
+   */
   getPersonAssignedExcludingDispo(personId: string, period: Period): number {
     let total = 0;
     for (const pa of this.personAssignmentsByPerson.get(personId) ?? []) {
       if (pa.scenarioId !== this.scenarioId) continue;
-      if (this.projectsById.get(pa.projectId)?.isDispo) continue;
+      const project = this.projectsById.get(pa.projectId);
+      if (project?.isDispo || project?.status === 'cancelled') continue;
       total += this.personAllocationAt(pa.id, period);
     }
     return round2(total);
@@ -323,6 +335,37 @@ export class PlanningEngine {
     }
     lines.sort((a, b) => a.personName.localeCompare(b.personName));
     return { projectId, period, lines };
+  }
+
+  /** Per-project assigned FTE for one person at one period — symmetric to getProjectPersonStaffing, drives the PersonDetail UI. */
+  getPersonProjectStaffing(personId: string, period: Period): PersonProjectStaffingLine[] {
+    const lines: PersonProjectStaffingLine[] = [];
+    for (const pa of this.personAssignmentsByPerson.get(personId) ?? []) {
+      if (pa.scenarioId !== this.scenarioId) continue;
+      const project = this.projectsById.get(pa.projectId);
+      const fte = this.personAllocationAt(pa.id, period);
+      lines.push({
+        personAssignmentId: pa.id,
+        projectId: pa.projectId,
+        projectName: project?.name ?? pa.projectId,
+        projectStatus: project?.status ?? 'planned',
+        fte,
+      });
+    }
+    lines.sort((a, b) => a.projectName.localeCompare(b.projectName));
+    return lines;
+  }
+
+  /** Every period any of a person's assignments has non-zero FTE — the window for their assignment timeline. */
+  personAllocatedPeriods(personId: string): Period[] {
+    const periods = new Set<Period>();
+    for (const pa of this.personAssignmentsByPerson.get(personId) ?? []) {
+      if (pa.scenarioId !== this.scenarioId) continue;
+      for (const alloc of this.personAllocationsByAssignmentId.get(pa.id) ?? []) {
+        if (Math.abs(alloc.fte) > 0.001) periods.add(alloc.period);
+      }
+    }
+    return [...periods].sort(comparePeriod);
   }
 
   /** Aggregate staffing across a project's whole lifecycle (or requirement/assignment span if TBD). */

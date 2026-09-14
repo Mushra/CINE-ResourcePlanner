@@ -17,6 +17,7 @@ import { DisciplineFormDrawer, type DisciplineFormValue } from '../components/Di
 import { PoolFormDrawer, type PoolFormValue } from '../components/PoolFormDrawer';
 import { PersonFormDrawer, type PersonFormValue } from '../components/PersonFormDrawer';
 import { BatchEditPersonDrawer, type BatchPersonPatch } from '../components/BatchEditPersonDrawer';
+import { usePersonSave } from '../hooks/usePersonSave';
 import type { Discipline, Person, ResourcePool } from '../../domain/types';
 
 export function Team() {
@@ -32,15 +33,13 @@ export function Team() {
   const createPool = useStore((s) => s.createPool);
   const updatePool = useStore((s) => s.updatePool);
   const deletePool = useStore((s) => s.deletePool);
-  const createPerson = useStore((s) => s.createPerson);
-  const updatePerson = useStore((s) => s.updatePerson);
   const batchUpdatePeople = useStore((s) => s.batchUpdatePeople);
   const deletePerson = useStore((s) => s.deletePerson);
   const setPoolDiscipline = useStore((s) => s.setPoolDiscipline);
-  const setPersonPool = useStore((s) => s.setPersonPool);
   const setPoolPersonPool = useStore((s) => s.setPoolPersonPool);
-  const setPersonDiscipline = useStore((s) => s.setPersonDiscipline);
   const clearOverrideByKey = useStore((s) => s.clearOverrideByKey);
+  const { savePersonEdit } = usePersonSave();
+  const openPerson = useUiStore((s) => s.openPerson);
 
   const [newDiscipline, setNewDiscipline] = useState(false);
   const [editingDiscipline, setEditingDiscipline] = useState<Discipline | null>(null);
@@ -72,23 +71,6 @@ export function Team() {
     if (chosenDiscipline && chosenDiscipline.id !== baselineDisciplineId) setPoolDiscipline(original.name, chosenDiscipline.name);
     else clearOverrideByKey('pool_discipline', normalizeKey(original.name));
     updatePool({ ...original, ...value, disciplineId: baselineDisciplineId });
-  }
-
-  function savePersonEdit(original: Person | undefined, value: PersonFormValue): void {
-    if (!original) { createPerson({ name: value.name, poolId: value.poolId, capacityFte: value.capacityFte, active: value.active, notes: value.notes, team: value.team, site: value.site }); return; }
-    const baselinePoolId = original.importPoolId ?? original.poolId;
-    const chosenPool = value.poolId ? pools.find((p) => p.id === value.poolId) : null;
-    if (chosenPool && chosenPool.id !== baselinePoolId) setPersonPool(original.name, chosenPool.name);
-    else clearOverrideByKey('person_pool', normalizeKey(original.name));
-
-    const chosenDiscipline = value.disciplineId ? disciplines.find((d) => d.id === value.disciplineId) : null;
-    if (chosenDiscipline) setPersonDiscipline(original.name, chosenDiscipline.name);
-    else clearOverrideByKey('person_discipline', normalizeKey(original.name));
-
-    updatePerson({
-      ...original, name: value.name, poolId: baselinePoolId, capacityFte: value.capacityFte,
-      active: value.active, notes: value.notes, team: value.team, site: value.site,
-    });
   }
 
   const period = todayPeriod();
@@ -338,7 +320,7 @@ export function Team() {
                                     />
                                   </td>
                                   <td>
-                                    {person.name}
+                                    <button type="button" className="person-name-link" onClick={() => openPerson(person.id)}>{person.name}</button>
                                     {roleOverridden && (
                                       <button
                                         type="button"

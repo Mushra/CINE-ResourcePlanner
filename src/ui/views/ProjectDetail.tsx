@@ -12,7 +12,8 @@ import { NumberField } from '../components/NumberField';
 import { ConfirmButton } from '../components/ConfirmButton';
 import { Collapsible } from '../components/Collapsible';
 import { ProjectFormDrawer, type ProjectFormValue } from '../components/ProjectFormDrawer';
-import { RequirementTimeline, type RequirementLane } from '../components/RequirementTimeline';
+import { RequirementTimeline, type RequirementGroup, type RequirementLane } from '../components/RequirementTimeline';
+import { deriveProjectStatus, STATUS_LABEL } from '../../domain/projectStatus';
 
 const CERTAINTY_LABEL: Record<string, string> = { confirmed: 'Confirmed', estimated: 'Estimated', tbd: 'TBD' };
 
@@ -114,29 +115,55 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const columns = buildColumns(months, besoinsGranularity);
   const assignColumns = buildColumns(months, assignationsGranularity);
 
-  const genericPoolLanes: RequirementLane[] = genericRequirementPools.map((pool) => {
-    const discipline = disciplines.find((d) => d.id === pool.disciplineId);
-    return {
-      key: `disc:${pool.disciplineId}`,
-      label: discipline?.name ?? 'Discipline',
-      color: discipline?.color ?? '#9ca3af',
-      values: months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === pool.id)?.required ?? 0),
-      onCommitRange: (periods, fte) => setDisciplineRequirementRange(project.id, pool.disciplineId!, periods, fte),
-      onRemove: () => clearRequirementPool(project.id, pool.id),
-    };
+  const timelineGroupDefs: { key: string; label: string; color: string; disciplineId: string | null }[] = [
+    ...requirementDisciplines.map((d) => ({ key: d.id, label: d.name, color: d.color, disciplineId: d.id })),
+    ...(unassignedSpecificPools.length > 0 ? [{ key: 'unassigned', label: 'Unassigned', color: '#9ca3af', disciplineId: null }] : []),
+  ];
+  const timelineGroups: RequirementGroup[] = timelineGroupDefs.map((g) => {
+    const genericPool = genericRequirementPools.find((p) => p.disciplineId === g.disciplineId);
+    const specificPools = g.disciplineId === null ? unassignedSpecificPools : specificRequirementPools.filter((p) => p.disciplineId === g.disciplineId);
+
+    const genericLane: RequirementLane | undefined = genericPool ? {
+      key: `disc:${genericPool.disciplineId}`,
+      label: g.label,
+      color: g.color,
+      values: months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === genericPool.id)?.required ?? 0),
+      onCommitRange: (periods, fte) => setDisciplineRequirementRange(project.id, genericPool.disciplineId!, periods, fte),
+      onRemove: () => clearRequirementPool(project.id, genericPool.id),
+    } : undefined;
+
+    const poolLanes = specificPools.map((pool) => {
+      const lane: RequirementLane = {
+        key: pool.id,
+        label: pool.name,
+        color: pool.color,
+        values: months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === pool.id)?.required ?? 0),
+        onCommitRange: (periods, fte) => setRequirementRange(project.id, pool.id, periods, fte),
+        onRemove: () => {
+          clearRequirementPool(project.id, pool.id);
+          engine.peopleInPool(pool.id).forEach((person) => clearPersonAssignment(person.id, project.id));
+        },
+      };
+      const memberNames = new Map<string, string>();
+      const memberFteByMonth = new Map<string, number[]>();
+      months.forEach((m, mi) => {
+        for (const line of engine.getProjectPersonStaffing(project.id, m).lines) {
+          if (line.poolId !== pool.id) continue;
+          memberNames.set(line.personId, line.personName);
+          if (!memberFteByMonth.has(line.personId)) memberFteByMonth.set(line.personId, months.map(() => 0));
+          memberFteByMonth.get(line.personId)![mi] = line.fte;
+        }
+      });
+      const members = [...memberNames.keys()]
+        .sort((a, b) => memberNames.get(a)!.localeCompare(memberNames.get(b)!))
+        .map((personId) => ({ personId, name: memberNames.get(personId)!, fte: memberFteByMonth.get(personId)! }));
+      return { lane, members };
+    });
+
+    const totals = months.map((_, mi) => (genericLane?.values[mi] ?? 0) + poolLanes.reduce((sum, pl) => sum + pl.lane.values[mi], 0));
+
+    return { key: g.key, label: g.label, color: g.color, totals, genericLane, poolLanes };
   });
-  const specificPoolLanes: RequirementLane[] = specificRequirementPools.map((pool) => ({
-    key: pool.id,
-    label: pool.name,
-    color: pool.color,
-    values: months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === pool.id)?.required ?? 0),
-    onCommitRange: (periods, fte) => setRequirementRange(project.id, pool.id, periods, fte),
-    onRemove: () => {
-      clearRequirementPool(project.id, pool.id);
-      engine.peopleInPool(pool.id).forEach((person) => clearPersonAssignment(person.id, project.id));
-    },
-  }));
-  const timelineLanes = [...genericPoolLanes, ...specificPoolLanes];
   const presentTargetIds = new Set([
     ...genericRequirementPools.map((p) => `disc:${p.disciplineId}`),
     ...specificRequirementPools.map((p) => p.id),
@@ -152,8 +179,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <div>
             <h1>{project.name}</h1>
             <div className="detail-meta">
-              <span className={`status-dot status-${project.status}`} />
-              <span>{project.status.replace('_', ' ')}</span>
+              <span className={`status-dot status-${deriveProjectStatus(project)}`} />
+              <span>{STATUS_LABEL[deriveProjectStatus(project)]}</span>
               <span className="meta-sep">·</span>
               <span className={`priority-badge priority-${project.priority}`}>{project.priority}</span>
               {project.isDispo && (
@@ -231,8 +258,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         ) : besoinsMode === 'timeline' ? (
           <RequirementTimeline
             months={months}
-            lanes={timelineLanes}
+            groups={timelineGroups}
             addOptions={timelineAddOptions}
+            projectId={project.id}
             onAddLane={(targetId) => (
               targetId.startsWith('disc:')
                 ? setDisciplineRequirement(project.id, targetId.slice(5), months[0], 1)

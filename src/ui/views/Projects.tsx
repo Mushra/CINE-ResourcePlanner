@@ -9,12 +9,10 @@ import { ConfirmButton } from '../components/ConfirmButton';
 import { StatusPill } from '../components/StatusPill';
 import { Icon } from '../components/Icon';
 import { ProjectFormDrawer, type ProjectFormValue } from '../components/ProjectFormDrawer';
+import { deriveProjectStatus, STATUS_LABEL } from '../../domain/projectStatus';
 import type { Priority } from '../../domain/types';
 
 const PRIORITY_ORDER: Record<Priority, number> = { critical: 0, high: 1, medium: 2, low: 3 };
-const STATUS_LABEL: Record<string, string> = {
-  planned: 'Planned', active: 'Active', on_hold: 'On hold', completed: 'Completed', cancelled: 'Cancelled',
-};
 
 export function Projects() {
   const projects = useStore((s) => s.data.projects);
@@ -85,10 +83,11 @@ export function Projects() {
               const projectChecks = checksByProject.get(project.id) ?? [];
               const months = periodRange(periodFromISODate(project.startDate), periodFromISODate(project.endDate)).length;
               const isTbd = project.startCertainty === 'tbd' || project.endCertainty === 'tbd';
+              const status = deriveProjectStatus(project);
               return (
                 <tr key={project.id} className="clickable-row" onClick={() => openProject(project.id)}>
                   <td className="cell-name">{project.name}</td>
-                  <td><span className={`status-dot status-${project.status}`} />{STATUS_LABEL[project.status]}</td>
+                  <td><span className={`status-dot status-${status}`} />{STATUS_LABEL[status]}</td>
                   <td><PriorityBadge priority={project.priority} /></td>
                   <td>{project.startDate ?? <span className="tbd-text">TBD</span>}</td>
                   <td>{project.endDate ?? <span className="tbd-text">TBD</span>}</td>

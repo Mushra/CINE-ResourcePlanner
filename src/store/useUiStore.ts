@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { GlobalFilter } from '../domain/filter';
 import { EMPTY_GLOBAL_FILTER } from '../domain/filter';
 
-export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'people' | 'project-detail';
+export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'people' | 'project-detail' | 'person-detail';
 export type PeopleMode = 'availability' | 'assignments';
 export type TimelineZoom = 'compact' | 'comfortable' | 'wide';
 export type HorizonMonths = 6 | 12;
@@ -121,9 +121,12 @@ function loadPeopleMode(): PeopleMode {
 interface UiState {
   view: ViewName;
   selectedProjectId: string | null;
+  selectedPersonId: string | null;
   navigate: (view: ViewName) => void;
   openProject: (projectId: string) => void;
   backToProjects: () => void;
+  openPerson: (personId: string) => void;
+  backToTeam: () => void;
 
   /** Keyed by a stable scope string (e.g. "team:disc:<id>"). true = collapsed. */
   collapsed: Record<string, boolean>;
@@ -170,9 +173,12 @@ const initialBesoinsPrefs = loadBesoinsPrefs();
 export const useUiStore = create<UiState>((set, get) => ({
   view: 'dashboard',
   selectedProjectId: null,
-  navigate: (view) => set({ view, selectedProjectId: null }),
-  openProject: (projectId) => set({ view: 'project-detail', selectedProjectId: projectId }),
+  selectedPersonId: null,
+  navigate: (view) => set({ view, selectedProjectId: null, selectedPersonId: null }),
+  openProject: (projectId) => set({ view: 'project-detail', selectedProjectId: projectId, selectedPersonId: null }),
   backToProjects: () => set({ view: 'projects', selectedProjectId: null }),
+  openPerson: (personId) => set({ view: 'person-detail', selectedPersonId: personId, selectedProjectId: null }),
+  backToTeam: () => set({ view: 'team', selectedPersonId: null }),
 
   collapsed: loadCollapsed(),
   isCollapsed: (key) => get().collapsed[key] === true,

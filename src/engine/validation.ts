@@ -2,6 +2,7 @@ import type { Period, Severity } from '../domain/types';
 import { PlanningEngine, UNASSIGNED_DISCIPLINE_ID, round2 } from './planning';
 import { getForecastWindowPeriods } from './forecast';
 import { comparePeriod, formatPeriodLabel, periodFromISODate, periodRange } from '../domain/periods';
+import { deriveProjectStatus } from '../domain/projectStatus';
 
 export type CheckCategory =
   | 'over_capacity'
@@ -98,7 +99,8 @@ function checkOverCapacity(engine: PlanningEngine, periods: Period[]): SanityChe
 function checkProjectStaffing(engine: PlanningEngine): SanityCheck[] {
   const checks: SanityCheck[] = [];
   for (const project of engine.projects()) {
-    if (project.status === 'cancelled' || project.status === 'completed') continue;
+    const status = deriveProjectStatus(project);
+    if (status === 'cancelled' || status === 'completed') continue;
     const periods = engine.projectActivePeriods(project.id);
     const seenUnderstaffedPool = new Set<string>();
 
@@ -200,7 +202,8 @@ function checkProjectStaffing(engine: PlanningEngine): SanityCheck[] {
 function checkDurationMismatch(engine: PlanningEngine): SanityCheck[] {
   const checks: SanityCheck[] = [];
   for (const project of engine.projects()) {
-    if (project.status === 'cancelled' || project.status === 'completed') continue;
+    const status = deriveProjectStatus(project);
+    if (status === 'cancelled' || status === 'completed') continue;
     const periods = engine.projectAllocatedPeriods(project.id);
     for (const poolId of engine.projectPoolIds(project.id)) {
       const reqPeriods = new Set<Period>();
@@ -277,7 +280,8 @@ function checkInvalidDates(engine: PlanningEngine): SanityCheck[] {
 function checkTbdDates(engine: PlanningEngine): SanityCheck[] {
   const checks: SanityCheck[] = [];
   for (const project of engine.projects()) {
-    if (project.status === 'cancelled' || project.status === 'completed') continue;
+    const status = deriveProjectStatus(project);
+    if (status === 'cancelled' || status === 'completed') continue;
     if (project.startCertainty === 'tbd' || project.endCertainty === 'tbd') {
       checks.push({
         id: `tbd:${project.id}`,

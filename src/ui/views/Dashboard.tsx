@@ -5,6 +5,7 @@ import { getSanityChecks, type SanityCheck } from '../../engine/validation';
 import { getForecastWindowPeriods } from '../../engine/forecast';
 import { PlanningEngine, UNASSIGNED_DISCIPLINE_ID, round2 } from '../../engine/planning';
 import { addMonths, formatPeriodLabel, periodRange, todayPeriod } from '../../domain/periods';
+import { deriveProjectStatus } from '../../domain/projectStatus';
 import type { Period, Person } from '../../domain/types';
 import { Icon } from '../components/Icon';
 import { StatusPill } from '../components/StatusPill';
@@ -41,7 +42,10 @@ export function Dashboard() {
     );
   }
 
-  const activeProjects = projects.filter((p) => p.status === 'active' || p.status === 'planned');
+  const activeProjects = projects.filter((p) => {
+    const status = deriveProjectStatus(p);
+    return status === 'active' || status === 'planned';
+  });
   const totalCapacity = engine.getTotalCapacity(period);
   const critical = checks.filter((c) => c.severity === 'critical');
   const warnings = checks.filter((c) => c.severity === 'warning');

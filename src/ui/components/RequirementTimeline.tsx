@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import type { Period } from '../../domain/types';
 import { formatPeriodLabel } from '../../domain/periods';
 import { Icon } from './Icon';
+import { useUiStore } from '../../store/useUiStore';
 
 const MONTH_W = 34;
 
@@ -13,6 +14,31 @@ export interface RequirementLane {
   values: number[];
   onCommitRange: (periods: Period[], fte: number) => void;
   onRemove?: () => void;
+}
+
+/** One assigned person under a role lane — read-only, mirrors the main Timeline's person rows. */
+export interface RequirementGroupMember {
+  personId: string;
+  name: string;
+  /** Assigned FTE per month, aligned index-for-index with the `months` prop. */
+  fte: number[];
+}
+
+export interface RequirementPoolLane {
+  lane: RequirementLane;
+  members: RequirementGroupMember[];
+}
+
+/** One discipline's requirement lanes, with a read-only total row and each role's assigned members underneath. */
+export interface RequirementGroup {
+  key: string;
+  label: string;
+  color: string;
+  /** Aggregate required FTE per month across the discipline's lanes, aligned to `months`. */
+  totals: number[];
+  /** The discipline-wide ("whole discipline") lane, if a generic requirement exists. */
+  genericLane?: RequirementLane;
+  poolLanes: RequirementPoolLane[];
 }
 
 interface Block {
@@ -38,18 +64,109 @@ function computeBlocks(values: number[]): Block[] {
   return blocks;
 }
 
+function formatNum(n: number): string {
+  return Math.abs(n - Math.round(n)) < 0.001 ? String(Math.round(n)) : n.toFixed(1);
+}
+
+/** Read-only aggregate row for a discipline's total required FTE — styled like the main Timeline's discipline cell. */
+function DisciplineTotalRow({ label, color, totals, months, collapsed, onToggle }: {
+  label: string;
+  color: string;
+  totals: number[];
+  months: Period[];
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="req-timeline-lane req-timeline-disc-row">
+      <div className="req-timeline-lane-label">
+        <button type="button" className="req-timeline-collapse" onClick={onToggle} aria-label={collapsed ? 'Expand' : 'Collapse'}>
+          <Icon name="chevron-right" size={11} className={collapsed ? '' : 'req-timeline-collapse-open'} />
+        </button>
+        <span className="discipline-dot" style={{ background: color }} />
+        {label}
+      </div>
+      <div className="req-timeline-lane-track req-timeline-disc-track" style={{ width: months.length * MONTH_W }}>
+        {months.map((m, i) => (
+          <div key={m} className="req-timeline-disc-cell" style={{ left: i * MONTH_W, width: MONTH_W }}>
+            {totals[i] > 0.001 && <span>{formatNum(totals[i])}</span>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Read-only per-person FTE row under a role lane — mirrors the main Timeline's person rows. */
+function MemberRow({ member, months }: { member: RequirementGroupMember; months: Period[] }) {
+  return (
+    <div className="req-timeline-lane req-timeline-member-row">
+      <div className="req-timeline-lane-label req-timeline-member-label">{member.name}</div>
+      <div className="req-timeline-lane-track req-timeline-disc-track" style={{ width: months.length * MONTH_W }}>
+        {months.map((m, i) => (
+          <div key={m} className="req-timeline-disc-cell" style={{ left: i * MONTH_W, width: MONTH_W }}>
+            {member.fte[i] > 0.001 && <span>{formatNum(member.fte[i])}</span>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RequirementGroupBlock({ group, months, projectId }: { group: RequirementGroup; months: Period[]; projectId: string }) {
+  const collapsed = useUiStore((s) => s.collapsed);
+  const toggleCollapse = useUiStore((s) => s.toggleCollapse);
+  const discKey = `projtl:disc:${projectId}:${group.key}`;
+  const discCollapsed = collapsed[discKey] === true;
+
+  return (
+    <div className="req-timeline-group">
+      <DisciplineTotalRow
+        label={group.label}
+        color={group.color}
+        totals={group.totals}
+        months={months}
+        collapsed={discCollapsed}
+        onToggle={() => toggleCollapse(discKey)}
+      />
+      {!discCollapsed && (
+        <>
+          {group.genericLane && <RequirementLaneRow lane={group.genericLane} months={months} />}
+          {group.poolLanes.map(({ lane, members }) => {
+            const poolKey = `projtl:pool:${projectId}:${lane.key}`;
+            const membersShown = collapsed[poolKey] === true;
+            return (
+              <div key={lane.key} className="req-timeline-pool-block">
+                <RequirementLaneRow
+                  lane={lane}
+                  months={months}
+                  membersToggle={members.length > 0 ? { shown: membersShown, onToggle: () => toggleCollapse(poolKey) } : undefined}
+                />
+                {membersShown && members.map((m) => <MemberRow key={m.personId} member={m} months={months} />)}
+              </div>
+            );
+          })}
+        </>
+      )}
+    </div>
+  );
+}
+
 /**
- * Mini-Gantt for a project's resource requirements: one lane per discipline/role, blocks placed
- * by mouse over month columns. Reads/writes the same requirement_allocations as the Besoins
- * table (via lane.onCommitRange), so edits here and in the table stay in sync automatically.
+ * Mini-Gantt for a project's resource requirements: one group per discipline (with a read-only
+ * total row), each holding draggable role lanes (create/move/resize blocks by mouse over month
+ * columns — writes the same requirement_allocations as the Besoins table via lane.onCommitRange,
+ * so edits here and in the table stay in sync) and, underneath each role, its assigned members'
+ * read-only FTE.
  */
 export function RequirementTimeline({
-  months, lanes, addOptions, onAddLane,
+  months, groups, addOptions, onAddLane, projectId,
 }: {
   months: Period[];
-  lanes: RequirementLane[];
+  groups: RequirementGroup[];
   addOptions: { id: string; label: string }[];
   onAddLane: (targetId: string) => void;
+  projectId: string;
 }) {
   return (
     <div className="req-timeline">
@@ -62,7 +179,7 @@ export function RequirementTimeline({
         {months.map((m) => <div key={m} className="req-timeline-month">{formatPeriodLabel(m, { withYear: false })}</div>)}
       </div>
       <div className="req-timeline-lanes">
-        {lanes.map((lane) => <RequirementLaneRow key={lane.key} lane={lane} months={months} />)}
+        {groups.map((group) => <RequirementGroupBlock key={group.key} group={group} months={months} projectId={projectId} />)}
       </div>
       {addOptions.length > 0 && (
         <div className="req-timeline-add">
@@ -85,7 +202,12 @@ export function RequirementTimeline({
 
 type DragMode = 'create' | 'move' | 'resize-start' | 'resize-end';
 
-function RequirementLaneRow({ lane, months }: { lane: RequirementLane; months: Period[] }) {
+function RequirementLaneRow({ lane, months, membersToggle }: {
+  lane: RequirementLane;
+  months: Period[];
+  /** When set, renders a toggle to show/hide this role's assigned members underneath. */
+  membersToggle?: { shown: boolean; onToggle: () => void };
+}) {
   const rowRef = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<{ block: Block; replaceIdx: number } | null>(null);
   const [editingBlock, setEditingBlock] = useState<Block | null>(null);
@@ -172,6 +294,16 @@ function RequirementLaneRow({ lane, months }: { lane: RequirementLane; months: P
   return (
     <div className="req-timeline-lane">
       <div className="req-timeline-lane-label">
+        {membersToggle && (
+          <button
+            type="button"
+            className="req-timeline-collapse"
+            onClick={membersToggle.onToggle}
+            aria-label={membersToggle.shown ? 'Hide people' : 'Show people'}
+          >
+            <Icon name="chevron-right" size={10} className={membersToggle.shown ? 'req-timeline-collapse-open' : ''} />
+          </button>
+        )}
         <span className="pool-dot" style={{ background: lane.color }} />
         {lane.label}
         {lane.onRemove && (

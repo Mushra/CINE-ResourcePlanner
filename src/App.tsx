@@ -9,6 +9,7 @@ import { Projects } from './ui/views/Projects';
 import { ProjectDetail } from './ui/views/ProjectDetail';
 import { Team } from './ui/views/Team';
 import { People } from './ui/views/People';
+import { PersonDetail } from './ui/views/PersonDetail';
 
 function App() {
   const status = useStore((s) => s.status);
@@ -17,6 +18,7 @@ function App() {
   const init = useStore((s) => s.init);
   const view = useUiStore((s) => s.view);
   const selectedProjectId = useUiStore((s) => s.selectedProjectId);
+  const selectedPersonId = useUiStore((s) => s.selectedPersonId);
 
   useEffect(() => {
     void init();
@@ -48,6 +50,7 @@ function App() {
         {view === 'project-detail' && selectedProjectId && <ProjectDetail projectId={selectedProjectId} />}
         {view === 'team' && <Team />}
         {view === 'people' && <People />}
+        {view === 'person-detail' && selectedPersonId && <PersonDetail personId={selectedPersonId} />}
       </AppShell>
       <Toaster />
     </>

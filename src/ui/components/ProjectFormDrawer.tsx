@@ -1,7 +1,14 @@
 import { useState } from 'react';
 import { Drawer } from './Drawer';
 import { Button } from './Button';
+import { deriveProjectStatus, STATUS_LABEL } from '../../domain/projectStatus';
 import type { DateCertainty, Priority, Project, ProjectStatus } from '../../domain/types';
+
+type StatusOverride = 'auto' | 'on_hold' | 'cancelled';
+
+function overrideFromStatus(status: ProjectStatus): StatusOverride {
+  return status === 'cancelled' || status === 'on_hold' ? status : 'auto';
+}
 
 export interface ProjectFormValue {
   name: string;
@@ -35,8 +42,11 @@ function fromProject(project?: Project): ProjectFormValue {
 export function ProjectFormDrawer({ project, onClose, onSave }: { project?: Project; onClose: () => void; onSave: (value: ProjectFormValue) => void }) {
   const [value, setValue] = useState<ProjectFormValue>(() => fromProject(project));
   const [initialSnapshot] = useState(() => JSON.stringify(value));
+  const [statusOverride, setStatusOverride] = useState<StatusOverride>(() => overrideFromStatus(value.status));
   const canSave = value.name.trim().length > 0;
-  const dirty = JSON.stringify(value) !== initialSnapshot;
+  const dirty = JSON.stringify(value) !== initialSnapshot || statusOverride !== overrideFromStatus(value.status);
+  const autoStatus = deriveProjectStatus({ status: 'planned', startDate: value.startDate, endDate: value.endDate });
+  const finalStatus: ProjectStatus = statusOverride === 'auto' ? autoStatus : statusOverride;
 
   function set<K extends keyof ProjectFormValue>(key: K, v: ProjectFormValue[K]): void {
     setValue((prev) => ({ ...prev, [key]: v }));
@@ -55,13 +65,14 @@ export function ProjectFormDrawer({ project, onClose, onSave }: { project?: Proj
       <div className="field-row">
         <div className="field">
           <label htmlFor="proj-status">Status</label>
-          <select id="proj-status" value={value.status} onChange={(e) => set('status', e.target.value as ProjectStatus)}>
-            <option value="planned">Planned</option>
-            <option value="active">Active</option>
+          <select id="proj-status" value={statusOverride} onChange={(e) => setStatusOverride(e.target.value as StatusOverride)}>
+            <option value="auto">Auto — {STATUS_LABEL[autoStatus]}</option>
             <option value="on_hold">On hold</option>
-            <option value="completed">Completed</option>
             <option value="cancelled">Cancelled</option>
           </select>
+          {statusOverride === 'auto' && (
+            <p className="field-hint">Derived from the dates below. Active/Planned/Completed update automatically as time passes.</p>
+          )}
         </div>
         <div className="field">
           <label htmlFor="proj-priority">Priority</label>
@@ -110,7 +121,7 @@ export function ProjectFormDrawer({ project, onClose, onSave }: { project?: Proj
         <Button
           variant="primary"
           disabled={!canSave || Boolean(value.startDate && value.endDate && value.startDate > value.endDate)}
-          onClick={() => onSave(value)}
+          onClick={() => onSave({ ...value, status: finalStatus })}
         >
           {project ? 'Save changes' : 'Create project'}
         </Button>

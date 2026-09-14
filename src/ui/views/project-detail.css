@@ -150,6 +150,44 @@
 .req-block-handle-left { left: 0; }
 .req-block-handle-right { right: 0; }
 .req-timeline-add { margin-top: 8px; }
+.req-timeline-group + .req-timeline-group { margin-top: 10px; }
+.req-timeline-pool-block { display: flex; flex-direction: column; gap: 3px; }
+.req-timeline-collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  margin-right: 1px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.req-timeline-collapse svg { transition: transform 0.15s ease; }
+.req-timeline-collapse-open { transform: rotate(90deg); }
+.req-timeline-disc-row { font-weight: 700; }
+.req-timeline-disc-row .req-timeline-lane-label { font-size: 12.5px; }
+.req-timeline-disc-track {
+  position: relative;
+  height: 26px;
+  background: var(--surface-1);
+  border-radius: var(--radius-sm);
+}
+.req-timeline-disc-cell {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.req-timeline-member-row .req-timeline-lane-label { font-weight: 400; }
+.req-timeline-member-label { padding-left: 22px; font-size: 11px; color: var(--text-tertiary); font-weight: 400; }
+.req-timeline-member-row .req-timeline-disc-cell { color: var(--text-secondary); font-weight: 500; }
 .req-block-editor {
   position: absolute;
   top: calc(100% + 4px);
@@ -278,3 +316,38 @@
 }
 .person-row-remove:hover { color: var(--status-critical); background: var(--surface-2); }
 .person-add-select { font-size: 11.5px; color: var(--text-tertiary); max-width: 110px; }
+
+/* Person detail — assignment timeline */
+.person-timeline { overflow-x: auto; }
+.person-timeline-header { display: grid; padding-bottom: 4px; }
+.person-timeline-rows { display: flex; flex-direction: column; gap: 3px; }
+.person-timeline-row { display: flex; align-items: center; gap: 8px; position: relative; }
+.person-timeline-label {
+  width: 160px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.person-timeline-label .person-name-link { font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.person-timeline-track {
+  position: relative;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: repeating-linear-gradient(to right, var(--surface-1) 0, var(--surface-1) 33px, var(--border) 33px, var(--border) 34px);
+}
+.person-timeline-cell {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
