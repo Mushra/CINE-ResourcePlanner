@@ -27,8 +27,8 @@ export interface AssignmentPoolGroup {
   onAddPerson: (personId: string) => void;
 }
 
-/** One discipline's staffing: an editable need lane, the coverage it gets from people actually
- * assigned (grouped by their specific pool), and a coverage row summarizing the two. */
+/** One discipline's staffing: an editable need lane (its cells hatch-highlight any month where
+ * assigned FTE doesn't match) and the people actually assigned, grouped by their specific pool. */
 export interface RequirementGroup {
   key: string;
   label: string;
@@ -70,45 +70,6 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-/** Need-vs-assigned row for a discipline — the gap is colored: under (red), over (amber), matched (neutral). */
-function CoverageRow({ label, color, needValues, assignedTotals, months, collapsed, onToggle }: {
-  label: string;
-  color: string;
-  needValues: number[];
-  assignedTotals: number[];
-  months: Period[];
-  collapsed: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <div className="req-timeline-lane req-timeline-disc-row">
-      <div className="req-timeline-lane-label">
-        <button type="button" className="req-timeline-collapse" onClick={onToggle} aria-label={collapsed ? 'Expand' : 'Collapse'}>
-          <Icon name="chevron-right" size={11} className={collapsed ? '' : 'req-timeline-collapse-open'} />
-        </button>
-        <span className="discipline-dot" style={{ background: color }} />
-        {label}
-      </div>
-      <div className="req-timeline-lane-track req-timeline-disc-track" style={{ width: months.length * MONTH_W }}>
-        {months.map((m, i) => {
-          const need = needValues[i] ?? 0;
-          const assigned = assignedTotals[i] ?? 0;
-          if (need <= 0.001 && assigned <= 0.001) {
-            return <div key={m} className="req-timeline-disc-cell" style={{ left: i * MONTH_W, width: MONTH_W }} />;
-          }
-          const gap = round2(assigned - need);
-          const cls = gap < -0.001 ? 'req-coverage-under' : gap > 0.001 ? 'req-coverage-over' : 'req-coverage-ok';
-          return (
-            <div key={m} className={`req-timeline-disc-cell ${cls}`} style={{ left: i * MONTH_W, width: MONTH_W }}>
-              <span>{formatNum(assigned)}/{formatNum(need)}</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function RequirementGroupBlock({ group, months, projectId }: { group: RequirementGroup; months: Period[]; projectId: string }) {
   const collapsed = useUiStore((s) => s.collapsed);
   const toggleCollapse = useUiStore((s) => s.toggleCollapse);
@@ -117,18 +78,14 @@ function RequirementGroupBlock({ group, months, projectId }: { group: Requiremen
 
   return (
     <div className="req-timeline-group">
-      <CoverageRow
-        label={group.label}
-        color={group.color}
-        needValues={group.needLane.values}
-        assignedTotals={group.assignedTotals}
+      <RequirementLaneRow
+        lane={group.needLane}
         months={months}
-        collapsed={discCollapsed}
-        onToggle={() => toggleCollapse(discKey)}
+        assignedValues={group.assignedTotals}
+        collapseToggle={{ collapsed: discCollapsed, onToggle: () => toggleCollapse(discKey) }}
       />
       {!discCollapsed && (
         <>
-          <RequirementLaneRow lane={group.needLane} months={months} />
           {group.poolGroups.map((pg) => {
             const poolKey = `projtl:pool:${projectId}:${pg.poolId}`;
             const poolCollapsed = collapsed[poolKey] === true;
@@ -176,11 +133,11 @@ function RequirementGroupBlock({ group, months, projectId }: { group: Requiremen
 }
 
 /**
- * Merged need+assignment editor for a project: one group per discipline, each with a coverage row
- * (need vs. assigned, gap highlighted), a draggable discipline-need lane, and — grouped by emploi
- * repère — every assigned person as its own draggable lane. Dragging creates/moves/resizes blocks
- * over month columns; clicking a block edits its FTE. Needs and assignments write through
- * lane.onCommitRange, so this is the single editor for both — there's no separate table anymore.
+ * Merged need+assignment editor for a project: one draggable lane per discipline need (hatched
+ * where assigned FTE doesn't match it, that month), and — grouped by emploi repère — every
+ * assigned person as its own draggable lane. Dragging creates/moves/resizes blocks over month
+ * columns; clicking a block edits its FTE. Needs and assignments write through lane.onCommitRange,
+ * so this is the single editor for both — there's no separate table or coverage row anymore.
  */
 export function RequirementTimeline({ months, groups, projectId }: {
   months: Period[];
@@ -208,11 +165,14 @@ type DragMode = 'create' | 'move' | 'resize-start' | 'resize-end';
 
 /** Draggable FTE lane: create/move/resize blocks over month columns, click a block to edit its FTE.
  * Exported so PersonDetail can reuse the exact same editable primitive for a person's own timeline. */
-export function RequirementLaneRow({ lane, months, membersToggle }: {
+export function RequirementLaneRow({ lane, months, assignedValues, collapseToggle }: {
   lane: RequirementLane;
   months: Period[];
-  /** When set, renders a toggle to show/hide related rows underneath (e.g. assigned members). */
-  membersToggle?: { shown: boolean; onToggle: () => void };
+  /** Actual assigned FTE per month, aligned to `months`. When given (the discipline need lane),
+   * any month where it doesn't match `lane.values` is hatch-highlighted, red under / amber over. */
+  assignedValues?: number[];
+  /** When set, renders a toggle to show/hide rows underneath (e.g. a discipline's pool groups). */
+  collapseToggle?: { collapsed: boolean; onToggle: () => void };
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<{ block: Block; replaceIdx: number } | null>(null);
@@ -300,14 +260,14 @@ export function RequirementLaneRow({ lane, months, membersToggle }: {
   return (
     <div className="req-timeline-lane">
       <div className="req-timeline-lane-label">
-        {membersToggle && (
+        {collapseToggle && (
           <button
             type="button"
             className="req-timeline-collapse"
-            onClick={membersToggle.onToggle}
-            aria-label={membersToggle.shown ? 'Hide people' : 'Show people'}
+            onClick={collapseToggle.onToggle}
+            aria-label={collapseToggle.collapsed ? 'Expand' : 'Collapse'}
           >
-            <Icon name="chevron-right" size={10} className={membersToggle.shown ? 'req-timeline-collapse-open' : ''} />
+            <Icon name="chevron-right" size={10} className={collapseToggle.collapsed ? '' : 'req-timeline-collapse-open'} />
           </button>
         )}
         <span className="pool-dot" style={{ background: lane.color }} />
@@ -345,6 +305,17 @@ export function RequirementLaneRow({ lane, months, membersToggle }: {
             <span className="req-block-handle req-block-handle-right" onPointerDown={(e) => beginBlockDrag('resize-end', b, e)} />
           </div>
         ))}
+        {assignedValues && months.map((_, i) => {
+          const need = lane.values[i] ?? 0;
+          const assigned = assignedValues[i] ?? 0;
+          const gap = round2(assigned - need);
+          if (Math.abs(gap) < 0.001) return null;
+          return (
+            <div key={`gap-${i}`} className={`req-need-gap ${gap < 0 ? 'req-need-gap-under' : 'req-need-gap-over'}`} style={{ left: i * MONTH_W, width: MONTH_W }}>
+              <span className="req-need-gap-badge">{formatNum(assigned)}</span>
+            </div>
+          );
+        })}
       </div>
       {editingBlock && (
         <div className="req-block-editor">
