@@ -122,6 +122,19 @@
   display: inline-flex;
 }
 .req-timeline-lane-remove:hover { color: var(--status-critical); }
+.req-timeline-lane-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.req-timeline-lane-link:hover { text-decoration: underline; }
 .req-timeline-lane-track {
   position: relative;
   height: 26px;
@@ -158,7 +171,7 @@
   font-weight: 600;
   color: var(--text-secondary);
 }
-.req-timeline-add-person { padding-left: 22px; margin: 2px 0 2px; }
+.req-timeline-add-person { padding-left: 2px; margin: 6px 0 2px; }
 .req-timeline-collapse {
   display: inline-flex;
   align-items: center;
@@ -247,38 +260,3 @@
 .person-add-assignment .person-add-select { max-width: 220px; }
 
 .person-add-select { font-size: 11.5px; color: var(--text-tertiary); max-width: 110px; }
-
-/* Person detail — assignment timeline */
-.person-timeline { overflow-x: auto; }
-.person-timeline-header { display: grid; padding-bottom: 4px; }
-.person-timeline-rows { display: flex; flex-direction: column; gap: 3px; }
-.person-timeline-row { display: flex; align-items: center; gap: 8px; position: relative; }
-.person-timeline-label {
-  width: 160px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-}
-.person-timeline-label .person-name-link { font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
-.person-timeline-track {
-  position: relative;
-  height: 26px;
-  border-radius: var(--radius-sm);
-  background: repeating-linear-gradient(to right, var(--surface-1) 0, var(--surface-1) 33px, var(--border) 33px, var(--border) 34px);
-}
-.person-timeline-cell {
-  position: absolute;
-  top: 0;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--text-primary);
-}

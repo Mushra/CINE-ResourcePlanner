@@ -1,18 +1,28 @@
 import { useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
-import { todayPeriod } from '../../domain/periods';
+import { formatPeriodLabel, todayPeriod } from '../../domain/periods';
 import { buildTimelineWindow } from '../timeline/timelineMath';
 import { isGenericPoolName } from '../../domain/identity';
-import { deriveProjectStatus, STATUS_LABEL } from '../../domain/projectStatus';
+import { deriveProjectStatus } from '../../domain/projectStatus';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
 import { ConfirmButton } from '../components/ConfirmButton';
 import { PersonFormDrawer, type PersonFormValue } from '../components/PersonFormDrawer';
-import { RangePanel } from '../components/RangePanel';
+import { RequirementLaneRow } from '../components/RequirementTimeline';
 import { usePersonSave } from '../hooks/usePersonSave';
 
 const MONTH_W = 34;
+
+/** Mirrors the app's status-dot colors (table.css) so a project lane reads the same way here as
+ * it does everywhere else a project's status shows up. */
+const STATUS_DOT_COLOR: Record<string, string> = {
+  active: 'var(--status-healthy)',
+  planned: 'var(--status-info)',
+  on_hold: 'var(--status-warning)',
+  completed: 'var(--text-tertiary)',
+  cancelled: 'var(--status-critical)',
+};
 
 export function PersonDetail({ personId }: { personId: string }) {
   const person = useStore((s) => s.data.people.find((p) => p.id === personId));
@@ -23,6 +33,7 @@ export function PersonDetail({ personId }: { personId: string }) {
   const deletePerson = useStore((s) => s.deletePerson);
   const setPersonAssignment = useStore((s) => s.setPersonAssignment);
   const setPersonAssignmentRange = useStore((s) => s.setPersonAssignmentRange);
+  const clearPersonAssignment = useStore((s) => s.clearPersonAssignment);
   const backToTeam = useUiStore((s) => s.backToTeam);
   const openProject = useUiStore((s) => s.openProject);
   const { savePersonEdit } = usePersonSave();
@@ -113,26 +124,30 @@ export function PersonDetail({ personId }: { personId: string }) {
         {projectRows.length === 0 ? (
           <p className="empty-inline">Not assigned to any project.</p>
         ) : (
-          <div className="person-timeline">
-            <div className="person-timeline-header" style={{ gridTemplateColumns: `160px repeat(${window.length}, ${MONTH_W}px)` }}>
+          <div className="req-timeline">
+            <p className="req-timeline-hint">
+              <Icon name="info" size={12} />
+              Drag across a lane to create a block, drag a block to move it, drag its edges to resize, click a block to edit its FTE.
+            </p>
+            <div className="req-timeline-header" style={{ gridTemplateColumns: `160px repeat(${window.length}, ${MONTH_W}px)` }}>
               <div className="req-timeline-corner" />
-              {window.map((p) => <div key={p} className="req-timeline-month">{p}</div>)}
+              {window.map((p) => <div key={p} className="req-timeline-month">{formatPeriodLabel(p, { withYear: false })}</div>)}
             </div>
-            <div className="person-timeline-rows">
+            <div className="req-timeline-lanes">
               {projectRows.map(([projectId, row]) => (
-                <div key={projectId} className="person-timeline-row">
-                  <div className="person-timeline-label">
-                    <button type="button" className="person-name-link" onClick={() => openProject(projectId)}>{row.name}</button>
-                    <span className={`status-dot status-${row.status}`} title={STATUS_LABEL[row.status as keyof typeof STATUS_LABEL] ?? row.status} />
-                  </div>
-                  <div className="person-timeline-track" style={{ width: window.length * MONTH_W }}>
-                    {window.map((p, i) => (
-                      <div key={p} className="person-timeline-cell" style={{ left: i * MONTH_W, width: MONTH_W }}>
-                        {row.fte[i] > 0.001 && <span>{row.fte[i]}</span>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <RequirementLaneRow
+                  key={projectId}
+                  months={window}
+                  lane={{
+                    key: projectId,
+                    label: row.name,
+                    color: STATUS_DOT_COLOR[row.status] ?? 'var(--text-tertiary)',
+                    values: row.fte,
+                    onCommitRange: (periods, fte) => setPersonAssignmentRange(person.id, projectId, periods, fte),
+                    onRemove: () => clearPersonAssignment(person.id, projectId),
+                    onLabelClick: () => openProject(projectId),
+                  }}
+                />
               ))}
             </div>
           </div>
@@ -151,12 +166,6 @@ export function PersonDetail({ personId }: { personId: string }) {
               <option value="" disabled>+ Add project assignment…</option>
               {assignableProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
-            <RangePanel
-              options={assignableProjects.map((p) => ({ id: p.id, label: p.name }))}
-              months={addWindow}
-              fteLabel="FTE"
-              onApply={(projectId, periods, fte) => setPersonAssignmentRange(person.id, projectId, periods, fte)}
-            />
           </div>
         )}
       </div>

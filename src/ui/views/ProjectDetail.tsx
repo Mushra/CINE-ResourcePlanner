@@ -67,6 +67,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     }
   });
   const usedPoolIds = new Set(engine.projectPoolIds(project.id));
+  const assignedPersonIds = new Set<string>();
+  months.forEach((m) => {
+    for (const line of engine.getProjectPersonStaffing(project.id, m).lines) {
+      if (line.fte > 0.001) assignedPersonIds.add(line.personId);
+    }
+  });
 
   const groupDefs = [...disciplineIdsWithSignal]
     .map((disciplineId) => {
@@ -93,11 +99,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     };
     const assignedTotals = disciplineStaffingByMonth.map((lines) => lines.find((l) => l.disciplineId === def.disciplineId)?.assigned ?? 0);
 
-    const specificPools = pools.filter((p) => (
+    const disciplinePools = pools.filter((p) => (
       !isGenericPoolName(p.name)
       && (def.disciplineId === UNASSIGNED_DISCIPLINE_ID ? p.disciplineId === null : p.disciplineId === def.disciplineId)
-      && usedPoolIds.has(p.id)
     ));
+    const specificPools = disciplinePools.filter((p) => usedPoolIds.has(p.id));
 
     const poolGroups: AssignmentPoolGroup[] = specificPools.map((pool) => {
       const memberNames = new Map<string, string>();
@@ -120,21 +126,25 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           onCommitRange: (periods, fte) => setPersonAssignmentRange(personId, project.id, periods, fte),
           onRemove: () => clearPersonAssignment(personId, project.id),
         }));
-      const addPersonOptions = people
-        .filter((p) => p.poolId === pool.id && !memberNames.has(p.id))
-        .map((p) => ({ id: p.id, label: p.name }));
-
-      return {
-        poolId: pool.id,
-        poolName: pool.name,
-        color: pool.color,
-        personLanes,
-        addPersonOptions,
-        onAddPerson: (personId) => setPersonAssignment(personId, project.id, months[0] ?? todayPeriod(), 1),
-      };
+      return { poolId: pool.id, poolName: pool.name, color: pool.color, personLanes };
     });
 
-    return { key: def.disciplineId, label: def.label, color: def.color, needLane, assignedTotals, poolGroups };
+    const disciplinePoolIds = new Set(disciplinePools.map((p) => p.id));
+    const addPersonOptions = people
+      .filter((p) => p.poolId && disciplinePoolIds.has(p.poolId) && !assignedPersonIds.has(p.id))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((p) => ({ id: p.id, label: `${p.name} (${pools.find((pl) => pl.id === p.poolId)?.name ?? ''})` }));
+
+    return {
+      key: def.disciplineId,
+      label: def.label,
+      color: def.color,
+      needLane,
+      assignedTotals,
+      poolGroups,
+      addPersonOptions,
+      onAddPerson: (personId) => setPersonAssignment(personId, project.id, months[0] ?? todayPeriod(), 1),
+    };
   });
 
   const addableDisciplines = disciplines

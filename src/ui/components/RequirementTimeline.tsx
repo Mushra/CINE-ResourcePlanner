@@ -14,21 +14,24 @@ export interface RequirementLane {
   values: number[];
   onCommitRange: (periods: Period[], fte: number) => void;
   onRemove?: () => void;
+  /** When set, the label renders as a clickable link instead of plain text (e.g. PersonDetail
+   * linking each of its assignment lanes to that project). */
+  onLabelClick?: () => void;
 }
 
 /** One emploi-repère (specific pool) under a discipline: its currently-assigned people as editable
- * lanes, plus a way to add another of the pool's people. */
+ * lanes. Only pools with at least one assigned person show up — adding the first one to an empty
+ * pool happens via the discipline's own "+ Add person" control below, not a per-pool one. */
 export interface AssignmentPoolGroup {
   poolId: string;
   poolName: string;
   color: string;
   personLanes: RequirementLane[];
-  addPersonOptions: { id: string; label: string }[];
-  onAddPerson: (personId: string) => void;
 }
 
 /** One discipline's staffing: an editable need lane (its cells hatch-highlight any month where
- * assigned FTE doesn't match) and the people actually assigned, grouped by their specific pool. */
+ * assigned FTE doesn't match), the people actually assigned grouped by their specific pool, and a
+ * single "+ Add person" control (any of the discipline's people, landing in their own pool). */
 export interface RequirementGroup {
   key: string;
   label: string;
@@ -37,6 +40,8 @@ export interface RequirementGroup {
   /** Σ assigned FTE per month across every pool group, aligned to `months`. */
   assignedTotals: number[];
   poolGroups: AssignmentPoolGroup[];
+  addPersonOptions: { id: string; label: string }[];
+  onAddPerson: (personId: string) => void;
 }
 
 interface Block {
@@ -106,29 +111,25 @@ function RequirementGroupBlock({ group, months, projectId }: { group: Requiremen
                   <span className="pool-dot" style={{ background: pg.color }} />
                   {pg.poolName}
                 </div>
-                {!poolCollapsed && (
-                  <>
-                    {pg.personLanes.map((lane) => <RequirementLaneRow key={lane.key} lane={lane} months={months} />)}
-                    {pg.addPersonOptions.length > 0 && (
-                      <div className="req-timeline-add-person">
-                        <select
-                          className="person-add-select"
-                          defaultValue=""
-                          onChange={(e) => {
-                            if (e.target.value) pg.onAddPerson(e.target.value);
-                            e.target.value = '';
-                          }}
-                        >
-                          <option value="" disabled>+ Add person…</option>
-                          {pg.addPersonOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-                        </select>
-                      </div>
-                    )}
-                  </>
-                )}
+                {!poolCollapsed && pg.personLanes.map((lane) => <RequirementLaneRow key={lane.key} lane={lane} months={months} />)}
               </div>
             );
           })}
+          {group.addPersonOptions.length > 0 && (
+            <div className="req-timeline-add-person">
+              <select
+                className="person-add-select"
+                defaultValue=""
+                onChange={(e) => {
+                  if (e.target.value) group.onAddPerson(e.target.value);
+                  e.target.value = '';
+                }}
+              >
+                <option value="" disabled>+ Add person…</option>
+                {group.addPersonOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -274,7 +275,9 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
           </button>
         )}
         <span className="pool-dot" style={{ background: lane.color }} />
-        {lane.label}
+        {lane.onLabelClick ? (
+          <button type="button" className="req-timeline-lane-link" onClick={lane.onLabelClick}>{lane.label}</button>
+        ) : lane.label}
         {lane.onRemove && (
           <button type="button" className="req-timeline-lane-remove" title="Remove" onClick={lane.onRemove}>
             <Icon name="close" size={10} />
