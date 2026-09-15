@@ -4,7 +4,7 @@ import { useUiStore, TIMELINE_ZOOM_MIN, TIMELINE_ZOOM_MAX } from '../../store/us
 import { buildTimelineWindow, isoDiffDays, monthWidthPx, timelineLabelColumnWidth, totalWindowWidth, xForIsoDate } from './timelineMath';
 import { addMonths, comparePeriod, formatPeriodLabel, periodFromISODate, periodRange, todayPeriod } from '../../domain/periods';
 import { ProjectBar } from './ProjectBar';
-import { AllocationCell, formatNum, hexToRgba } from './AllocationCell';
+import { formatNum, hexToRgba } from './AllocationCell';
 import { UnscheduledPanel } from './UnscheduledPanel';
 import { Icon } from '../components/Icon';
 import { Button } from '../components/Button';
@@ -17,7 +17,9 @@ import { isGenericPoolName } from '../../domain/identity';
 import type { PlanningEngine } from '../../engine/planning';
 import type { Period } from '../../domain/types';
 
-/** Read-only aggregate cell for a discipline's total — styled like AllocationCell but never opens an editor. */
+/** Read-only required/assigned cell for a discipline total or a specific pool's row — needs are
+ * discipline-only now, so neither level is editable here; edit needs and assignments on the
+ * project's Staffing card instead. */
 function DisciplineCell({
   width, required, assigned, capacity, color, overCapacity,
 }: {
@@ -109,7 +111,6 @@ export function Timeline() {
   const projects = useStore((s) => s.data.projects);
   const updateProject = useStore((s) => s.updateProject);
   const createProject = useStore((s) => s.createProject);
-  const setRequirement = useStore((s) => s.setRequirement);
   const shiftProjectAllocations = useStore((s) => s.shiftProjectAllocations);
   const autofillProjectExtension = useStore((s) => s.autofillProjectExtension);
   const { confirm, confirm3, dialog } = useConfirmDialog();
@@ -470,15 +471,14 @@ export function Timeline() {
                                       const staffing = engine.getProjectStaffing(project.id, period);
                                       const line = staffing.lines.find((l) => l.poolId === poolId);
                                       return (
-                                        <AllocationCell
+                                        <DisciplineCell
                                           key={period}
                                           width={monthWidthPx(period, pxPerDay)}
                                           required={line?.required ?? 0}
                                           assigned={line?.assigned ?? 0}
                                           capacity={engine.getCapacity(poolId, period)}
-                                          poolColor={pool.color}
+                                          color={pool.color}
                                           overCapacity={engine.isOverCapacity(poolId, period)}
-                                          onSetRequired={(v) => setRequirement(project.id, poolId, period, v)}
                                         />
                                       );
                                     })}

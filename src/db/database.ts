@@ -1,5 +1,6 @@
 import initSqlJs, { type Database as SqlJsDatabase, type SqlJsStatic } from 'sql.js';
 import schemaSql from './schema.sql?raw';
+import { genericPoolName, isGenericPoolName } from '../domain/identity';
 
 let sqlJsModule: SqlJsStatic | null = null;
 
@@ -12,7 +13,7 @@ async function getSqlJs(): Promise<SqlJsStatic> {
   return sqlJsModule;
 }
 
-export const SCHEMA_VERSION = '5';
+export const SCHEMA_VERSION = '6';
 
 /** Thin wrapper around a sql.js Database: schema bootstrap, typed helpers, byte export. */
 export class PlannerDatabase {
@@ -51,6 +52,7 @@ export class PlannerDatabase {
     if (Number(from) < 2) this.migrateV1toV2();
     if (Number(from) < 4) this.migrateV3toV4();
     if (Number(from) < 5) this.migrateV4toV5();
+    if (Number(from) < 6) this.migrateV5toV6();
   }
 
   /**
@@ -105,6 +107,101 @@ export class PlannerDatabase {
     const peopleColumns = this.query<{ name: string }>('PRAGMA table_info(people)');
     if (!peopleColumns.some((c) => c.name === 'site')) {
       this.db.exec("ALTER TABLE people ADD COLUMN site TEXT NOT NULL DEFAULT ''");
+    }
+  }
+
+  /**
+   * v6 moves needs to discipline-only granularity: for every (project, discipline) that has
+   * specific-pool requirement allocations, sums them per period onto the discipline's generic
+   * pool requirement (creating the generic pool/requirement if needed, same convention as
+   * resolveGenericPoolId in useStore.ts), then deletes the specific-pool requirement rows
+   * (allocations cascade). Assignments are untouched — they stay person→specific-pool. A project
+   * with no specific-pool requirements is left alone.
+   */
+  private migrateV5toV6(): void {
+    type PoolRow = { id: string; name: string; discipline_id: string | null };
+    type ReqRow = { id: string; project_id: string; pool_id: string; scenario_id: string };
+    type AllocRow = { requirement_id: string; period: string; fte: number };
+
+    const pools = this.query<PoolRow>('SELECT id, name, discipline_id FROM resource_pools');
+    const poolById = new Map(pools.map((p) => [p.id, p]));
+    const disciplines = this.query<{ id: string; name: string; color: string }>('SELECT id, name, color FROM disciplines');
+    const disciplineById = new Map(disciplines.map((d) => [d.id, d]));
+    const genericPoolByDiscipline = new Map<string, string>();
+    for (const p of pools) {
+      if (p.discipline_id && isGenericPoolName(p.name)) genericPoolByDiscipline.set(p.discipline_id, p.id);
+    }
+
+    const requirements = this.query<ReqRow>('SELECT id, project_id, pool_id, scenario_id FROM requirements');
+    const allocations = this.query<AllocRow>('SELECT requirement_id, period, fte FROM requirement_allocations');
+    const allocationsByRequirement = new Map<string, AllocRow[]>();
+    for (const a of allocations) {
+      const arr = allocationsByRequirement.get(a.requirement_id) ?? [];
+      arr.push(a);
+      allocationsByRequirement.set(a.requirement_id, arr);
+    }
+
+    interface Group { projectId: string; disciplineId: string; scenarioId: string; reqIds: string[]; sums: Map<string, number> }
+    const groups = new Map<string, Group>();
+    for (const req of requirements) {
+      const pool = poolById.get(req.pool_id);
+      if (!pool || !pool.discipline_id || isGenericPoolName(pool.name)) continue;
+      const key = `${req.project_id}|${pool.discipline_id}|${req.scenario_id}`;
+      const group = groups.get(key) ?? { projectId: req.project_id, disciplineId: pool.discipline_id, scenarioId: req.scenario_id, reqIds: [], sums: new Map<string, number>() };
+      group.reqIds.push(req.id);
+      for (const a of allocationsByRequirement.get(req.id) ?? []) {
+        if (a.fte <= 0.001) continue;
+        group.sums.set(a.period, (group.sums.get(a.period) ?? 0) + a.fte);
+      }
+      groups.set(key, group);
+    }
+    if (groups.size === 0) return;
+
+    let maxPoolOrder = this.query<{ m: number | null }>('SELECT MAX(sort_order) as m FROM resource_pools')[0]?.m ?? -1;
+
+    for (const group of groups.values()) {
+      const discipline = disciplineById.get(group.disciplineId);
+      if (!discipline) continue;
+
+      let genericPoolId = genericPoolByDiscipline.get(group.disciplineId);
+      if (!genericPoolId) {
+        genericPoolId = `pool_mig6_${group.disciplineId}`;
+        maxPoolOrder += 1;
+        this.exec(
+          'INSERT INTO resource_pools (id, name, capacity_fte, color, sort_order, discipline_id) VALUES (?, ?, 0, ?, ?, ?)',
+          [genericPoolId, genericPoolName(discipline.name), discipline.color, maxPoolOrder, group.disciplineId],
+        );
+        genericPoolByDiscipline.set(group.disciplineId, genericPoolId);
+      }
+
+      if (group.sums.size > 0) {
+        const existingReq = this.query<{ id: string }>(
+          'SELECT id FROM requirements WHERE project_id = ? AND pool_id = ? AND scenario_id = ?',
+          [group.projectId, genericPoolId, group.scenarioId],
+        )[0];
+        let genericReqId = existingReq?.id;
+        if (!genericReqId) {
+          genericReqId = `req_mig6_${group.projectId}_${group.disciplineId}_${group.scenarioId}`;
+          this.exec('INSERT INTO requirements (id, project_id, pool_id, scenario_id) VALUES (?, ?, ?, ?)', [genericReqId, group.projectId, genericPoolId, group.scenarioId]);
+        }
+        const existingAllocs = this.query<{ period: string; fte: number }>(
+          'SELECT period, fte FROM requirement_allocations WHERE requirement_id = ?',
+          [genericReqId],
+        );
+        const existingByPeriod = new Map(existingAllocs.map((a) => [a.period, a.fte]));
+        for (const [period, fte] of group.sums) {
+          const total = (existingByPeriod.get(period) ?? 0) + fte;
+          this.exec(
+            `INSERT INTO requirement_allocations (requirement_id, period, fte) VALUES (?, ?, ?)
+             ON CONFLICT(requirement_id, period) DO UPDATE SET fte = excluded.fte`,
+            [genericReqId, period, total],
+          );
+        }
+      }
+
+      for (const reqId of group.reqIds) {
+        this.exec('DELETE FROM requirements WHERE id = ?', [reqId]);
+      }
     }
   }
 

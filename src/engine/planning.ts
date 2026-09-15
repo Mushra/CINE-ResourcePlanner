@@ -28,6 +28,14 @@ export interface ProjectStaffing {
   lines: ProjectStaffingLine[];
 }
 
+export interface ProjectDisciplineStaffingLine {
+  disciplineId: string;
+  disciplineName: string;
+  required: number;
+  assigned: number;
+  gap: number; // assigned - required; negative = understaffed
+}
+
 export interface ProjectPersonStaffingLine {
   personAssignmentId: string;
   personId: string;
@@ -316,6 +324,36 @@ export class PlanningEngine {
       .sort((a, b) => a.poolName.localeCompare(b.poolName));
 
     return { projectId, period, lines };
+  }
+
+  /**
+   * Required vs. assigned FTE per discipline for one project at one period. Needs are stored
+   * discipline-only (on a hidden generic pool, see domain/identity.ts) while assignments bucket
+   * to each person's specific pool — so need and assigned only reconcile at this granularity.
+   * This is the single source of truth for both staffing validation and the merged Besoins/
+   * Assignations UI. Pools with no discipline bucket under UNASSIGNED_DISCIPLINE_ID.
+   */
+  getProjectDisciplineStaffing(projectId: string, period: Period): ProjectDisciplineStaffingLine[] {
+    const byDiscipline = new Map<string, ProjectDisciplineStaffingLine>();
+    for (const poolLine of this.getProjectStaffing(projectId, period).lines) {
+      const disciplineId = this.poolsById.get(poolLine.poolId)?.disciplineId ?? UNASSIGNED_DISCIPLINE_ID;
+      let line = byDiscipline.get(disciplineId);
+      if (!line) {
+        line = {
+          disciplineId,
+          disciplineName: disciplineId === UNASSIGNED_DISCIPLINE_ID ? 'Unassigned' : (this.disciplinesById.get(disciplineId)?.name ?? disciplineId),
+          required: 0,
+          assigned: 0,
+          gap: 0,
+        };
+        byDiscipline.set(disciplineId, line);
+      }
+      line.required += poolLine.required;
+      line.assigned += poolLine.assigned;
+    }
+    return [...byDiscipline.values()]
+      .map((l) => ({ ...l, required: round2(l.required), assigned: round2(l.assigned), gap: round2(l.assigned - l.required) }))
+      .sort((a, b) => a.disciplineName.localeCompare(b.disciplineName));
   }
 
   /** Per-person assigned FTE for one project at one period — drives the ProjectDetail UI. */

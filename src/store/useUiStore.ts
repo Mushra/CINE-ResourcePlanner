@@ -14,7 +14,6 @@ export const TIMELINE_ZOOM_DEFAULT = 100;
 const COLLAPSE_STORAGE_KEY = 'cine-planner-collapse';
 const TIMELINE_FILTERS_KEY = 'cine-planner-timeline-filters';
 const GLOBAL_FILTER_KEY = 'cine-planner-global-filter';
-const BESOINS_PREFS_KEY = 'cine-planner-besoins-prefs';
 const PEOPLE_MODE_KEY = 'cine-planner-people-mode';
 
 function loadCollapsed(): Record<string, boolean> {
@@ -90,36 +89,6 @@ function saveGlobalFilterPrefs(prefs: GlobalFilterPrefs): void {
   localStorage.setItem(GLOBAL_FILTER_KEY, JSON.stringify(prefs));
 }
 
-export type BesoinsMode = 'table' | 'timeline';
-export type BesoinsGranularity = 'month' | 'year';
-
-interface BesoinsPrefs {
-  mode: BesoinsMode;
-  granularity: BesoinsGranularity;
-  assignationsGranularity: BesoinsGranularity;
-}
-
-function loadBesoinsPrefs(): BesoinsPrefs {
-  const fallback: BesoinsPrefs = { mode: 'table', granularity: 'month', assignationsGranularity: 'month' };
-  try {
-    const raw = localStorage.getItem(BESOINS_PREFS_KEY);
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) return fallback;
-    return {
-      mode: parsed.mode === 'timeline' ? 'timeline' : 'table',
-      granularity: parsed.granularity === 'year' ? 'year' : 'month',
-      assignationsGranularity: parsed.assignationsGranularity === 'year' ? 'year' : 'month',
-    };
-  } catch {
-    return fallback;
-  }
-}
-
-function saveBesoinsPrefs(prefs: BesoinsPrefs): void {
-  localStorage.setItem(BESOINS_PREFS_KEY, JSON.stringify(prefs));
-}
-
 function loadPeopleMode(): PeopleMode {
   try {
     return localStorage.getItem(PEOPLE_MODE_KEY) === 'assignments' ? 'assignments' : 'availability';
@@ -166,13 +135,6 @@ interface UiState {
   peopleMode: PeopleMode;
   setPeopleMode: (mode: PeopleMode) => void;
 
-  besoinsMode: BesoinsMode;
-  besoinsGranularity: BesoinsGranularity;
-  assignationsGranularity: BesoinsGranularity;
-  setBesoinsMode: (mode: BesoinsMode) => void;
-  setBesoinsGranularity: (granularity: BesoinsGranularity) => void;
-  setAssignationsGranularity: (granularity: BesoinsGranularity) => void;
-
   /** Ephemeral — not persisted. Global "jump to…" search opened with Ctrl/Cmd+K. */
   commandPaletteOpen: boolean;
   setCommandPaletteOpen: (open: boolean) => void;
@@ -180,7 +142,6 @@ interface UiState {
 
 const initialTimelineFilters = loadTimelineFilters();
 const initialGlobalFilterPrefs = loadGlobalFilterPrefs();
-const initialBesoinsPrefs = loadBesoinsPrefs();
 
 export const useUiStore = create<UiState>((set, get) => ({
   view: 'dashboard',
@@ -248,22 +209,6 @@ export const useUiStore = create<UiState>((set, get) => ({
   setPeopleMode: (mode) => {
     localStorage.setItem(PEOPLE_MODE_KEY, mode);
     set({ peopleMode: mode });
-  },
-
-  besoinsMode: initialBesoinsPrefs.mode,
-  besoinsGranularity: initialBesoinsPrefs.granularity,
-  assignationsGranularity: initialBesoinsPrefs.assignationsGranularity,
-  setBesoinsMode: (mode) => {
-    saveBesoinsPrefs({ mode, granularity: get().besoinsGranularity, assignationsGranularity: get().assignationsGranularity });
-    set({ besoinsMode: mode });
-  },
-  setBesoinsGranularity: (granularity) => {
-    saveBesoinsPrefs({ mode: get().besoinsMode, granularity, assignationsGranularity: get().assignationsGranularity });
-    set({ besoinsGranularity: granularity });
-  },
-  setAssignationsGranularity: (granularity) => {
-    saveBesoinsPrefs({ mode: get().besoinsMode, granularity: get().besoinsGranularity, assignationsGranularity: granularity });
-    set({ assignationsGranularity: granularity });
   },
 
   commandPaletteOpen: false,

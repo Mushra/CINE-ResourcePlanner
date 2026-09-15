@@ -76,8 +76,6 @@
 .segmented button.active { background: var(--accent); color: var(--text-on-accent); }
 .segmented-sm button { padding: 3px 9px; font-size: 11px; }
 
-.alloc-cell-mixed .num-input { font-style: italic; }
-
 .requirements-card { padding: 16px 18px 18px; }
 
 /* Requirement block-timeline (Besoins → Timeline mode) */
@@ -149,9 +147,18 @@
 .req-block-handle { position: absolute; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
 .req-block-handle-left { left: 0; }
 .req-block-handle-right { right: 0; }
-.req-timeline-add { margin-top: 8px; }
 .req-timeline-group + .req-timeline-group { margin-top: 10px; }
-.req-timeline-pool-block { display: flex; flex-direction: column; gap: 3px; }
+.req-timeline-pool-block { display: flex; flex-direction: column; gap: 3px; margin-top: 3px; }
+.req-timeline-pool-subheader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 2px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.req-timeline-add-person { padding-left: 22px; margin: 2px 0 2px; }
 .req-timeline-collapse {
   display: inline-flex;
   align-items: center;
@@ -185,9 +192,9 @@
   font-weight: 600;
   color: var(--text-primary);
 }
-.req-timeline-member-row .req-timeline-lane-label { font-weight: 400; }
-.req-timeline-member-label { padding-left: 22px; font-size: 11px; color: var(--text-tertiary); font-weight: 400; }
-.req-timeline-member-row .req-timeline-disc-cell { color: var(--text-secondary); font-weight: 500; }
+.req-coverage-under { color: var(--status-critical); font-weight: 700; }
+.req-coverage-over { color: var(--status-warning); font-weight: 700; }
+.req-coverage-ok { color: var(--status-healthy); }
 .req-block-editor {
   position: absolute;
   top: calc(100% + 4px);
@@ -209,74 +216,6 @@
 .empty-inline { color: var(--text-tertiary); font-size: 12.5px; margin: 4px 0; }
 
 .table-scroll { overflow-x: auto; }
-.alloc-table { border-collapse: collapse; font-size: 12.5px; min-width: 100%; }
-.alloc-table th, .alloc-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-.alloc-table thead th {
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--text-tertiary);
-  text-align: center;
-  border-bottom: 1px solid var(--border-strong);
-}
-.alloc-row-label {
-  text-align: left;
-  font-weight: 600;
-  min-width: 130px;
-  vertical-align: middle;
-  border-right: 1px solid var(--border);
-}
-.alloc-row-label .pool-dot, .pool-subheader .pool-dot { margin-right: 6px; }
-.alloc-kind-label { color: var(--text-tertiary); font-size: 11px; text-align: right; min-width: 68px; }
-.alloc-actions-col { width: 90px; text-align: center; vertical-align: middle; border-left: 1px solid var(--border); }
-.alloc-cell { text-align: center; padding: 4px 6px !important; }
-.alloc-cell-inner { display: inline-flex; align-items: center; gap: 2px; }
-.alloc-fill-right {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border: none;
-  background: none;
-  color: var(--text-tertiary);
-  border-radius: 3px;
-  cursor: pointer;
-  opacity: 0;
-  flex-shrink: 0;
-}
-.alloc-cell:hover .alloc-fill-right { opacity: 1; }
-.alloc-fill-right:hover { background: var(--surface-2); color: var(--accent); }
-.alloc-cell-short .num-input { border-color: var(--status-critical); color: var(--status-critical); font-weight: 700; }
-.pool-group-row td { border-bottom: none; }
-
-.alloc-row-collapse {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  border: none;
-  background: none;
-  padding: 0;
-  margin-right: 4px;
-  color: var(--text-tertiary);
-  cursor: pointer;
-}
-.alloc-row-collapse svg { transition: transform 0.15s ease; }
-.alloc-row-collapse-open { transform: rotate(90deg); }
-.alloc-row-label-indent { padding-left: 24px; font-weight: 400; }
-.requirement-discipline-row td { background: var(--surface-1); }
-.requirement-pool-row .alloc-row-label { font-weight: 400; color: var(--text-secondary); }
-
-.pool-subheader-row td { border-bottom: 1px solid var(--border-strong); background: var(--surface-1); }
-.pool-subheader {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-weight: 600;
-  font-size: 12px;
-  text-align: left !important;
-}
 
 .range-panel {
   display: flex;
@@ -297,27 +236,6 @@
 .person-add-assignment { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
 .person-add-assignment .person-add-select { max-width: 220px; }
 
-.person-row-label {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 5px;
-  color: var(--text-secondary);
-  font-weight: 500;
-  text-transform: none;
-}
-.person-row-remove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  padding: 1px;
-  border-radius: 3px;
-}
-.person-row-remove:hover { color: var(--status-critical); background: var(--surface-2); }
 .person-add-select { font-size: 11.5px; color: var(--text-tertiary); max-width: 110px; }
 
 /* Person detail — assignment timeline */

@@ -1,50 +1,22 @@
-import { Fragment, useState } from 'react';
+import { useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
-import { addMonths, comparePeriod, formatPeriodLabel, periodFromISODate, periodRange, todayPeriod } from '../../domain/periods';
+import { addMonths, comparePeriod, periodFromISODate, periodRange, todayPeriod } from '../../domain/periods';
 import { getSanityChecks } from '../../engine/validation';
+import { UNASSIGNED_DISCIPLINE_ID } from '../../engine/planning';
 import { isGenericPoolName } from '../../domain/identity';
-import type { Period } from '../../domain/types';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
 import { StatusPill } from '../components/StatusPill';
-import { NumberField } from '../components/NumberField';
 import { ConfirmButton } from '../components/ConfirmButton';
 import { Collapsible } from '../components/Collapsible';
 import { ProjectFormDrawer, type ProjectFormValue } from '../components/ProjectFormDrawer';
-import { RequirementTimeline, type RequirementGroup, type RequirementLane } from '../components/RequirementTimeline';
+import { RequirementTimeline, type AssignmentPoolGroup, type RequirementGroup, type RequirementLane } from '../components/RequirementTimeline';
 import { RangePanel } from '../components/RangePanel';
 import { deriveProjectStatus, STATUS_LABEL } from '../../domain/projectStatus';
 
 const CERTAINTY_LABEL: Record<string, string> = { confirmed: 'Confirmed', estimated: 'Estimated', tbd: 'TBD' };
-
-interface ColumnDef {
-  key: string;
-  label: string;
-  periods: Period[];
-}
-
-/** Groups `months` into either one column per month, or one column per year (for the year-granularity Besoins table). */
-function buildColumns(months: Period[], granularity: 'month' | 'year'): ColumnDef[] {
-  if (granularity === 'month') {
-    return months.map((m) => ({ key: m, label: formatPeriodLabel(m, { withYear: false }), periods: [m] }));
-  }
-  const byYear = new Map<string, Period[]>();
-  for (const m of months) {
-    const year = m.slice(0, 4);
-    if (!byYear.has(year)) byYear.set(year, []);
-    byYear.get(year)!.push(m);
-  }
-  return [...byYear.entries()].map(([year, periods]) => ({ key: year, label: year, periods }));
-}
-
-/** A year column's display value is its first month's; `mixed` flags when the months disagree. */
-function columnValue(periods: Period[], months: Period[], requiredByMonth: number[]): { value: number; mixed: boolean } {
-  const vals = periods.map((p) => requiredByMonth[months.indexOf(p)] ?? 0);
-  const first = vals[0] ?? 0;
-  const mixed = vals.some((v) => Math.abs(v - first) > 0.001);
-  return { value: first, mixed };
-}
+const UNASSIGNED_COLOR = '#9ca3af';
 
 export function ProjectDetail({ projectId }: { projectId: string }) {
   const project = useStore((s) => s.data.projects.find((p) => p.id === projectId));
@@ -52,12 +24,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const disciplines = useStore((s) => s.data.disciplines);
   const pools = useStore((s) => s.data.pools);
   const people = useStore((s) => s.data.people);
-  const requirements = useStore((s) => s.data.requirements);
   const updateProject = useStore((s) => s.updateProject);
   const deleteProject = useStore((s) => s.deleteProject);
-  const setRequirement = useStore((s) => s.setRequirement);
-  const setRequirementRange = useStore((s) => s.setRequirementRange);
-  const setDisciplineRequirement = useStore((s) => s.setDisciplineRequirement);
   const setDisciplineRequirementRange = useStore((s) => s.setDisciplineRequirementRange);
   const setPersonAssignment = useStore((s) => s.setPersonAssignment);
   const setPersonAssignmentRange = useStore((s) => s.setPersonAssignmentRange);
@@ -65,14 +33,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const clearPersonAssignment = useStore((s) => s.clearPersonAssignment);
   const feedRequirementsFromAssignments = useStore((s) => s.feedRequirementsFromAssignments);
   const backToProjects = useUiStore((s) => s.backToProjects);
-  const collapsed = useUiStore((s) => s.collapsed);
-  const toggleCollapse = useUiStore((s) => s.toggleCollapse);
-  const besoinsMode = useUiStore((s) => s.besoinsMode);
-  const setBesoinsMode = useUiStore((s) => s.setBesoinsMode);
-  const besoinsGranularity = useUiStore((s) => s.besoinsGranularity);
-  const setBesoinsGranularity = useUiStore((s) => s.setBesoinsGranularity);
-  const assignationsGranularity = useUiStore((s) => s.assignationsGranularity);
-  const setAssignationsGranularity = useUiStore((s) => s.setAssignationsGranularity);
   const [editing, setEditing] = useState(false);
 
   const checks = project ? getSanityChecks(engine).filter((c) => c.projectId === project.id) : [];
@@ -89,8 +49,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const explicitLifecycle = periodRange(periodFromISODate(project.startDate), periodFromISODate(project.endDate));
   const allocatedPeriods = engine.projectAllocatedPeriods(project.id);
   // Editable window = the project's lifecycle unioned with any already-allocated months, padded 6
-  // months past the later of the two — so the grid/drag editors always offer room to plan ahead of
-  // the recorded end date, rather than locking editing to the current start/end.
+  // months past the later of the two — so the drag editor always offers room to plan ahead of the
+  // recorded end date, rather than locking editing to the current start/end.
   const combinedPeriods = [...explicitLifecycle, ...allocatedPeriods];
   const months = combinedPeriods.length > 0
     ? periodRange(
@@ -99,59 +59,47 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       )
     : periodRange(todayPeriod(), addMonths(todayPeriod(), 3));
 
-  const requirementPoolIds = new Set(requirements.filter((r) => r.projectId === project.id).map((r) => r.poolId));
-  const requirementPools = pools.filter((p) => requirementPoolIds.has(p.id));
-  const genericRequirementPools = requirementPools.filter((p) => isGenericPoolName(p.name));
-  const specificRequirementPools = requirementPools.filter((p) => !isGenericPoolName(p.name));
-
-  const requirementDisciplineIds = new Set(
-    [...genericRequirementPools, ...specificRequirementPools]
-      .map((p) => p.disciplineId)
-      .filter((id): id is string => id !== null),
-  );
-  const requirementDisciplines = disciplines.filter((d) => requirementDisciplineIds.has(d.id));
-  const unassignedSpecificPools = specificRequirementPools.filter((p) => p.disciplineId === null);
-
-  const requirementTargetOptions = [
-    ...disciplines.map((d) => ({ id: `disc:${d.id}`, label: `${d.name} (whole discipline)` })),
-    ...pools.filter((p) => !isGenericPoolName(p.name)).map((p) => ({ id: p.id, label: p.name })),
-  ];
-
+  const disciplineStaffingByMonth = months.map((m) => engine.getProjectDisciplineStaffing(project.id, m));
+  const disciplineIdsWithSignal = new Set<string>();
+  disciplineStaffingByMonth.forEach((lines) => {
+    for (const line of lines) {
+      if (line.required > 0.001 || line.assigned > 0.001) disciplineIdsWithSignal.add(line.disciplineId);
+    }
+  });
   const usedPoolIds = new Set(engine.projectPoolIds(project.id));
-  const usedPools = pools.filter((p) => usedPoolIds.has(p.id) && !isGenericPoolName(p.name));
 
-  const columns = buildColumns(months, besoinsGranularity);
-  const assignColumns = buildColumns(months, assignationsGranularity);
+  const groupDefs = [...disciplineIdsWithSignal]
+    .map((disciplineId) => {
+      if (disciplineId === UNASSIGNED_DISCIPLINE_ID) return { disciplineId, label: 'Unassigned', color: UNASSIGNED_COLOR };
+      const discipline = disciplines.find((d) => d.id === disciplineId);
+      return { disciplineId, label: discipline?.name ?? disciplineId, color: discipline?.color ?? UNASSIGNED_COLOR };
+    })
+    .sort((a, b) => (
+      a.disciplineId === UNASSIGNED_DISCIPLINE_ID ? 1
+      : b.disciplineId === UNASSIGNED_DISCIPLINE_ID ? -1
+      : a.label.localeCompare(b.label)
+    ));
 
-  const timelineGroupDefs: { key: string; label: string; color: string; disciplineId: string | null }[] = [
-    ...requirementDisciplines.map((d) => ({ key: d.id, label: d.name, color: d.color, disciplineId: d.id })),
-    ...(unassignedSpecificPools.length > 0 ? [{ key: 'unassigned', label: 'Unassigned', color: '#9ca3af', disciplineId: null }] : []),
-  ];
-  const timelineGroups: RequirementGroup[] = timelineGroupDefs.map((g) => {
-    const genericPool = genericRequirementPools.find((p) => p.disciplineId === g.disciplineId);
-    const specificPools = g.disciplineId === null ? unassignedSpecificPools : specificRequirementPools.filter((p) => p.disciplineId === g.disciplineId);
+  const timelineGroups: RequirementGroup[] = groupDefs.map((def) => {
+    const genericPool = pools.find((p) => p.disciplineId === def.disciplineId && isGenericPoolName(p.name));
 
-    const genericLane: RequirementLane | undefined = genericPool ? {
-      key: `disc:${genericPool.disciplineId}`,
-      label: g.label,
-      color: g.color,
-      values: months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === genericPool.id)?.required ?? 0),
-      onCommitRange: (periods, fte) => setDisciplineRequirementRange(project.id, genericPool.disciplineId!, periods, fte),
-      onRemove: () => clearRequirementPool(project.id, genericPool.id),
-    } : undefined;
+    const needLane: RequirementLane = {
+      key: `disc:${def.disciplineId}`,
+      label: def.label,
+      color: def.color,
+      values: disciplineStaffingByMonth.map((lines) => lines.find((l) => l.disciplineId === def.disciplineId)?.required ?? 0),
+      onCommitRange: (periods, fte) => setDisciplineRequirementRange(project.id, def.disciplineId, periods, fte),
+      onRemove: genericPool ? () => clearRequirementPool(project.id, genericPool.id) : undefined,
+    };
+    const assignedTotals = disciplineStaffingByMonth.map((lines) => lines.find((l) => l.disciplineId === def.disciplineId)?.assigned ?? 0);
 
-    const poolLanes = specificPools.map((pool) => {
-      const lane: RequirementLane = {
-        key: pool.id,
-        label: pool.name,
-        color: pool.color,
-        values: months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === pool.id)?.required ?? 0),
-        onCommitRange: (periods, fte) => setRequirementRange(project.id, pool.id, periods, fte),
-        onRemove: () => {
-          clearRequirementPool(project.id, pool.id);
-          engine.peopleInPool(pool.id).forEach((person) => clearPersonAssignment(person.id, project.id));
-        },
-      };
+    const specificPools = pools.filter((p) => (
+      !isGenericPoolName(p.name)
+      && (def.disciplineId === UNASSIGNED_DISCIPLINE_ID ? p.disciplineId === null : p.disciplineId === def.disciplineId)
+      && usedPoolIds.has(p.id)
+    ));
+
+    const poolGroups: AssignmentPoolGroup[] = specificPools.map((pool) => {
       const memberNames = new Map<string, string>();
       const memberFteByMonth = new Map<string, number[]>();
       months.forEach((m, mi) => {
@@ -162,21 +110,37 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           memberFteByMonth.get(line.personId)![mi] = line.fte;
         }
       });
-      const members = [...memberNames.keys()]
+      const personLanes: RequirementLane[] = [...memberNames.keys()]
         .sort((a, b) => memberNames.get(a)!.localeCompare(memberNames.get(b)!))
-        .map((personId) => ({ personId, name: memberNames.get(personId)!, fte: memberFteByMonth.get(personId)! }));
-      return { lane, members };
+        .map((personId) => ({
+          key: personId,
+          label: memberNames.get(personId)!,
+          color: pool.color,
+          values: memberFteByMonth.get(personId)!,
+          onCommitRange: (periods, fte) => setPersonAssignmentRange(personId, project.id, periods, fte),
+          onRemove: () => clearPersonAssignment(personId, project.id),
+        }));
+      const addPersonOptions = people
+        .filter((p) => p.poolId === pool.id && !memberNames.has(p.id))
+        .map((p) => ({ id: p.id, label: p.name }));
+
+      return {
+        poolId: pool.id,
+        poolName: pool.name,
+        color: pool.color,
+        personLanes,
+        addPersonOptions,
+        onAddPerson: (personId) => setPersonAssignment(personId, project.id, months[0] ?? todayPeriod(), 1),
+      };
     });
 
-    const totals = months.map((_, mi) => (genericLane?.values[mi] ?? 0) + poolLanes.reduce((sum, pl) => sum + pl.lane.values[mi], 0));
-
-    return { key: g.key, label: g.label, color: g.color, totals, genericLane, poolLanes };
+    return { key: def.disciplineId, label: def.label, color: def.color, needLane, assignedTotals, poolGroups };
   });
-  const presentTargetIds = new Set([
-    ...genericRequirementPools.map((p) => `disc:${p.disciplineId}`),
-    ...specificRequirementPools.map((p) => p.id),
-  ]);
-  const timelineAddOptions = requirementTargetOptions.filter((o) => !presentTargetIds.has(o.id));
+
+  const rangePanelOptions = [
+    ...disciplines.map((d) => ({ id: `disc:${d.id}`, label: `${d.name} (whole discipline)` })),
+    ...people.map((p) => ({ id: p.id, label: p.poolId ? `${p.name} (${pools.find((pl) => pl.id === p.poolId)?.name ?? ''})` : p.name })),
+  ];
 
   return (
     <div className="project-detail-view">
@@ -228,8 +192,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
       <div className="card requirements-card">
         <div className="panel-header">
-          <h2>Besoins</h2>
-          <span className="panel-sub">What the project needs, by role and month</span>
+          <h2>Staffing</h2>
+          <span className="panel-sub">Needs (by discipline) and who's actually assigned, by month</span>
           <div className="panel-header-toggles">
             <Button variant="ghost" size="sm" icon="download" onClick={() => feedRequirementsFromAssignments(project.id, 'fill-empty')}>Fill empty needs from assignments</Button>
             <ConfirmButton
@@ -238,273 +202,23 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               icon="download"
               onConfirm={() => feedRequirementsFromAssignments(project.id, 'overwrite')}
             />
-            {besoinsMode === 'table' && (
-              <div className="segmented segmented-sm">
-                <button type="button" className={besoinsGranularity === 'month' ? 'active' : ''} onClick={() => setBesoinsGranularity('month')}>Month</button>
-                <button type="button" className={besoinsGranularity === 'year' ? 'active' : ''} onClick={() => setBesoinsGranularity('year')}>Year</button>
-              </div>
-            )}
-            <div className="segmented segmented-sm">
-              <button type="button" className={besoinsMode === 'table' ? 'active' : ''} onClick={() => setBesoinsMode('table')}>Table</button>
-              <button type="button" className={besoinsMode === 'timeline' ? 'active' : ''} onClick={() => setBesoinsMode('timeline')}>Timeline</button>
-            </div>
           </div>
         </div>
 
         <RangePanel
-          options={requirementTargetOptions}
+          options={rangePanelOptions}
           months={months}
           onApply={(targetId, periods, fte) => (
             targetId.startsWith('disc:')
               ? setDisciplineRequirementRange(project.id, targetId.slice(5), periods, fte)
-              : setRequirementRange(project.id, targetId, periods, fte)
+              : setPersonAssignmentRange(targetId, project.id, periods, fte)
           )}
         />
 
-        {requirementDisciplines.length === 0 && unassignedSpecificPools.length === 0 ? (
-          <p className="empty-inline">No resource requirements yet. Use the panel above to set a need — pick a whole discipline for a headcount minimum, or a specific role.</p>
-        ) : besoinsMode === 'timeline' ? (
-          <RequirementTimeline
-            months={months}
-            groups={timelineGroups}
-            addOptions={timelineAddOptions}
-            projectId={project.id}
-            onAddLane={(targetId) => (
-              targetId.startsWith('disc:')
-                ? setDisciplineRequirement(project.id, targetId.slice(5), months[0], 1)
-                : setRequirement(project.id, targetId, months[0], 1)
-            )}
-          />
+        {timelineGroups.length === 0 ? (
+          <p className="empty-inline">No resource requirements yet. Use the panel above to set a discipline need, or assign a person directly.</p>
         ) : (
-          <div className="table-scroll">
-            <table className="alloc-table">
-              <thead>
-                <tr>
-                  <th className="alloc-row-label">Discipline / Emploi repère</th>
-                  {columns.map((c) => <th key={c.key}>{c.label}</th>)}
-                  <th className="alloc-actions-col" />
-                </tr>
-              </thead>
-              <tbody>
-                {requirementDisciplines.map((discipline) => {
-                  const genericPool = genericRequirementPools.find((p) => p.disciplineId === discipline.id);
-                  const specificPools = specificRequirementPools.filter((p) => p.disciplineId === discipline.id);
-                  const collapseKey = `projdetail:req-disc:${project.id}:${discipline.id}`;
-                  const rowsCollapsed = specificPools.length > 0 && collapsed[collapseKey] === true;
-                  const requiredByMonth = months.map((m) => genericPool && engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === genericPool.id)?.required || 0);
-                  return (
-                    <Fragment key={discipline.id}>
-                      <tr className="requirement-discipline-row">
-                        <td className="alloc-row-label">
-                          {specificPools.length > 0 && (
-                            <button
-                              type="button"
-                              className="alloc-row-collapse"
-                              onClick={() => toggleCollapse(collapseKey)}
-                              aria-label={rowsCollapsed ? 'Expand' : 'Collapse'}
-                            >
-                              <Icon name="chevron-right" size={11} className={rowsCollapsed ? '' : 'alloc-row-collapse-open'} />
-                            </button>
-                          )}
-                          <span className="discipline-dot" style={{ background: discipline.color }} />
-                          {discipline.name}
-                        </td>
-                        {columns.map((col, i) => {
-                          const { value, mixed } = columnValue(col.periods, months, requiredByMonth);
-                          return (
-                            <AllocCell
-                              key={col.key}
-                              value={value}
-                              mixed={mixed}
-                              onCommit={(v) => setDisciplineRequirementRange(project.id, discipline.id, col.periods, v)}
-                              onFillRight={i < columns.length - 1 ? () => setDisciplineRequirementRange(project.id, discipline.id, columns.slice(i + 1).flatMap((c) => c.periods), value) : undefined}
-                            />
-                          );
-                        })}
-                        <td className="alloc-actions-col">
-                          {genericPool && (
-                            <ConfirmButton
-                              label="Remove"
-                              onConfirm={() => clearRequirementPool(project.id, genericPool.id)}
-                            />
-                          )}
-                        </td>
-                      </tr>
-                      {!rowsCollapsed && specificPools.map((pool) => {
-                        const poolRequiredByMonth = months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === pool.id)?.required ?? 0);
-                        return (
-                          <tr key={pool.id} className="requirement-pool-row">
-                            <td className="alloc-row-label alloc-row-label-indent">
-                              <span className="pool-dot" style={{ background: pool.color }} />
-                              {pool.name}
-                            </td>
-                            {columns.map((col, i) => {
-                              const { value, mixed } = columnValue(col.periods, months, poolRequiredByMonth);
-                              return (
-                                <AllocCell
-                                  key={col.key}
-                                  value={value}
-                                  mixed={mixed}
-                                  onCommit={(v) => setRequirementRange(project.id, pool.id, col.periods, v)}
-                                  onFillRight={i < columns.length - 1 ? () => setRequirementRange(project.id, pool.id, columns.slice(i + 1).flatMap((c) => c.periods), value) : undefined}
-                                />
-                              );
-                            })}
-                            <td className="alloc-actions-col">
-                              <ConfirmButton
-                                label="Remove"
-                                onConfirm={() => {
-                                  clearRequirementPool(project.id, pool.id);
-                                  engine.peopleInPool(pool.id).forEach((person) => clearPersonAssignment(person.id, project.id));
-                                }}
-                              />
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </Fragment>
-                  );
-                })}
-                {unassignedSpecificPools.map((pool) => {
-                  const requiredByMonth = months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === pool.id)?.required ?? 0);
-                  return (
-                    <tr key={pool.id}>
-                      <td className="alloc-row-label">
-                        <span className="pool-dot" style={{ background: pool.color }} />
-                        {pool.name}
-                      </td>
-                      {columns.map((col, i) => {
-                        const { value, mixed } = columnValue(col.periods, months, requiredByMonth);
-                        return (
-                          <AllocCell
-                            key={col.key}
-                            value={value}
-                            mixed={mixed}
-                            onCommit={(v) => setRequirementRange(project.id, pool.id, col.periods, v)}
-                            onFillRight={i < columns.length - 1 ? () => setRequirementRange(project.id, pool.id, columns.slice(i + 1).flatMap((c) => c.periods), value) : undefined}
-                          />
-                        );
-                      })}
-                      <td className="alloc-actions-col">
-                        <ConfirmButton
-                          label="Remove"
-                          onConfirm={() => {
-                            clearRequirementPool(project.id, pool.id);
-                            engine.peopleInPool(pool.id).forEach((person) => clearPersonAssignment(person.id, project.id));
-                          }}
-                        />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <div className="card requirements-card">
-        <div className="panel-header">
-          <h2>Assignations</h2>
-          <span className="panel-sub">Who is actually staffed, by month</span>
-          <div className="panel-header-toggles">
-            <div className="segmented segmented-sm">
-              <button type="button" className={assignationsGranularity === 'month' ? 'active' : ''} onClick={() => setAssignationsGranularity('month')}>Month</button>
-              <button type="button" className={assignationsGranularity === 'year' ? 'active' : ''} onClick={() => setAssignationsGranularity('year')}>Year</button>
-            </div>
-          </div>
-        </div>
-
-        <RangePanel
-          options={people.map((p) => ({ id: p.id, label: p.poolId ? `${p.name} (${pools.find((pl) => pl.id === p.poolId)?.name ?? ''})` : p.name }))}
-          months={months}
-          fteLabel="FTE"
-          onApply={(personId, periods, fte) => setPersonAssignmentRange(personId, project.id, periods, fte)}
-        />
-
-        {usedPools.length === 0 ? (
-          <p className="empty-inline">No one is assigned yet.</p>
-        ) : (
-          <div className="table-scroll">
-            <table className="alloc-table">
-              <thead>
-                <tr>
-                  <th className="alloc-row-label">Person</th>
-                  {assignColumns.map((c) => <th key={c.key}>{c.label}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {usedPools.map((pool) => {
-                  const staffingByMonth = months.map((m) => engine.getProjectStaffing(project.id, m).lines.find((l) => l.poolId === pool.id));
-                  const personLinesByMonth = months.map((m) => engine.getProjectPersonStaffing(project.id, m).lines.filter((l) => l.poolId === pool.id));
-                  const requiredByMonth = staffingByMonth.map((s) => s?.required ?? 0);
-                  const assignedByMonth = staffingByMonth.map((s) => s?.assigned ?? 0);
-
-                  const assignedPeople = new Map<string, string>();
-                  personLinesByMonth.forEach((lines) => lines.forEach((l) => assignedPeople.set(l.personId, l.personName)));
-                  const assignedPersonIds = [...assignedPeople.keys()].sort((a, b) => assignedPeople.get(a)!.localeCompare(assignedPeople.get(b)!));
-
-                  const addablePeople = people.filter((p) => p.poolId === pool.id && !assignedPeople.has(p.id));
-
-                  return (
-                    <Fragment key={pool.id}>
-                      <tr className="pool-subheader-row">
-                        <td className="pool-subheader" colSpan={assignColumns.length + 1}>
-                          <span className="pool-dot" style={{ background: pool.color }} />
-                          {pool.name}
-                        </td>
-                      </tr>
-                      {assignedPersonIds.map((personId) => (
-                        <tr key={personId}>
-                          <td className="alloc-kind-label person-row-label">
-                            {assignedPeople.get(personId)}
-                            <button type="button" className="person-row-remove" title="Unassign" onClick={() => clearPersonAssignment(personId, project.id)}>
-                              <Icon name="close" size={11} />
-                            </button>
-                          </td>
-                          {assignColumns.map((col, i) => {
-                            const { value: required } = columnValue(col.periods, months, requiredByMonth);
-                            const { value: assigned } = columnValue(col.periods, months, assignedByMonth);
-                            const short = required > 0 && assigned < required - 0.001;
-                            const fteByMonth = months.map((_, mi) => personLinesByMonth[mi].find((l) => l.personId === personId)?.fte ?? 0);
-                            const { value: fte, mixed } = columnValue(col.periods, months, fteByMonth);
-                            return (
-                              <AllocCell
-                                key={col.key}
-                                value={fte}
-                                mixed={mixed}
-                                highlightShort={short}
-                                onCommit={(v) => setPersonAssignmentRange(personId, project.id, col.periods, v)}
-                                onFillRight={i < assignColumns.length - 1 ? () => setPersonAssignmentRange(personId, project.id, assignColumns.slice(i + 1).flatMap((c) => c.periods), fte) : undefined}
-                              />
-                            );
-                          })}
-                        </tr>
-                      ))}
-                      {addablePeople.length > 0 && (
-                        <tr>
-                          <td className="alloc-kind-label">
-                            <select
-                              className="person-add-select"
-                              defaultValue=""
-                              onChange={(e) => {
-                                if (e.target.value) setPersonAssignment(e.target.value, project.id, months[0] ?? todayPeriod(), 1);
-                                e.target.value = '';
-                              }}
-                            >
-                              <option value="" disabled>+ Add person…</option>
-                              {addablePeople.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                            </select>
-                          </td>
-                          {assignColumns.map((c) => <td key={c.key} className="alloc-cell" />)}
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <RequirementTimeline months={months} groups={timelineGroups} projectId={project.id} />
         )}
       </div>
 
@@ -531,26 +245,3 @@ function DateChip({ label, date, certainty }: { label: string; date: string | nu
     </div>
   );
 }
-
-/** One grid cell: an editable FTE plus a fill-right affordance that copies its value to every month after it. */
-function AllocCell({ value, onCommit, onFillRight, highlightShort, mixed }: {
-  value: number;
-  onCommit: (value: number) => void;
-  onFillRight?: () => void;
-  highlightShort?: boolean;
-  mixed?: boolean;
-}) {
-  return (
-    <td className={`alloc-cell ${highlightShort ? 'alloc-cell-short' : ''} ${mixed ? 'alloc-cell-mixed' : ''}`} title={mixed ? 'Months in this year have different values' : undefined}>
-      <div className="alloc-cell-inner">
-        <NumberField value={value} onCommit={onCommit} onFillRight={onFillRight} className="num-input" />
-        {onFillRight && (
-          <button type="button" className="alloc-fill-right" title="Fill right with this value" onClick={onFillRight}>
-            <Icon name="chevron-right" size={10} />
-          </button>
-        )}
-      </div>
-    </td>
-  );
-}
-

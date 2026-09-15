@@ -102,24 +102,24 @@ function checkProjectStaffing(engine: PlanningEngine): SanityCheck[] {
     const status = deriveProjectStatus(project);
     if (status === 'cancelled' || status === 'completed') continue;
     const periods = engine.projectActivePeriods(project.id);
-    const seenUnderstaffedPool = new Set<string>();
+    const seenUnderstaffedDiscipline = new Set<string>();
 
     for (const period of periods) {
-      const staffing = engine.getProjectStaffing(project.id, period);
-      for (const line of staffing.lines) {
+      const lines = engine.getProjectDisciplineStaffing(project.id, period);
+      for (const line of lines) {
         if (line.required <= 0) {
           if (line.assigned > 0.001) {
             checks.push({
-              id: `assignment-without-requirement:${project.id}:${line.poolId}:${period}`,
+              id: `assignment-without-requirement:${project.id}:${line.disciplineId}:${period}`,
               severity: 'warning',
               category: 'assignment_without_requirement',
               projectId: project.id,
               projectName: project.name,
-              poolId: line.poolId,
-              poolName: line.poolName,
+              disciplineId: line.disciplineId,
+              disciplineName: line.disciplineName,
               period,
-              message: `${project.name} has ${line.poolName} assigned with no requirement in ${formatPeriodLabel(period)}`,
-              impact: `${line.assigned} FTE assigned but no requirement exists for this role/period`,
+              message: `${project.name} has ${line.disciplineName} assigned with no requirement in ${formatPeriodLabel(period)}`,
+              impact: `${line.assigned} FTE assigned but no requirement exists for this discipline/period`,
             });
           }
           continue;
@@ -127,33 +127,33 @@ function checkProjectStaffing(engine: PlanningEngine): SanityCheck[] {
 
         if (line.gap > 0.001) {
           checks.push({
-            id: `over-allocated:${project.id}:${line.poolId}:${period}`,
+            id: `over-allocated:${project.id}:${line.disciplineId}:${period}`,
             severity: 'warning',
             category: 'over_allocated',
             projectId: project.id,
             projectName: project.name,
-            poolId: line.poolId,
-            poolName: line.poolName,
+            disciplineId: line.disciplineId,
+            disciplineName: line.disciplineName,
             period,
-            message: `${project.name} is over-allocated on ${line.poolName} in ${formatPeriodLabel(period)}`,
+            message: `${project.name} is over-allocated on ${line.disciplineName} in ${formatPeriodLabel(period)}`,
             impact: `Assigned ${line.assigned} FTE exceeds requirement ${line.required} FTE by ${round2(line.gap)} FTE`,
           });
         }
 
         if (line.assigned <= 0.001) {
-          // No assignment at all for this pool on this project — a distinct, more severe case.
-          const key = `${project.id}:${line.poolId}`;
-          if (!seenUnderstaffedPool.has(key)) {
-            seenUnderstaffedPool.add(key);
+          // No assignment at all for this discipline on this project — a distinct, more severe case.
+          const key = `${project.id}:${line.disciplineId}`;
+          if (!seenUnderstaffedDiscipline.has(key)) {
+            seenUnderstaffedDiscipline.add(key);
             checks.push({
               id: `unstaffed:${key}`,
               severity: 'critical',
               category: 'unstaffed_requirement',
               projectId: project.id,
               projectName: project.name,
-              poolId: line.poolId,
-              poolName: line.poolName,
-              message: `${project.name} needs ${line.poolName} but has no assignment`,
+              disciplineId: line.disciplineId,
+              disciplineName: line.disciplineName,
+              message: `${project.name} needs ${line.disciplineName} but has no assignment`,
               impact: `Requirement of up to ${line.required} FTE has zero staffing`,
             });
           }
@@ -164,31 +164,31 @@ function checkProjectStaffing(engine: PlanningEngine): SanityCheck[] {
           const missing = round2(-line.gap);
           const severity: Severity = project.priority === 'critical' || project.priority === 'high' ? 'critical' : 'warning';
           checks.push({
-            id: `understaffed:${project.id}:${line.poolId}:${period}`,
+            id: `understaffed:${project.id}:${line.disciplineId}:${period}`,
             severity,
             category: 'understaffed_project',
             projectId: project.id,
             projectName: project.name,
-            poolId: line.poolId,
-            poolName: line.poolName,
+            disciplineId: line.disciplineId,
+            disciplineName: line.disciplineName,
             period,
-            message: `${project.name} is understaffed on ${line.poolName} in ${formatPeriodLabel(period)}`,
+            message: `${project.name} is understaffed on ${line.disciplineName} in ${formatPeriodLabel(period)}`,
             impact: `Missing ${missing} FTE (required ${line.required}, assigned ${line.assigned})`,
           });
 
-          const available = engine.getAvailableCapacity(line.poolId, period);
+          const available = round2(engine.getDisciplineCapacity(line.disciplineId, period) - engine.getDisciplineAssignedCapacity(line.disciplineId, period));
           if (available > 0.001) {
             checks.push({
-              id: `available:${project.id}:${line.poolId}:${period}`,
+              id: `available:${project.id}:${line.disciplineId}:${period}`,
               severity: 'info',
               category: 'available_not_assigned',
               projectId: project.id,
               projectName: project.name,
-              poolId: line.poolId,
-              poolName: line.poolName,
+              disciplineId: line.disciplineId,
+              disciplineName: line.disciplineName,
               period,
-              message: `${line.poolName} has spare capacity elsewhere while ${project.name} is understaffed`,
-              impact: `${round2(Math.min(available, missing))} of ${missing} FTE gap could be covered by ${available} FTE of unassigned ${line.poolName} capacity`,
+              message: `${line.disciplineName} has spare capacity elsewhere while ${project.name} is understaffed`,
+              impact: `${round2(Math.min(available, missing))} of ${missing} FTE gap could be covered by ${available} FTE of unassigned ${line.disciplineName} capacity`,
             });
           }
         }
@@ -198,39 +198,43 @@ function checkProjectStaffing(engine: PlanningEngine): SanityCheck[] {
   return checks;
 }
 
-/** Flags assignments that reach into periods a pool has no requirement for on that project. */
+/** Flags assignments that reach into periods a discipline has no requirement for on that project. */
 function checkDurationMismatch(engine: PlanningEngine): SanityCheck[] {
   const checks: SanityCheck[] = [];
   for (const project of engine.projects()) {
     const status = deriveProjectStatus(project);
     if (status === 'cancelled' || status === 'completed') continue;
     const periods = engine.projectAllocatedPeriods(project.id);
+    const disciplineIds = new Set<string>();
     for (const poolId of engine.projectPoolIds(project.id)) {
+      disciplineIds.add(engine.pool(poolId)?.disciplineId ?? UNASSIGNED_DISCIPLINE_ID);
+    }
+    for (const disciplineId of disciplineIds) {
       const reqPeriods = new Set<Period>();
       const extraAsnPeriods: Period[] = [];
       for (const period of periods) {
-        const line = engine.getProjectStaffing(project.id, period).lines.find((l) => l.poolId === poolId);
+        const line = engine.getProjectDisciplineStaffing(project.id, period).find((l) => l.disciplineId === disciplineId);
         if (!line) continue;
         if (line.required > 0.001) reqPeriods.add(period);
       }
-      if (reqPeriods.size === 0) continue; // no requirement at all for this pool — covered by assignment_without_requirement
+      if (reqPeriods.size === 0) continue; // no requirement at all for this discipline — covered by assignment_without_requirement
       for (const period of periods) {
-        const line = engine.getProjectStaffing(project.id, period).lines.find((l) => l.poolId === poolId);
+        const line = engine.getProjectDisciplineStaffing(project.id, period).find((l) => l.disciplineId === disciplineId);
         if (line && line.assigned > 0.001 && !reqPeriods.has(period)) extraAsnPeriods.push(period);
       }
       if (extraAsnPeriods.length > 0) {
-        const poolName = engine.pool(poolId)?.name ?? poolId;
+        const disciplineName = disciplineId === UNASSIGNED_DISCIPLINE_ID ? 'Unassigned' : (engine.discipline(disciplineId)?.name ?? disciplineId);
         const list = extraAsnPeriods.sort(comparePeriod).map((p) => formatPeriodLabel(p)).join(', ');
         checks.push({
-          id: `duration-mismatch:${project.id}:${poolId}`,
+          id: `duration-mismatch:${project.id}:${disciplineId}`,
           severity: 'warning',
           category: 'duration_mismatch',
           projectId: project.id,
           projectName: project.name,
-          poolId,
-          poolName,
-          message: `${project.name} has ${poolName} assigned outside its requirement's duration`,
-          impact: `Assigned in ${list}, where no requirement is defined for this role`,
+          disciplineId,
+          disciplineName,
+          message: `${project.name} has ${disciplineName} assigned outside its requirement's duration`,
+          impact: `Assigned in ${list}, where no requirement is defined for this discipline`,
         });
       }
     }

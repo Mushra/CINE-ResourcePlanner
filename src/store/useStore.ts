@@ -23,7 +23,7 @@ import { PlanningEngine, round2 } from '../engine/planning';
 import type { Discipline, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
 import { emptyPlanningData } from '../domain/types';
 import { applyStructureOverrides } from '../domain/overrides';
-import { normalizeKey, genericPoolName, isGenericPoolName } from '../domain/identity';
+import { normalizeKey, genericPoolName } from '../domain/identity';
 import { addMonths, comparePeriod, formatPeriodLabel, isoFirstDayOfPeriod, isoLastDayOfPeriod, periodFromISODate, periodRange } from '../domain/periods';
 import { spreadHue } from '../ui/lib/colors';
 
@@ -198,18 +198,19 @@ export const useStore = create<StoreState>((set, get) => {
   }
 
   /**
-   * Copies current assignment FTE onto requirement FTE for a project's specific roles (never the
-   * discipline-level generic pools, so headcount minima aren't clobbered by a per-role sync).
-   * 'overwrite' mirrors assigned exactly, including down to 0; 'fill-empty' only touches role/months
-   * with no requirement set yet. Returns the number of role/month cells changed. Does not persist.
+   * Copies current assigned FTE onto discipline-need FTE for a project (needs are discipline-only,
+   * see resolveGenericPoolId). 'overwrite' mirrors assigned exactly, including down to 0; 'fill-empty'
+   * only touches discipline/months with no need set yet. Returns the number of discipline/month cells
+   * changed. Does not persist.
    */
   function feedProjectRequirements(db: PlannerDatabase, engine: PlanningEngine, projectId: string, mode: FeedRequirementsMode): number {
     let changed = 0;
     for (const period of engine.projectActivePeriods(projectId)) {
-      for (const line of engine.getProjectStaffing(projectId, period).lines) {
-        if (isGenericPoolName(line.poolName)) continue;
+      for (const line of engine.getProjectDisciplineStaffing(projectId, period)) {
         if (mode === 'fill-empty' ? line.required > 0.001 : Math.abs(line.required - line.assigned) < 0.001) continue;
-        const req = getOrCreateRequirement(db, projectId, line.poolId, BASE_SCENARIO_ID);
+        const poolId = resolveGenericPoolId(db, line.disciplineId);
+        if (!poolId) continue;
+        const req = getOrCreateRequirement(db, projectId, poolId, BASE_SCENARIO_ID);
         repoSetRequirementAllocation(db, req.id, period, line.assigned);
         changed += 1;
       }
