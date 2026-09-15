@@ -44,6 +44,21 @@ export class PlannerDatabase {
     const from = this.getSetting('schema_version');
     this.migrate(from);
     this.setSetting('schema_version', SCHEMA_VERSION);
+    this.healDanglingReferences();
+  }
+
+  /**
+   * sql.js never enforces the `ON DELETE SET NULL`/`CASCADE` declared in schema.sql (the
+   * foreign_keys pragma defaults off), so a delete written before that was accounted for — or any
+   * future one that misses it — can leave a dangling reference. Run defensively on every load:
+   * currently just resource_pools.discipline_id, the one case that surfaced (a deleted discipline's
+   * pools kept pointing at the gone id and lingered in project timelines under a broken label
+   * instead of falling into the "Unassigned" bucket like any other discipline-less pool).
+   */
+  private healDanglingReferences(): void {
+    this.db.exec(
+      'UPDATE resource_pools SET discipline_id = NULL WHERE discipline_id IS NOT NULL AND discipline_id NOT IN (SELECT id FROM disciplines)',
+    );
   }
 
   /** Fresh DBs (from === null) never had the legacy tables — nothing to migrate. */

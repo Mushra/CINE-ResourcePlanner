@@ -245,6 +245,11 @@ export function updateDiscipline(db: PlannerDatabase, discipline: Discipline): v
 }
 
 export function deleteDiscipline(db: PlannerDatabase, disciplineId: string): void {
+  // sql.js doesn't enforce the `ON DELETE SET NULL` declared on resource_pools.discipline_id
+  // (foreign_keys pragma is off by default), so do it ourselves — otherwise pools keep pointing
+  // at the deleted id and linger in project timelines under a broken label instead of falling
+  // back to the "Unassigned" bucket like any other discipline-less pool.
+  db.exec('UPDATE resource_pools SET discipline_id = NULL WHERE discipline_id = ?', [disciplineId]);
   db.exec('DELETE FROM disciplines WHERE id = ?', [disciplineId]);
 }
 
