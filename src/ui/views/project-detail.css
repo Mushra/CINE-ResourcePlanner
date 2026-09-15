@@ -238,6 +238,7 @@
 .req-block-editor-sep { color: var(--text-tertiary); }
 .req-block-editor-date-wrap { position: relative; display: inline-flex; }
 .req-block-editor-date {
+  display: inline-flex;
   border: 1px solid var(--border);
   background: var(--surface-1);
   border-radius: 4px;
@@ -245,19 +246,21 @@
   font: inherit;
   font-weight: 600;
   color: var(--text-primary);
-  cursor: pointer;
 }
-.req-block-editor-date:hover { background: var(--surface-2); border-color: var(--border-strong); }
+.req-block-editor-date-wrap:hover .req-block-editor-date { background: var(--surface-2); border-color: var(--border-strong); }
+/* The real <input type="date"> sits transparent on top of the label above — clicking it is a
+   direct click on the native control (so the browser's own picker-opening behavior just works),
+   while its native rendering stays invisible so the formatted label shows through underneath. */
 .req-block-editor-date-input {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  border: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
   padding: 0;
-  pointer-events: none;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
 }
 .req-block-editor-close { border: none; background: none; cursor: pointer; color: var(--text-tertiary); display: inline-flex; }
 .pool-add-select { font-size: 12.5px; }

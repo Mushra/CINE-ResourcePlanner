@@ -284,13 +284,15 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
     setEditingBlock({ startIdx: start, endIdx: end, fte: editingBlock.fte });
   }
 
-  function openDatePicker(ref: React.RefObject<HTMLInputElement | null>): void {
-    const input = ref.current;
-    if (!input) return;
+  /** Best-effort: some browsers only auto-open the native calendar when the click lands on the
+   * icon rather than anywhere in the field. Forcing it on every click (the input itself is what
+   * received the click, so activation is always valid here) makes it consistent; failures are
+   * silently ignored since the input's own default click behavior already covers most cases. */
+  function forceShowPicker(e: React.MouseEvent<HTMLInputElement>): void {
     try {
-      input.showPicker();
+      e.currentTarget.showPicker();
     } catch {
-      input.focus();
+      // ignore — default click behavior on the input already opens it in most browsers
     }
   }
 
@@ -360,9 +362,9 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
         <div className="req-block-editor" style={{ left: 168 + editingBlock.startIdx * MONTH_W }}>
           <span className="req-block-editor-label">FTE for</span>
           <span className="req-block-editor-date-wrap">
-            <button type="button" className="req-block-editor-date" onClick={() => openDatePicker(startDateInputRef)}>
+            <span className="req-block-editor-date" aria-hidden="true">
               {formatPeriodLabel(months[editingBlock.startIdx], { withYear: true })}
-            </button>
+            </span>
             <input
               ref={startDateInputRef}
               type="date"
@@ -370,6 +372,7 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
               value={isoFirstDayOfPeriod(months[editingBlock.startIdx])}
               min={isoFirstDayOfPeriod(months[0])}
               max={isoLastDayOfPeriod(months[months.length - 1])}
+              onClick={forceShowPicker}
               onChange={(e) => {
                 const period = periodFromISODate(e.target.value);
                 if (period) commitEditingRange(monthsBetween(months[0], period), editingBlock.endIdx);
@@ -380,9 +383,9 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
             <>
               <span className="req-block-editor-sep">–</span>
               <span className="req-block-editor-date-wrap">
-                <button type="button" className="req-block-editor-date" onClick={() => openDatePicker(endDateInputRef)}>
+                <span className="req-block-editor-date" aria-hidden="true">
                   {formatPeriodLabel(months[editingBlock.endIdx], { withYear: true })}
-                </button>
+                </span>
                 <input
                   ref={endDateInputRef}
                   type="date"
@@ -390,6 +393,7 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
                   value={isoLastDayOfPeriod(months[editingBlock.endIdx])}
                   min={isoFirstDayOfPeriod(months[0])}
                   max={isoLastDayOfPeriod(months[months.length - 1])}
+                  onClick={forceShowPicker}
                   onChange={(e) => {
                     const period = periodFromISODate(e.target.value);
                     if (period) commitEditingRange(editingBlock.startIdx, monthsBetween(months[0], period));
