@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { Period } from '../../domain/types';
-import { formatPeriodLabel } from '../../domain/periods';
+import { formatPeriodLabel, isoFirstDayOfPeriod, isoLastDayOfPeriod, monthsBetween, periodFromISODate } from '../../domain/periods';
 import { Icon } from './Icon';
 import { useUiStore } from '../../store/useUiStore';
 
@@ -183,6 +183,8 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
   const [editingBlock, setEditingBlock] = useState<Block | null>(null);
   const dragRef = useRef<{ mode: DragMode; anchorIdx: number; replaceIdx: number; orig: Block } | null>(null);
   const movedRef = useRef(false);
+  const startDateInputRef = useRef<HTMLInputElement>(null);
+  const endDateInputRef = useRef<HTMLInputElement>(null);
 
   const baseBlocks = computeBlocks(lane.values);
   const blocks = preview
@@ -265,6 +267,33 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
     lane.onCommitRange(months.slice(finalBlock.startIdx, finalBlock.endIdx + 1), finalBlock.fte);
   }
 
+  function clampIdx(idx: number): number {
+    return Math.max(0, Math.min(months.length - 1, idx));
+  }
+
+  /** Re-ranges the block currently open in the FTE editor (e.g. from a date-picker pick), keeping
+   * the editor open on the new range. Endpoints are sorted so picking a start past the current end
+   * (or vice versa) flips which side is which, like dragging a resize handle past the other one. */
+  function commitEditingRange(rawStart: number, rawEnd: number): void {
+    if (!editingBlock) return;
+    const start = clampIdx(Math.min(rawStart, rawEnd));
+    const end = clampIdx(Math.max(rawStart, rawEnd));
+    if (start === editingBlock.startIdx && end === editingBlock.endIdx) return;
+    lane.onCommitRange(months.slice(editingBlock.startIdx, editingBlock.endIdx + 1), 0);
+    lane.onCommitRange(months.slice(start, end + 1), editingBlock.fte);
+    setEditingBlock({ startIdx: start, endIdx: end, fte: editingBlock.fte });
+  }
+
+  function openDatePicker(ref: React.RefObject<HTMLInputElement | null>): void {
+    const input = ref.current;
+    if (!input) return;
+    try {
+      input.showPicker();
+    } catch {
+      input.focus();
+    }
+  }
+
   return (
     <div className="req-timeline-lane">
       <div className="req-timeline-lane-label">
@@ -328,8 +357,47 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
         })}
       </div>
       {editingBlock && (
-        <div className="req-block-editor">
-          <span>FTE for {formatPeriodLabel(months[editingBlock.startIdx], { withYear: true })}{editingBlock.endIdx !== editingBlock.startIdx ? ` – ${formatPeriodLabel(months[editingBlock.endIdx], { withYear: true })}` : ''}</span>
+        <div className="req-block-editor" style={{ left: 168 + editingBlock.startIdx * MONTH_W }}>
+          <span className="req-block-editor-label">FTE for</span>
+          <span className="req-block-editor-date-wrap">
+            <button type="button" className="req-block-editor-date" onClick={() => openDatePicker(startDateInputRef)}>
+              {formatPeriodLabel(months[editingBlock.startIdx], { withYear: true })}
+            </button>
+            <input
+              ref={startDateInputRef}
+              type="date"
+              className="req-block-editor-date-input"
+              value={isoFirstDayOfPeriod(months[editingBlock.startIdx])}
+              min={isoFirstDayOfPeriod(months[0])}
+              max={isoLastDayOfPeriod(months[months.length - 1])}
+              onChange={(e) => {
+                const period = periodFromISODate(e.target.value);
+                if (period) commitEditingRange(monthsBetween(months[0], period), editingBlock.endIdx);
+              }}
+            />
+          </span>
+          {editingBlock.endIdx !== editingBlock.startIdx && (
+            <>
+              <span className="req-block-editor-sep">–</span>
+              <span className="req-block-editor-date-wrap">
+                <button type="button" className="req-block-editor-date" onClick={() => openDatePicker(endDateInputRef)}>
+                  {formatPeriodLabel(months[editingBlock.endIdx], { withYear: true })}
+                </button>
+                <input
+                  ref={endDateInputRef}
+                  type="date"
+                  className="req-block-editor-date-input"
+                  value={isoLastDayOfPeriod(months[editingBlock.endIdx])}
+                  min={isoFirstDayOfPeriod(months[0])}
+                  max={isoLastDayOfPeriod(months[months.length - 1])}
+                  onChange={(e) => {
+                    const period = periodFromISODate(e.target.value);
+                    if (period) commitEditingRange(editingBlock.startIdx, monthsBetween(months[0], period));
+                  }}
+                />
+              </span>
+            </>
+          )}
           <input
             type="number"
             step={0.5}

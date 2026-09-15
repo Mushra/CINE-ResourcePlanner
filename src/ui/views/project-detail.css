@@ -221,7 +221,6 @@
 .req-block-editor {
   position: absolute;
   top: calc(100% + 4px);
-  left: 168px;
   z-index: 5;
   display: flex;
   align-items: center;
@@ -232,8 +231,34 @@
   padding: 6px 8px;
   font-size: 11.5px;
   box-shadow: var(--shadow-md);
+  white-space: nowrap;
 }
-.req-block-editor input { width: 56px; }
+.req-block-editor input[type="number"] { width: 56px; }
+.req-block-editor-label,
+.req-block-editor-sep { color: var(--text-tertiary); }
+.req-block-editor-date-wrap { position: relative; display: inline-flex; }
+.req-block-editor-date {
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.req-block-editor-date:hover { background: var(--surface-2); border-color: var(--border-strong); }
+.req-block-editor-date-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  border: 0;
+  padding: 0;
+  pointer-events: none;
+}
 .req-block-editor-close { border: none; background: none; cursor: pointer; color: var(--text-tertiary); display: inline-flex; }
 .pool-add-select { font-size: 12.5px; }
 .empty-inline { color: var(--text-tertiary); font-size: 12.5px; margin: 4px 0; }
