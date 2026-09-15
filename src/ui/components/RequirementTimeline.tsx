@@ -209,7 +209,11 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
     e.stopPropagation();
     movedRef.current = false;
     const replaceIdx = baseBlocks.indexOf(block);
-    dragRef.current = { mode, anchorIdx: block.startIdx, replaceIdx, orig: block };
+    // For a move, anchor on the cell actually under the pointer (not the block's left edge) so the
+    // block tracks the cursor from wherever it was grabbed instead of snapping to align its edge
+    // with the pointer on the very first move.
+    const anchorIdx = mode === 'move' ? idxFromClientX(e.clientX) : block.startIdx;
+    dragRef.current = { mode, anchorIdx, replaceIdx, orig: block };
     setPreview({ block, replaceIdx });
     (e.target as Element).setPointerCapture(e.pointerId);
   }
