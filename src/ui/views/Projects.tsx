@@ -43,13 +43,13 @@ export function Projects() {
         </div>
         <div className="view-header-actions">
           <ConfirmButton
-            label="Fill empty from assignments"
+            label="Fill empty needs from assignments"
             confirmLabel="Fill empty everywhere"
             icon="download"
             onConfirm={() => feedAllRequirementsFromAssignments('fill-empty')}
           />
           <ConfirmButton
-            label="= assignments"
+            label="Overwrite needs from assignments"
             confirmLabel="Overwrite everywhere"
             icon="download"
             onConfirm={() => feedAllRequirementsFromAssignments('overwrite')}

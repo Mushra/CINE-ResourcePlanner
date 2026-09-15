@@ -73,8 +73,11 @@ function round2(n: number): number {
 function RequirementGroupBlock({ group, months, projectId }: { group: RequirementGroup; months: Period[]; projectId: string }) {
   const collapsed = useUiStore((s) => s.collapsed);
   const toggleCollapse = useUiStore((s) => s.toggleCollapse);
+  const setCollapsed = useUiStore((s) => s.setCollapsed);
   const discKey = `projtl:disc:${projectId}:${group.key}`;
-  const discCollapsed = collapsed[discKey] === true;
+  // Discipline rows default to collapsed on first view (unlike other collapsible rows, which
+  // default open) — undefined means "never touched", not "explicitly expanded".
+  const discCollapsed = collapsed[discKey] ?? true;
 
   return (
     <div className="req-timeline-group">
@@ -82,7 +85,7 @@ function RequirementGroupBlock({ group, months, projectId }: { group: Requiremen
         lane={group.needLane}
         months={months}
         assignedValues={group.assignedTotals}
-        collapseToggle={{ collapsed: discCollapsed, onToggle: () => toggleCollapse(discKey) }}
+        collapseToggle={{ collapsed: discCollapsed, onToggle: () => setCollapsed(discKey, !discCollapsed) }}
       />
       {!discCollapsed && (
         <>

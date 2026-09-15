@@ -12,7 +12,6 @@ import { ConfirmButton } from '../components/ConfirmButton';
 import { Collapsible } from '../components/Collapsible';
 import { ProjectFormDrawer, type ProjectFormValue } from '../components/ProjectFormDrawer';
 import { RequirementTimeline, type AssignmentPoolGroup, type RequirementGroup, type RequirementLane } from '../components/RequirementTimeline';
-import { RangePanel } from '../components/RangePanel';
 import { deriveProjectStatus, STATUS_LABEL } from '../../domain/projectStatus';
 
 const CERTAINTY_LABEL: Record<string, string> = { confirmed: 'Confirmed', estimated: 'Estimated', tbd: 'TBD' };
@@ -26,6 +25,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const people = useStore((s) => s.data.people);
   const updateProject = useStore((s) => s.updateProject);
   const deleteProject = useStore((s) => s.deleteProject);
+  const setDisciplineRequirement = useStore((s) => s.setDisciplineRequirement);
   const setDisciplineRequirementRange = useStore((s) => s.setDisciplineRequirementRange);
   const setPersonAssignment = useStore((s) => s.setPersonAssignment);
   const setPersonAssignmentRange = useStore((s) => s.setPersonAssignmentRange);
@@ -137,10 +137,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     return { key: def.disciplineId, label: def.label, color: def.color, needLane, assignedTotals, poolGroups };
   });
 
-  const rangePanelOptions = [
-    ...disciplines.map((d) => ({ id: `disc:${d.id}`, label: `${d.name} (whole discipline)` })),
-    ...people.map((p) => ({ id: p.id, label: p.poolId ? `${p.name} (${pools.find((pl) => pl.id === p.poolId)?.name ?? ''})` : p.name })),
-  ];
+  const addableDisciplines = disciplines
+    .filter((d) => !disciplineIdsWithSignal.has(d.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <div className="project-detail-view">
@@ -205,20 +204,26 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           </div>
         </div>
 
-        <RangePanel
-          options={rangePanelOptions}
-          months={months}
-          onApply={(targetId, periods, fte) => (
-            targetId.startsWith('disc:')
-              ? setDisciplineRequirementRange(project.id, targetId.slice(5), periods, fte)
-              : setPersonAssignmentRange(targetId, project.id, periods, fte)
-          )}
-        />
-
         {timelineGroups.length === 0 ? (
-          <p className="empty-inline">No resource requirements yet. Use the panel above to set a discipline need, or assign a person directly.</p>
+          <p className="empty-inline">No resource requirements yet. Add a discipline below to set a need.</p>
         ) : (
           <RequirementTimeline months={months} groups={timelineGroups} projectId={project.id} />
+        )}
+
+        {addableDisciplines.length > 0 && (
+          <div className="person-add-assignment">
+            <select
+              className="person-add-select"
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) setDisciplineRequirement(project.id, e.target.value, months[0] ?? todayPeriod(), 1);
+                e.target.value = '';
+              }}
+            >
+              <option value="" disabled>+ Add discipline…</option>
+              {addableDisciplines.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </div>
         )}
       </div>
 
