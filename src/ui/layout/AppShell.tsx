@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon, type IconName } from '../components/Icon';
 import { Button } from '../components/Button';
-import { ImportDrawer } from '../components/ImportDrawer';
+import { ImportDrawer, type ImportKind } from '../components/ImportDrawer';
 import { CommandPalette } from '../components/CommandPalette';
 import { ValidationRulesDialog } from '../components/ValidationRulesDialog';
 import { useStore } from '../../store/useStore';
@@ -58,7 +58,7 @@ function TopBar() {
   const exportXlsx = useStore((s) => s.exportXlsx);
   const setCommandPaletteOpen = useUiStore((s) => s.setCommandPaletteOpen);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
+  const [importKind, setImportKind] = useState<ImportKind | null>(null);
   const [helpMenuOpen, setHelpMenuOpen] = useState(false);
   const [validationRulesOpen, setValidationRulesOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -100,7 +100,7 @@ function TopBar() {
         </Button>
         <div className="menu-wrap" ref={menuRef}>
           <Button icon="more" size="sm" variant="ghost" onClick={() => setMenuOpen((v) => !v)} aria-label="More file actions" />
-          {menuOpen && <FileMenu onClose={() => setMenuOpen(false)} onImport={() => setImportOpen(true)} />}
+          {menuOpen && <FileMenu onClose={() => setMenuOpen(false)} onImport={setImportKind} />}
         </div>
         <Button icon="download" size="sm" variant="secondary" onClick={() => void exportXlsx()}>
           Export
@@ -119,13 +119,13 @@ function TopBar() {
           )}
         </div>
       </div>
-      {importOpen && <ImportDrawer onClose={() => setImportOpen(false)} />}
+      {importKind && <ImportDrawer kind={importKind} onClose={() => setImportKind(null)} />}
       {validationRulesOpen && <ValidationRulesDialog onClose={() => setValidationRulesOpen(false)} />}
     </header>
   );
 }
 
-function FileMenu({ onClose, onImport }: { onClose: () => void; onImport: () => void }) {
+function FileMenu({ onClose, onImport }: { onClose: () => void; onImport: (kind: ImportKind) => void }) {
   const newDatabase = useStore((s) => s.newDatabase);
   const openDatabase = useStore((s) => s.openDatabase);
   const saveDatabaseAs = useStore((s) => s.saveDatabaseAs);
@@ -151,8 +151,11 @@ function FileMenu({ onClose, onImport }: { onClose: () => void; onImport: () => 
         <Icon name="save" size={14} /> Save as / backup…
       </button>
       <div className="dropdown-sep" />
-      <button type="button" onClick={() => run(onImport)}>
+      <button type="button" onClick={() => run(() => onImport('rpm'))}>
         <Icon name="download" size={14} /> Import RPM export…
+      </button>
+      <button type="button" onClick={() => run(() => onImport('staffing'))}>
+        <Icon name="download" size={14} /> Import Staffing Consolidated report…
       </button>
     </div>
   );

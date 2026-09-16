@@ -17,8 +17,9 @@ import { seedDemoData } from '../db/seed';
 import { getStoredFileName, loadAutosave, saveAutosave, setStoredFileName } from '../persistence/indexeddb';
 import * as files from '../persistence/files';
 import { exportWorkbookToBytes } from '../export/xlsx';
-import type { ImportReport } from '../import/rpmImport';
-import { parseAnyWorkbook } from '../import/staffingImport';
+import type { ImportReport, NormalizedImport } from '../import/rpmImport';
+import { parseRpmWorkbook } from '../import/rpmImport';
+import { parseStaffingWorkbook } from '../import/staffingImport';
 import { PlanningEngine, round2 } from '../engine/planning';
 import type { Discipline, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
 import { emptyPlanningData } from '../domain/types';
@@ -67,7 +68,8 @@ interface StoreState {
   saveDatabase: () => Promise<void>;
   saveDatabaseAs: () => Promise<void>;
   exportXlsx: () => Promise<void>;
-  importRpm: (mode: ImportMode) => Promise<ImportReport | null>;
+  importRpmExport: (mode: ImportMode) => Promise<ImportReport | null>;
+  importStaffingReport: (mode: ImportMode) => Promise<ImportReport | null>;
 
   createProject: (input: Omit<Project, 'id' | 'sortOrder'>) => Project;
   updateProject: (project: Project) => void;
@@ -273,6 +275,39 @@ export const useStore = create<StoreState>((set, get) => {
     if (Object.keys(patch).length > 0) repoUpdateProject(db, { ...project, ...patch });
   }
 
+  async function runImport(parse: (buffer: ArrayBuffer, fileName?: string) => Promise<NormalizedImport>, mode: ImportMode): Promise<ImportReport | null> {
+    try {
+      const opened = await files.openXlsxFile();
+      if (!opened) return null;
+      const normalized = await parse(opened.buffer, opened.name);
+
+      const currentDb = get().db;
+      const effectiveMode: ImportMode = mode === 'replace' || !currentDb ? 'replace' : 'merge';
+      const db = effectiveMode === 'replace' ? await PlannerDatabase.createNew() : currentDb!;
+      applyRpmImport(db, normalized, effectiveMode);
+
+      const fileName = effectiveMode === 'replace' ? opened.name.replace(/\.xlsx$/i, '') || 'Imported plan' : get().fileName;
+      set({
+        db,
+        fileName,
+        fileHandle: effectiveMode === 'replace' ? null : get().fileHandle,
+        dirty: true,
+        lastImportReport: normalized.report,
+      });
+      setStoredFileName(fileName);
+      reload(db);
+      void saveAutosave(db.export());
+      get().toast(
+        'success',
+        `Imported ${normalized.report.importedRows} rows into ${normalized.report.projectCount} projects / ${normalized.report.personCount} people`,
+      );
+      return normalized.report;
+    } catch (err) {
+      get().toast('error', `Import failed: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
+  }
+
   return {
     status: 'loading',
     errorMessage: null,
@@ -392,38 +427,8 @@ export const useStore = create<StoreState>((set, get) => {
       }
     },
 
-    importRpm: async (mode) => {
-      try {
-        const opened = await files.openXlsxFile();
-        if (!opened) return null;
-        const normalized = await parseAnyWorkbook(opened.buffer, opened.name);
-
-        const currentDb = get().db;
-        const effectiveMode: ImportMode = mode === 'replace' || !currentDb ? 'replace' : 'merge';
-        const db = effectiveMode === 'replace' ? await PlannerDatabase.createNew() : currentDb!;
-        applyRpmImport(db, normalized, effectiveMode);
-
-        const fileName = effectiveMode === 'replace' ? opened.name.replace(/\.xlsx$/i, '') || 'Imported plan' : get().fileName;
-        set({
-          db,
-          fileName,
-          fileHandle: effectiveMode === 'replace' ? null : get().fileHandle,
-          dirty: true,
-          lastImportReport: normalized.report,
-        });
-        setStoredFileName(fileName);
-        reload(db);
-        void saveAutosave(db.export());
-        get().toast(
-          'success',
-          `Imported ${normalized.report.importedRows} rows into ${normalized.report.projectCount} projects / ${normalized.report.personCount} people`,
-        );
-        return normalized.report;
-      } catch (err) {
-        get().toast('error', `Import failed: ${err instanceof Error ? err.message : String(err)}`);
-        return null;
-      }
-    },
+    importRpmExport: (mode) => runImport(parseRpmWorkbook, mode),
+    importStaffingReport: (mode) => runImport(parseStaffingWorkbook, mode),
 
     createProject: (input) => {
       const db = get().db!;

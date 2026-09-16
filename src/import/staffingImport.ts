@@ -15,7 +15,6 @@ import JSZip from 'jszip';
 import { comparePeriod, isoFirstDayOfPeriod, isoLastDayOfPeriod } from '../domain/periods';
 import { round2 } from '../engine/planning';
 import type { ImportReport, NormalizedAssignmentGroup, NormalizedDiscipline, NormalizedImport, NormalizedPerson, NormalizedPool, NormalizedProject } from './rpmImport';
-import { parseRpmWorkbook } from './rpmImport';
 
 const POOL_COLOR_PALETTE = [
   '#4f7cff', '#f5a524', '#a855f7', '#22c3aa', '#ec6a9c',
@@ -41,10 +40,6 @@ async function loadPatchedWorkbook(buffer: ArrayBuffer): Promise<ExcelJS.Workboo
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(patched);
   return wb;
-}
-
-function isStaffingWorkbook(wb: ExcelJS.Workbook): boolean {
-  return wb.getWorksheet(PEOPLE_SHEET) !== undefined && wb.getWorksheet(ASSIGNMENTS_SHEET) !== undefined;
 }
 
 function headerMap(sheet: ExcelJS.Worksheet): Map<string, number> {
@@ -240,11 +235,4 @@ export async function parseStaffingWorkbook(buffer: ArrayBuffer, fileName?: stri
   };
 
   return { disciplines, pools, people, projects, assignments, report };
-}
-
-/** Detects the workbook shape and dispatches to the matching parser. */
-export async function parseAnyWorkbook(buffer: ArrayBuffer, fileName?: string): Promise<NormalizedImport> {
-  const wb = await loadPatchedWorkbook(buffer);
-  if (isStaffingWorkbook(wb)) return parseStaffingWorkbook(buffer, fileName);
-  return parseRpmWorkbook(buffer, fileName);
 }

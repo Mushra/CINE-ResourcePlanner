@@ -5,30 +5,48 @@ import { useStore } from '../../store/useStore';
 import type { ImportMode } from '../../db/applyImport';
 import type { ImportReport } from '../../import/rpmImport';
 
-export function ImportDrawer({ onClose }: { onClose: () => void }) {
-  const importRpm = useStore((s) => s.importRpm);
+export type ImportKind = 'rpm' | 'staffing';
+
+const IMPORT_COPY: Record<ImportKind, { title: string; hint: string }> = {
+  rpm: {
+    title: 'Import RPM export',
+    hint:
+      'Import an RPM production export (.xlsx, "Filtered Requests" report). Assigned rows ' +
+      'become named people, grouped into disciplines and roles — requirements are left empty ' +
+      'for you to set.',
+  },
+  staffing: {
+    title: 'Import Staffing Consolidated report',
+    hint:
+      'Import a Staffing_Cinematics_Consolidated workbook (.xlsx, People + Assignments_DB ' +
+      'sheets). Assigned rows become named people, grouped into disciplines and roles — ' +
+      'requirements are left empty for you to set.',
+  },
+};
+
+export function ImportDrawer({ kind, onClose }: { kind: ImportKind; onClose: () => void }) {
+  const importRpmExport = useStore((s) => s.importRpmExport);
+  const importStaffingReport = useStore((s) => s.importStaffingReport);
+  const runImport = kind === 'rpm' ? importRpmExport : importStaffingReport;
+  const copy = IMPORT_COPY[kind];
   const [mode, setMode] = useState<ImportMode>('merge');
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<ImportReport | null>(null);
 
   async function run(): Promise<void> {
     setBusy(true);
-    const result = await importRpm(mode);
+    const result = await runImport(mode);
     setBusy(false);
     if (result) setReport(result);
   }
 
   return (
-    <Drawer title="Import export" onClose={onClose} width={460}>
+    <Drawer title={copy.title} onClose={onClose} width={460}>
       {report ? (
         <ImportReportView report={report} onClose={onClose} />
       ) : (
         <>
-          <p className="drawer-hint">
-            Import an RPM production export or a Staffing consolidated workbook (.xlsx) — the
-            format is detected automatically. Assigned rows become named people, grouped into
-            disciplines and roles — requirements are left empty for you to set.
-          </p>
+          <p className="drawer-hint">{copy.hint}</p>
 
           <div className="import-mode-options">
             <label className="import-mode-option">
