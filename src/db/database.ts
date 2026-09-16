@@ -50,15 +50,24 @@ export class PlannerDatabase {
   /**
    * sql.js never enforces the `ON DELETE SET NULL`/`CASCADE` declared in schema.sql (the
    * foreign_keys pragma defaults off), so a delete written before that was accounted for — or any
-   * future one that misses it — can leave a dangling reference. Run defensively on every load:
-   * currently just resource_pools.discipline_id, the one case that surfaced (a deleted discipline's
-   * pools kept pointing at the gone id and lingered in project timelines under a broken label
-   * instead of falling into the "Unassigned" bucket like any other discipline-less pool).
+   * future one that misses it — can leave a dangling reference. Run defensively on every load to
+   * repair anything a save from before the relevant delete-path fix left behind: a pool/person
+   * pointing at a gone discipline/pool falls back to "Unassigned"/"no role" like any other
+   * unset value, and a requirement/assignment/override pointing at a gone pool/person/requirement
+   * (nothing sensible to fall back to) is removed along with it.
    */
   private healDanglingReferences(): void {
-    this.db.exec(
-      'UPDATE resource_pools SET discipline_id = NULL WHERE discipline_id IS NOT NULL AND discipline_id NOT IN (SELECT id FROM disciplines)',
-    );
+    this.db.exec('UPDATE resource_pools SET discipline_id = NULL WHERE discipline_id IS NOT NULL AND discipline_id NOT IN (SELECT id FROM disciplines)');
+    this.db.exec('UPDATE people SET pool_id = NULL WHERE pool_id IS NOT NULL AND pool_id NOT IN (SELECT id FROM resource_pools)');
+    this.db.exec('DELETE FROM requirement_allocations WHERE requirement_id IN (SELECT id FROM requirements WHERE pool_id NOT IN (SELECT id FROM resource_pools))');
+    this.db.exec('DELETE FROM requirements WHERE pool_id NOT IN (SELECT id FROM resource_pools)');
+    this.db.exec('DELETE FROM pool_capacity_overrides WHERE pool_id NOT IN (SELECT id FROM resource_pools)');
+    this.db.exec('DELETE FROM person_assignment_allocations WHERE person_assignment_id IN (SELECT id FROM person_assignments WHERE person_id NOT IN (SELECT id FROM people))');
+    this.db.exec('DELETE FROM person_assignments WHERE person_id NOT IN (SELECT id FROM people)');
+    // Defensive: catch any allocation left orphaned by a requirement/assignment already gone for
+    // some other reason.
+    this.db.exec('DELETE FROM requirement_allocations WHERE requirement_id NOT IN (SELECT id FROM requirements)');
+    this.db.exec('DELETE FROM person_assignment_allocations WHERE person_assignment_id NOT IN (SELECT id FROM person_assignments)');
   }
 
   /** Fresh DBs (from === null) never had the legacy tables — nothing to migrate. */

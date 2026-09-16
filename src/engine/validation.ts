@@ -330,13 +330,14 @@ function checkOverAllocatedPeople(engine: PlanningEngine): SanityCheck[] {
   return checks;
 }
 
-/** Active people with capacity but no assignment anywhere in the near-term forecast window. */
+/** Active people with capacity but no real assignment anywhere in the near-term forecast window —
+ * parked on a "dispo"/bench project counts the same as no assignment at all. */
 function checkUnstaffedPeople(engine: PlanningEngine): SanityCheck[] {
   const checks: SanityCheck[] = [];
   const periods = getForecastWindowPeriods(engine, 6);
   for (const person of engine.people()) {
     if (!person.active || person.capacityFte <= 0.001) continue;
-    const totalAssigned = periods.reduce((sum, period) => sum + engine.getPersonAssigned(person.id, period), 0);
+    const totalAssigned = periods.reduce((sum, period) => sum + engine.getPersonAssignedExcludingDispo(person.id, period), 0);
     if (totalAssigned > 0.001) continue;
     const pool = person.poolId ? engine.pool(person.poolId) : undefined;
     checks.push({

@@ -10,6 +10,7 @@ import { useFilteredEngine } from '../hooks/useFilteredEngine';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
 import { ConfirmButton } from '../components/ConfirmButton';
+import { useConfirmDialog } from '../components/ConfirmDialog';
 import { Collapsible } from '../components/Collapsible';
 import { Icon } from '../components/Icon';
 import { GlobalFilterBar } from '../components/GlobalFilterBar';
@@ -19,6 +20,11 @@ import { PersonFormDrawer, type PersonFormValue } from '../components/PersonForm
 import { BatchEditPersonDrawer, type BatchPersonPatch } from '../components/BatchEditPersonDrawer';
 import { usePersonSave } from '../hooks/usePersonSave';
 import type { Discipline, Person, ResourcePool } from '../../domain/types';
+
+/** Synthetic, non-persisted pool id: groups people whose pool_id is null (never assigned a role,
+ * or left over from a "delete role only" that didn't cascade to them) so they stay visible in
+ * Team instead of vanishing — mirrors UNASSIGNED_DISCIPLINE_ID for pool-less disciplines. */
+const NO_ROLE_POOL_ID = '__no_role__';
 
 export function Team() {
   const { engine, options } = useFilteredEngine();
@@ -40,6 +46,7 @@ export function Team() {
   const clearOverrideByKey = useStore((s) => s.clearOverrideByKey);
   const { savePersonEdit } = usePersonSave();
   const openPerson = useUiStore((s) => s.openPerson);
+  const { confirm, confirm3, dialog } = useConfirmDialog();
 
   const [newDiscipline, setNewDiscipline] = useState(false);
   const [editingDiscipline, setEditingDiscipline] = useState<Discipline | null>(null);
@@ -71,6 +78,40 @@ export function Team() {
     if (chosenDiscipline && chosenDiscipline.id !== baselineDisciplineId) setPoolDiscipline(original.name, chosenDiscipline.name);
     else clearOverrideByKey('pool_discipline', normalizeKey(original.name));
     updatePool({ ...original, ...value, disciplineId: baselineDisciplineId });
+  }
+
+  const plural = (n: number) => (n === 1 ? '' : 's');
+
+  /** Deleting a discipline/role that still has content asks how to handle it — cascade delete
+   * everything under it, or delete just the target and let its content fall back to
+   * "Unassigned"/"no role". Skips the extra prompt entirely when there's nothing to lose. */
+  async function handleDeleteDiscipline(discipline: Discipline): Promise<void> {
+    const roleCount = engine.poolsInDiscipline(discipline.id).filter((p) => !isGenericPoolName(p.name)).length;
+    const peopleCount = engine.peopleInDiscipline(discipline.id).length;
+    if (roleCount === 0 && peopleCount === 0) {
+      if (await confirm(`Delete discipline "${discipline.name}"?`)) deleteDiscipline(discipline.id);
+      return;
+    }
+    const choice = await confirm3(
+      `"${discipline.name}" contient ${roleCount} emploi${plural(roleCount)} repère et ${peopleCount} personne${plural(peopleCount)}. Les supprimer aussi ?`,
+      { yesLabel: 'Oui, tout supprimer', noLabel: 'Non, garder sous "Unassigned"' },
+    );
+    if (choice === 'yes') deleteDiscipline(discipline.id, true);
+    else if (choice === 'no') deleteDiscipline(discipline.id, false);
+  }
+
+  async function handleDeletePool(pool: ResourcePool): Promise<void> {
+    const peopleCount = engine.peopleInPool(pool.id).length;
+    if (peopleCount === 0) {
+      if (await confirm(`Delete role "${pool.name}"?`)) deletePool(pool.id);
+      return;
+    }
+    const choice = await confirm3(
+      `"${pool.name}" contient ${peopleCount} personne${plural(peopleCount)}. Les supprimer aussi ?`,
+      { yesLabel: 'Oui, tout supprimer', noLabel: 'Non, garder sous "Sans rôle"' },
+    );
+    if (choice === 'yes') deletePool(pool.id, true);
+    else if (choice === 'no') deletePool(pool.id, false);
   }
 
   const period = todayPeriod();
@@ -120,6 +161,17 @@ export function Team() {
       if (!entry) { entry = { pool, people: [], borrowed: true }; group.pools.push(entry); }
       entry.people.push(person);
     }
+  }
+  // People with no role at all (never assigned one, or their role was deleted without cascading)
+  // get a synthetic "no role" bucket instead of vanishing from Team entirely.
+  const noRolePool: ResourcePool = { id: NO_ROLE_POOL_ID, name: 'Sans rôle', capacityFte: 0, color: '#9ca3af', sortOrder: -1, disciplineId: null };
+  for (const person of engine.people()) {
+    if (person.poolId) continue;
+    const group = groupById.get(person.effectiveDisciplineId ?? UNASSIGNED_DISCIPLINE_ID);
+    if (!group) continue;
+    let entry = group.pools.find((e) => e.pool.id === NO_ROLE_POOL_ID);
+    if (!entry) { entry = { pool: noRolePool, people: [], borrowed: false }; group.pools.push(entry); }
+    entry.people.push(person);
   }
   if (unassignedGroup.pools.length > 0) groups.push(unassignedGroup);
 
@@ -224,14 +276,14 @@ export function Team() {
                 <span className="discipline-dot" style={{ background: group.discipline?.color ?? '#9ca3af' }} />
                 <h2>{group.discipline?.name ?? 'Unassigned'}</h2>
                 {(() => {
-                  const nativeCount = group.pools.filter((e) => !e.borrowed).length;
+                  const nativeCount = group.pools.filter((e) => !e.borrowed && e.pool.id !== NO_ROLE_POOL_ID).length;
                   return <span className="discipline-role-count">{nativeCount} role{nativeCount === 1 ? '' : 's'}</span>;
                 })()}
                 <div className="discipline-actions" onClick={(e) => e.stopPropagation()}>
                   {group.discipline && (
                     <>
                       <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditingDiscipline(group.discipline)}>Edit</Button>
-                      <ConfirmButton label="Delete" onConfirm={() => deleteDiscipline(group.discipline!.id)} />
+                      <Button variant="ghost" size="sm" icon="trash" onClick={() => void handleDeleteDiscipline(group.discipline!)}>Delete</Button>
                     </>
                   )}
                   <Button
@@ -251,8 +303,9 @@ export function Team() {
             ) : (
               <div className="team-roles">
                 {group.pools.map(({ pool, people: rolePeople }) => {
+                  const isNoRolePool = pool.id === NO_ROLE_POOL_ID;
                   const poolAllSelected = rolePeople.length > 0 && rolePeople.every((p) => selected.has(p.id));
-                  const poolOverridden = pool.importDisciplineId !== pool.disciplineId;
+                  const poolOverridden = !isNoRolePool && pool.importDisciplineId !== pool.disciplineId;
                   return (
                     <Collapsible
                       key={pool.id}
@@ -272,12 +325,14 @@ export function Team() {
                               <Icon name="structure" size={12} />
                             </button>
                           )}
-                          <span className="team-role-capacity">{engine.getCapacity(pool.id, period)} FTE</span>
-                          <div className="team-role-actions" onClick={(e) => e.stopPropagation()}>
-                            <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditingPool(pool)}>Edit</Button>
-                            <ConfirmButton label="Delete" onConfirm={() => deletePool(pool.id)} />
-                            <Button variant="ghost" size="sm" icon="plus" onClick={() => setNewPersonForPool(pool.id)}>Add person</Button>
-                          </div>
+                          {!isNoRolePool && <span className="team-role-capacity">{engine.getCapacity(pool.id, period)} FTE</span>}
+                          {!isNoRolePool && (
+                            <div className="team-role-actions" onClick={(e) => e.stopPropagation()}>
+                              <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditingPool(pool)}>Edit</Button>
+                              <Button variant="ghost" size="sm" icon="trash" onClick={() => void handleDeletePool(pool)}>Delete</Button>
+                              <Button variant="ghost" size="sm" icon="plus" onClick={() => setNewPersonForPool(pool.id)}>Add person</Button>
+                            </div>
+                          )}
                         </>
                       }
                     >
@@ -347,7 +402,7 @@ export function Team() {
                                   <td>{person.team || '—'}</td>
                                   <td>{person.site || '—'}</td>
                                   <td>
-                                    {engine.getPersonAssigned(person.id, period)}
+                                    {engine.getPersonAssignedExcludingDispo(person.id, period)}
                                     {overAllocatedNow.has(person.id) && (
                                       <span className="team-overalloc-flag" title={overAllocatedNow.get(person.id)}>
                                         <Icon name="warning" size={12} />
@@ -457,6 +512,7 @@ export function Team() {
           }}
         />
       )}
+      {dialog}
     </div>
   );
 }

@@ -3,10 +3,10 @@ import { PlannerDatabase } from '../db/database';
 import {
   loadPlanningData, BASE_SCENARIO_ID,
   createProject as repoCreateProject, updateProject as repoUpdateProject, deleteProject as repoDeleteProject,
-  createPool as repoCreatePool, updatePool as repoUpdatePool, deletePool as repoDeletePool,
+  createPool as repoCreatePool, updatePool as repoUpdatePool, deletePool as repoDeletePool, deletePoolCascade as repoDeletePoolCascade,
   setPoolCapacityOverride as repoSetPoolCapacityOverride,
   getOrCreateRequirement, setRequirementAllocation as repoSetRequirementAllocation, setRequirementAllocations as repoSetRequirementAllocations, deleteRequirement as repoDeleteRequirement,
-  createDiscipline as repoCreateDiscipline, updateDiscipline as repoUpdateDiscipline, deleteDiscipline as repoDeleteDiscipline,
+  createDiscipline as repoCreateDiscipline, updateDiscipline as repoUpdateDiscipline, deleteDiscipline as repoDeleteDiscipline, deleteDisciplineCascade as repoDeleteDisciplineCascade,
   createPerson as repoCreatePerson, updatePerson as repoUpdatePerson, deletePerson as repoDeletePerson,
   getOrCreatePersonAssignment, setPersonAssignmentAllocation as repoSetPersonAssignmentAllocation, setPersonAssignmentAllocations as repoSetPersonAssignmentAllocations, deletePersonAssignment as repoDeletePersonAssignment,
   upsertStructureOverride as repoUpsertStructureOverride, deleteStructureOverride as repoDeleteStructureOverride,
@@ -75,12 +75,16 @@ interface StoreState {
 
   createPool: (input: Omit<ResourcePool, 'id' | 'sortOrder'>) => ResourcePool;
   updatePool: (pool: ResourcePool) => void;
-  deletePool: (poolId: string) => void;
+  /** cascade=true also deletes every person in the role (and their assignments); otherwise they
+   * fall back to "no role", like any other pool-less person. */
+  deletePool: (poolId: string, cascade?: boolean) => void;
   setPoolCapacityOverride: (poolId: string, period: Period, capacityFte: number | null) => void;
 
   createDiscipline: (input: Omit<Discipline, 'id' | 'sortOrder'>) => Discipline;
   updateDiscipline: (discipline: Discipline) => void;
-  deleteDiscipline: (disciplineId: string) => void;
+  /** cascade=true also deletes every role under it and their people (and assignments); otherwise
+   * its roles fall back to "Unassigned", like any other discipline-less role. */
+  deleteDiscipline: (disciplineId: string, cascade?: boolean) => void;
 
   createPerson: (input: Omit<Person, 'id' | 'sortOrder'>) => Person;
   updatePerson: (person: Person) => void;
@@ -450,10 +454,11 @@ export const useStore = create<StoreState>((set, get) => {
       repoUpdatePool(db, { ...pool, name });
       persist();
     },
-    deletePool: (poolId) => {
+    deletePool: (poolId, cascade) => {
       const db = get().db!;
       const name = get().data.pools.find((p) => p.id === poolId)?.name ?? 'Pool';
-      repoDeletePool(db, poolId);
+      if (cascade) repoDeletePoolCascade(db, poolId);
+      else repoDeletePool(db, poolId);
       persist();
       get().toast('info', `${name} pool deleted`);
     },
@@ -477,10 +482,11 @@ export const useStore = create<StoreState>((set, get) => {
       repoUpdateDiscipline(db, { ...discipline, name });
       persist();
     },
-    deleteDiscipline: (disciplineId) => {
+    deleteDiscipline: (disciplineId, cascade) => {
       const db = get().db!;
       const name = get().data.disciplines.find((d) => d.id === disciplineId)?.name ?? 'Discipline';
-      repoDeleteDiscipline(db, disciplineId);
+      if (cascade) repoDeleteDisciplineCascade(db, disciplineId);
+      else repoDeleteDiscipline(db, disciplineId);
       persist();
       get().toast('info', `${name} discipline deleted`);
     },

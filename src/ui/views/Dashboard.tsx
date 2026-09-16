@@ -61,7 +61,7 @@ export function Dashboard() {
     checks.filter((c) => c.category === 'over_allocated' && c.period === period).map((c) => c.projectId),
   );
   const unstaffedPeopleNow = people.filter(
-    (p) => p.active && p.capacityFte > 0.001 && engine.getPersonAssigned(p.id, period) <= 0.001,
+    (p) => p.active && p.capacityFte > 0.001 && engine.getPersonAssignedExcludingDispo(p.id, period) <= 0.001,
   );
 
   const groupedChecks: { id: string; name: string; checks: SanityCheck[] }[] = [];
@@ -200,11 +200,17 @@ function ProjectMix({ engine, periods, openProject }: { engine: PlanningEngine; 
 
   const monthly = useMemo(() => periods.map((p) => {
     const rows = projects
+      .filter((project) => !project.isDispo)
       .map((project) => ({ project, value: engine.getProjectAssigned(project.id, p) }))
       .filter((r) => r.value > 0.001)
       .sort((a, b) => b.value - a.value);
-    const total = rows.reduce((sum, r) => sum + r.value, 0);
-    return { period: p, rows, total };
+    const assigned = rows.reduce((sum, r) => sum + r.value, 0);
+    // Capacity not staffed on real work — whether the person has no assignment at all or is
+    // parked on a "dispo" project, it's the same "available" bucket, sized against total capacity
+    // (not just assigned) so the bar reconciles with the org's real headcount.
+    const available = round2(Math.max(0, engine.getTotalCapacity(p) - assigned));
+    const total = round2(assigned + available);
+    return { period: p, rows, available, total };
   }), [engine, projects, periods]);
 
   const activeProjects = useMemo(() => {
@@ -225,7 +231,7 @@ function ProjectMix({ engine, periods, openProject }: { engine: PlanningEngine; 
       <div className="panel-header">
         <div className="panel-header-title">
           <h2>Répartition de la capacité par projet</h2>
-          <span className="panel-sub">Lecture mensuelle en FTE staffé, par projet · dispo incluse</span>
+          <span className="panel-sub">Lecture mensuelle en FTE · disponible = non staffé + dispo</span>
         </div>
       </div>
 
@@ -240,16 +246,15 @@ function ProjectMix({ engine, periods, openProject }: { engine: PlanningEngine; 
                 <div className="month-stack">
                   {m.rows.map((r) => {
                     const cls = highlighted.size ? (highlighted.has(r.project.id) ? ' highlighted' : ' dimmed') : '';
-                    const dispoCls = r.project.isDispo ? ' mix-seg-dispo' : '';
                     return (
                       <div
                         key={r.project.id}
                         role="button"
                         tabIndex={0}
-                        className={`mix-seg${dispoCls}${cls}`}
+                        className={`mix-seg${cls}`}
                         style={{
                           width: `${m.total > 0 ? (100 * r.value) / m.total : 0}%`,
-                          ...(r.project.isDispo ? {} : { background: colorForProject(r.project.id, orderedIds) }),
+                          background: colorForProject(r.project.id, orderedIds),
                         }}
                         onMouseEnter={(e) => showTip(e, `${r.project.name} · ${round2(r.value)} FTE`)}
                         onMouseLeave={() => setHover(null)}
@@ -258,6 +263,14 @@ function ProjectMix({ engine, periods, openProject }: { engine: PlanningEngine; 
                       />
                     );
                   })}
+                  {m.available > 0.001 && (
+                    <div
+                      className={`mix-seg mix-seg-dispo${highlighted.size ? ' dimmed' : ''}`}
+                      style={{ width: `${m.total > 0 ? (100 * m.available) / m.total : 0}%` }}
+                      onMouseEnter={(e) => showTip(e, `Disponible · ${round2(m.available)} FTE`)}
+                      onMouseLeave={() => setHover(null)}
+                    />
+                  )}
                 </div>
                 <div className="month-stack-total">Total · {round2(m.total)} FTE</div>
               </div>
@@ -273,14 +286,15 @@ function ProjectMix({ engine, periods, openProject }: { engine: PlanningEngine; 
               const cls = highlighted.size ? (highlighted.has(p.id) ? ' active' : ' dimmed') : '';
               return (
                 <button key={p.id} type="button" className={`mix-legend-item${cls}`} onClick={() => toggleHighlight(p.id)}>
-                  <i
-                    className={`mix-legend-dot${p.isDispo ? ' mix-seg-dispo' : ''}`}
-                    style={p.isDispo ? undefined : { background: colorForProject(p.id, orderedIds) }}
-                  />
+                  <i className="mix-legend-dot" style={{ background: colorForProject(p.id, orderedIds) }} />
                   {p.name}
                 </button>
               );
             })}
+            <span className="mix-legend-item">
+              <i className="mix-legend-dot mix-seg-dispo" />
+              Disponible
+            </span>
           </div>
         </>
       )}

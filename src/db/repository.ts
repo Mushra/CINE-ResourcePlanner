@@ -166,8 +166,23 @@ export function updatePool(db: PlannerDatabase, pool: ResourcePool): void {
   ]);
 }
 
+/** Deletes just the role itself — its people fall back to "no role" (like any other pool-less
+ * person) rather than vanishing, and its now-pointless requirements/capacity overrides are
+ * cleaned up explicitly since sql.js doesn't enforce the schema's declared CASCADE/SET NULL. */
 export function deletePool(db: PlannerDatabase, poolId: string): void {
+  db.exec('UPDATE people SET pool_id = NULL WHERE pool_id = ?', [poolId]);
+  db.exec('DELETE FROM requirement_allocations WHERE requirement_id IN (SELECT id FROM requirements WHERE pool_id = ?)', [poolId]);
+  db.exec('DELETE FROM requirements WHERE pool_id = ?', [poolId]);
+  db.exec('DELETE FROM pool_capacity_overrides WHERE pool_id = ?', [poolId]);
   db.exec('DELETE FROM resource_pools WHERE id = ?', [poolId]);
+}
+
+/** Deletes the role AND every person in it (each with their own assignments) — for the "delete
+ * everything under here too" choice in the Team delete-confirmation prompt. */
+export function deletePoolCascade(db: PlannerDatabase, poolId: string): void {
+  const personIds = db.query<{ id: string }>('SELECT id FROM people WHERE pool_id = ?', [poolId]).map((r) => r.id);
+  for (const personId of personIds) deletePerson(db, personId);
+  deletePool(db, poolId);
 }
 
 export function setPoolCapacityOverride(db: PlannerDatabase, poolId: string, period: Period, capacityFte: number | null): void {
@@ -253,6 +268,14 @@ export function deleteDiscipline(db: PlannerDatabase, disciplineId: string): voi
   db.exec('DELETE FROM disciplines WHERE id = ?', [disciplineId]);
 }
 
+/** Deletes the discipline AND every role under it (each with its own people/assignments) — for
+ * the "delete everything under here too" choice in the Team delete-confirmation prompt. */
+export function deleteDisciplineCascade(db: PlannerDatabase, disciplineId: string): void {
+  const poolIds = db.query<{ id: string }>('SELECT id FROM resource_pools WHERE discipline_id = ?', [disciplineId]).map((r) => r.id);
+  for (const poolId of poolIds) deletePoolCascade(db, poolId);
+  deleteDiscipline(db, disciplineId);
+}
+
 // ---------------------------------------------------------------------------
 // People
 // ---------------------------------------------------------------------------
@@ -273,6 +296,11 @@ export function updatePerson(db: PlannerDatabase, person: Person): void {
 }
 
 export function deletePerson(db: PlannerDatabase, personId: string): void {
+  // person_assignments/person_assignment_allocations declare ON DELETE CASCADE but sql.js doesn't
+  // enforce it — clean them up explicitly, otherwise the deleted person's assignments linger as
+  // phantom FTE that keeps inflating a project's staffed total forever.
+  db.exec('DELETE FROM person_assignment_allocations WHERE person_assignment_id IN (SELECT id FROM person_assignments WHERE person_id = ?)', [personId]);
+  db.exec('DELETE FROM person_assignments WHERE person_id = ?', [personId]);
   db.exec('DELETE FROM people WHERE id = ?', [personId]);
 }
 

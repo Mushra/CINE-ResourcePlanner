@@ -52,7 +52,7 @@ export function PersonDetail({ personId }: { personId: string }) {
   const discipline = disciplines.find((d) => d.id === person.effectiveDisciplineId);
   const visiblePools = pools.filter((p) => !isGenericPoolName(p.name));
   const period = todayPeriod();
-  const assignedNow = engine.getPersonAssigned(person.id, period);
+  const assignedNow = engine.getPersonAssignedExcludingDispo(person.id, period);
 
   const projectById = new Map(projects.map((p) => [p.id, p] as const));
   const window = buildTimelineWindow(engine.personAllocatedPeriods(person.id));
