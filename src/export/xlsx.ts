@@ -180,7 +180,7 @@ function buildSanityChecksSheet(wb: ExcelJS.Workbook, engine: PlanningEngine): v
     const row = sheet.addRow({
       severity: check.severity.toUpperCase(),
       project: check.projectName ?? '—',
-      pool: check.poolName ?? '—',
+      pool: check.disciplineName ?? check.poolName ?? '—',
       month: check.period ? formatPeriodLabel(check.period) : '—',
       issue: check.message,
       impact: check.impact,

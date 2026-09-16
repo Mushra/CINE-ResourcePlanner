@@ -1,16 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { PlanningEngine } from '../src/engine/planning';
 import { getSanityChecks } from '../src/engine/validation';
-import { person, personAssignment, planningData, pool, project, requirement } from './fixtures';
+import { discipline, person, personAssignment, planningData, pool, project, requirement } from './fixtures';
 
 describe('getSanityChecks — over capacity', () => {
-  it('emits a critical check when demand exceeds pool capacity', () => {
-    const animation = pool({ name: 'Animation', capacityFte: 8 });
+  it('emits a critical check when demand exceeds discipline capacity', () => {
+    const animationDiscipline = discipline({ name: 'Animation' });
+    const animation = pool({ name: 'Animation', capacityFte: 8, disciplineId: animationDiscipline.id });
     const p1 = project({ name: 'Alpha', startDate: '2026-11-01', endDate: '2026-11-30' });
     const r1 = requirement(p1.id, animation.id, { '2026-11': 9 });
 
     const engine = new PlanningEngine(
       planningData({
+        disciplines: [animationDiscipline],
         pools: [animation],
         projects: [p1],
         requirements: [r1.requirement],
@@ -20,16 +22,18 @@ describe('getSanityChecks — over capacity', () => {
 
     const checks = getSanityChecks(engine).filter((c) => c.category === 'over_capacity');
     expect(checks).toHaveLength(1);
-    expect(checks[0]).toMatchObject({ severity: 'critical', poolId: animation.id, period: '2026-11' });
+    expect(checks[0]).toMatchObject({ severity: 'critical', disciplineId: animationDiscipline.id, period: '2026-11' });
   });
 
   it('does not flag over capacity when demand is within capacity', () => {
-    const animation = pool({ capacityFte: 8 });
+    const animationDiscipline = discipline({ name: 'Animation' });
+    const animation = pool({ capacityFte: 8, disciplineId: animationDiscipline.id });
     const p1 = project({ startDate: '2026-11-01', endDate: '2026-11-30' });
     const r1 = requirement(p1.id, animation.id, { '2026-11': 6 });
 
     const engine = new PlanningEngine(
       planningData({
+        disciplines: [animationDiscipline],
         pools: [animation],
         projects: [p1],
         requirements: [r1.requirement],

@@ -5,7 +5,7 @@ export type IconName =
   | 'plus' | 'chevron-right' | 'chevron-down' | 'chevron-left' | 'close'
   | 'warning' | 'critical' | 'check' | 'info'
   | 'sun' | 'moon' | 'save' | 'folder-open' | 'file-plus' | 'download'
-  | 'search' | 'more' | 'arrow-left' | 'trash' | 'edit' | 'calendar' | 'zoom-in' | 'zoom-out' | 'structure' | 'filter' | 'table';
+  | 'search' | 'more' | 'arrow-left' | 'trash' | 'edit' | 'calendar' | 'zoom-in' | 'zoom-out' | 'structure' | 'filter' | 'table' | 'help';
 
 const PATHS: Record<IconName, React.ReactNode> = {
   dashboard: <><rect x="3" y="3" width="7" height="9" rx="1.2" /><rect x="14" y="3" width="7" height="5" rx="1.2" /><rect x="14" y="12" width="7" height="9" rx="1.2" /><rect x="3" y="16" width="7" height="5" rx="1.2" /></>,
@@ -38,6 +38,7 @@ const PATHS: Record<IconName, React.ReactNode> = {
   structure: <><rect x="9" y="3" width="6" height="5" rx="1" /><rect x="3" y="16" width="6" height="5" rx="1" /><rect x="15" y="16" width="6" height="5" rx="1" /><path d="M12 8v4" /><path d="M6 16v-2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2" /></>,
   filter: <path d="M4 4h16l-6 8v6l-4 2v-8Z" />,
   table: <><rect x="3" y="4" width="18" height="16" rx="1.5" /><line x1="3" y1="9.5" x2="21" y2="9.5" /><line x1="3" y1="14.5" x2="21" y2="14.5" /><line x1="9" y1="4" x2="9" y2="20" /></>,
+  help: <><circle cx="12" cy="12" r="9" /><path d="M9.3 9.3a2.7 2.7 0 1 1 3.9 2.4c-.9.5-1.2 1-1.2 2" /><circle cx="12" cy="17" r="0.6" fill="currentColor" /></>,
 };
 
 export function Icon({ name, size = 16, ...rest }: { name: IconName; size?: number } & SVGProps<SVGSVGElement>) {

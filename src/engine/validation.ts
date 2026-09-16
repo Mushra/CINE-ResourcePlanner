@@ -72,22 +72,35 @@ function severityRank(s: Severity): number {
   return s === 'critical' ? 2 : s === 'warning' ? 1 : 0;
 }
 
+/**
+ * Total demand vs. total capacity for a discipline across every project in a period — scoped to
+ * disciplines, not pools, because needs are discipline-only (see getProjectDisciplineStaffing):
+ * they live on a hidden generic pool that always has capacityFte 0 by construction, so comparing
+ * required-vs-capacity on that pool directly would flag every discipline with any need at all as
+ * "over capacity" regardless of how much real capacity the discipline actually has in its specific
+ * pools. Aggregating to the discipline (real capacity from its specific pools, required from
+ * wherever the need is recorded) is the only granularity where this comparison means anything.
+ */
 function checkOverCapacity(engine: PlanningEngine, periods: Period[]): SanityCheck[] {
   const checks: SanityCheck[] = [];
-  for (const pool of engine.pools()) {
+  const disciplineIds: string[] = engine.disciplines().map((d) => d.id);
+  if (engine.pools().some((p) => p.disciplineId === null)) disciplineIds.push(UNASSIGNED_DISCIPLINE_ID);
+
+  for (const disciplineId of disciplineIds) {
+    const disciplineName = disciplineId === UNASSIGNED_DISCIPLINE_ID ? 'Unassigned' : (engine.discipline(disciplineId)?.name ?? disciplineId);
     for (const period of periods) {
-      const capacity = engine.getCapacity(pool.id, period);
-      const required = engine.getRequiredCapacity(pool.id, period);
+      const capacity = engine.getDisciplineCapacity(disciplineId, period);
+      const required = engine.getDisciplineRequiredCapacity(disciplineId, period);
       const over = round2(required - capacity);
       if (over > 0.001) {
         checks.push({
-          id: `over-capacity:${pool.id}:${period}`,
+          id: `over-capacity:${disciplineId}:${period}`,
           severity: 'critical',
           category: 'over_capacity',
-          poolId: pool.id,
-          poolName: pool.name,
+          disciplineId,
+          disciplineName,
           period,
-          message: `${pool.name} is over capacity in ${formatPeriodLabel(period)}`,
+          message: `${disciplineName} is over capacity in ${formatPeriodLabel(period)}`,
           impact: `Demand ${required} FTE exceeds capacity ${capacity} FTE — ${over} FTE over capacity`,
         });
       }

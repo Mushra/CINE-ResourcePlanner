@@ -3,6 +3,7 @@ import { Icon, type IconName } from '../components/Icon';
 import { Button } from '../components/Button';
 import { ImportDrawer } from '../components/ImportDrawer';
 import { CommandPalette } from '../components/CommandPalette';
+import { ValidationRulesDialog } from '../components/ValidationRulesDialog';
 import { useStore } from '../../store/useStore';
 import { useUiStore, type ViewName } from '../../store/useUiStore';
 
@@ -58,7 +59,10 @@ function TopBar() {
   const setCommandPaletteOpen = useUiStore((s) => s.setCommandPaletteOpen);
   const [menuOpen, setMenuOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [helpMenuOpen, setHelpMenuOpen] = useState(false);
+  const [validationRulesOpen, setValidationRulesOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const helpMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -68,6 +72,15 @@ function TopBar() {
     document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (!helpMenuOpen) return;
+    function onClick(e: MouseEvent) {
+      if (helpMenuRef.current && !helpMenuRef.current.contains(e.target as Node)) setHelpMenuOpen(false);
+    }
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [helpMenuOpen]);
 
   return (
     <header className="topbar">
@@ -95,8 +108,19 @@ function TopBar() {
         <button type="button" className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme">
           <Icon name={theme === 'light' ? 'moon' : 'sun'} size={15} />
         </button>
+        <div className="menu-wrap" ref={helpMenuRef}>
+          <Button icon="help" size="sm" variant="ghost" onClick={() => setHelpMenuOpen((v) => !v)} aria-label="Help" />
+          {helpMenuOpen && (
+            <div className="dropdown-menu">
+              <button type="button" onClick={() => { setHelpMenuOpen(false); setValidationRulesOpen(true); }}>
+                <Icon name="info" size={14} /> Planning Health Validation Rules
+              </button>
+            </div>
+          )}
+        </div>
       </div>
       {importOpen && <ImportDrawer onClose={() => setImportOpen(false)} />}
+      {validationRulesOpen && <ValidationRulesDialog onClose={() => setValidationRulesOpen(false)} />}
     </header>
   );
 }
