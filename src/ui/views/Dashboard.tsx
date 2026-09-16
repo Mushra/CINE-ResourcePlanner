@@ -22,7 +22,6 @@ export function Dashboard() {
   const { engine, options } = useFilteredEngine();
   const projects = useStore((s) => s.data.projects);
   const lastImportReport = useStore((s) => s.lastImportReport);
-  const navigate = useUiStore((s) => s.navigate);
   const openProject = useUiStore((s) => s.openProject);
   const openPerson = useUiStore((s) => s.openPerson);
   const newDatabase = useStore((s) => s.newDatabase);
@@ -146,7 +145,11 @@ export function Dashboard() {
                             <button
                               type="button"
                               className="issue-message"
-                              onClick={() => (check.projectId ? openProject(check.projectId) : navigate('people'))}
+                              disabled={!check.personId && !check.projectId}
+                              onClick={() => {
+                                if (check.personId) openPerson(check.personId);
+                                else if (check.projectId) openProject(check.projectId);
+                              }}
                             >
                               {check.message}
                             </button>

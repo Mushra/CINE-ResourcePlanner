@@ -66,5 +66,13 @@ export function filterPlanningData(data: PlanningData, filter: GlobalFilter): Pl
   const personAssignmentIds = new Set(personAssignments.map((pa) => pa.id));
   const personAssignmentAllocations = data.personAssignmentAllocations.filter((a) => personAssignmentIds.has(a.personAssignmentId));
 
-  return { ...data, disciplines, pools, people, requirements, requirementAllocations, personAssignments, personAssignmentAllocations };
+  // A project with no requirement and no assignment left after filtering has nothing to show under
+  // the current slice (no supply, no demand) — drop it so project-level checks (invalid/TBD dates)
+  // that aren't otherwise pool/person-scoped don't keep surfacing projects outside the filter.
+  const activeProjectIds = new Set<string>();
+  for (const r of requirements) activeProjectIds.add(r.projectId);
+  for (const pa of personAssignments) activeProjectIds.add(pa.projectId);
+  const projects = data.projects.filter((p) => activeProjectIds.has(p.id));
+
+  return { ...data, projects, disciplines, pools, people, requirements, requirementAllocations, personAssignments, personAssignmentAllocations };
 }
