@@ -269,6 +269,24 @@
 }
 .field-row > .field { flex: 1; }
 
+.inline-discipline-create {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.inline-discipline-create input[type="text"],
+.inline-discipline-create input:not([type]) {
+  flex: 1;
+  min-width: 0;
+}
+.inline-discipline-create input[type="color"] {
+  width: 34px;
+  height: 34px;
+  padding: 2px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
 .num-input {
   width: 56px;
   text-align: right;

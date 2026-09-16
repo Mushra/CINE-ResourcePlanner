@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Drawer } from './Drawer';
 import { Button } from './Button';
 import { NumberField } from './NumberField';
+import { DisciplinePicker } from './DisciplinePicker';
 import type { Discipline, Person, ResourcePool } from '../../domain/types';
 
 const USE_ROLE_DISCIPLINE = '__use_role__';
@@ -35,7 +36,7 @@ function fromPerson(person: Person | undefined, pools: ResourcePool[], defaultPo
 }
 
 export function PersonFormDrawer({
-  person, pools, disciplines, defaultPoolId, teamOptions, siteOptions, onClose, onSave,
+  person, pools, disciplines, defaultPoolId, teamOptions, siteOptions, onCreateDiscipline, onClose, onSave,
 }: {
   person?: Person;
   pools: ResourcePool[];
@@ -43,6 +44,9 @@ export function PersonFormDrawer({
   defaultPoolId?: string | null;
   teamOptions?: string[];
   siteOptions?: string[];
+  /** Backs the Famille d'emplois picker's "+ New discipline…" option — creates the discipline and
+   * returns it so it can be assigned to this person immediately, without leaving this drawer. */
+  onCreateDiscipline?: (input: { name: string; color: string }) => Discipline;
   onClose: () => void;
   onSave: (value: PersonFormValue) => void;
 }) {
@@ -90,14 +94,14 @@ export function PersonFormDrawer({
 
       <div className="field">
         <label htmlFor="person-discipline">Famille d'emplois</label>
-        <select
+        <DisciplinePicker
           id="person-discipline"
+          disciplines={disciplines}
           value={value.disciplineId ?? USE_ROLE_DISCIPLINE}
-          onChange={(e) => set('disciplineId', e.target.value === USE_ROLE_DISCIPLINE ? null : e.target.value)}
-        >
-          <option value={USE_ROLE_DISCIPLINE}>— Use role's discipline ({nativeDisciplineName}) —</option>
-          {disciplines.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-        </select>
+          emptyOption={{ value: USE_ROLE_DISCIPLINE, label: `— Use role's discipline (${nativeDisciplineName}) —` }}
+          onChange={(raw) => set('disciplineId', raw === USE_ROLE_DISCIPLINE ? null : raw)}
+          onCreateDiscipline={onCreateDiscipline}
+        />
         {value.disciplineId !== null && (
           <p className="field-hint field-hint-warning">
             Override active — this person keeps their role but is grouped under a different discipline.{' '}

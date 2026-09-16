@@ -44,7 +44,75 @@ export class PlannerDatabase {
     const from = this.getSetting('schema_version');
     this.migrate(from);
     this.setSetting('schema_version', SCHEMA_VERSION);
+    this.healDuplicateGenericPools();
     this.healDanglingReferences();
+  }
+
+  /**
+   * Collapses any discipline that ended up with more than one generic ("— Unspecified role") pool
+   * back to one. This used to happen whenever resolveGenericPoolId (useStore.ts) matched by exact
+   * name instead of disciplineId + isGenericPoolName: after a discipline rename, the old generic
+   * pool's name (frozen at creation) no longer matched the freshly-computed name, so the next
+   * "Overwrite needs from assignments" silently created a second one and wrote into it — leaving
+   * the discipline's total need split across two pools, with the stale one un-reachable from the UI
+   * and never zeroed out no matter how many times Overwrite ran. Keeps the oldest (lowest
+   * sort_order) pool, sums every other one's requirement allocations onto it period-by-period, then
+   * deletes the extras; healDanglingReferences (run right after) sweeps their now-orphaned rows.
+   */
+  private healDuplicateGenericPools(): void {
+    type PoolRow = { id: string; name: string; discipline_id: string | null; sort_order: number };
+    const pools = this.query<PoolRow>('SELECT id, name, discipline_id, sort_order FROM resource_pools');
+    const byDiscipline = new Map<string, PoolRow[]>();
+    for (const p of pools) {
+      if (!p.discipline_id || !isGenericPoolName(p.name)) continue;
+      const arr = byDiscipline.get(p.discipline_id) ?? [];
+      arr.push(p);
+      byDiscipline.set(p.discipline_id, arr);
+    }
+
+    for (const dupes of byDiscipline.values()) {
+      if (dupes.length < 2) continue;
+      dupes.sort((a, b) => a.sort_order - b.sort_order);
+      const [canonical, ...extras] = dupes;
+
+      for (const extra of extras) {
+        const reqs = this.query<{ id: string; project_id: string; scenario_id: string }>(
+          'SELECT id, project_id, scenario_id FROM requirements WHERE pool_id = ?',
+          [extra.id],
+        );
+        for (const req of reqs) {
+          const allocs = this.query<{ period: string; fte: number }>(
+            'SELECT period, fte FROM requirement_allocations WHERE requirement_id = ?',
+            [req.id],
+          );
+          if (allocs.length > 0) {
+            const existingReq = this.query<{ id: string }>(
+              'SELECT id FROM requirements WHERE project_id = ? AND pool_id = ? AND scenario_id = ?',
+              [req.project_id, canonical.id, req.scenario_id],
+            )[0];
+            let canonicalReqId = existingReq?.id;
+            if (!canonicalReqId) {
+              canonicalReqId = `req_mig_dup_${extra.id}_${req.id}`;
+              this.exec('INSERT INTO requirements (id, project_id, pool_id, scenario_id) VALUES (?, ?, ?, ?)', [canonicalReqId, req.project_id, canonical.id, req.scenario_id]);
+            }
+            const existingByPeriod = new Map(
+              this.query<{ period: string; fte: number }>('SELECT period, fte FROM requirement_allocations WHERE requirement_id = ?', [canonicalReqId])
+                .map((a) => [a.period, a.fte]),
+            );
+            for (const a of allocs) {
+              const total = (existingByPeriod.get(a.period) ?? 0) + a.fte;
+              this.exec(
+                `INSERT INTO requirement_allocations (requirement_id, period, fte) VALUES (?, ?, ?)
+                 ON CONFLICT(requirement_id, period) DO UPDATE SET fte = excluded.fte`,
+                [canonicalReqId, a.period, total],
+              );
+            }
+          }
+          this.exec('DELETE FROM requirements WHERE id = ?', [req.id]);
+        }
+        this.exec('DELETE FROM resource_pools WHERE id = ?', [extra.id]);
+      }
+    }
   }
 
   /**

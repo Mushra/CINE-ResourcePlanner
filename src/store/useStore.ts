@@ -23,7 +23,7 @@ import { PlanningEngine, round2 } from '../engine/planning';
 import type { Discipline, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
 import { emptyPlanningData } from '../domain/types';
 import { applyStructureOverrides } from '../domain/overrides';
-import { normalizeKey, genericPoolName } from '../domain/identity';
+import { normalizeKey, genericPoolName, isGenericPoolName } from '../domain/identity';
 import { addMonths, comparePeriod, formatPeriodLabel, isoFirstDayOfPeriod, isoLastDayOfPeriod, periodFromISODate, periodRange } from '../domain/periods';
 import { spreadHue } from '../ui/lib/colors';
 
@@ -168,14 +168,21 @@ export const useStore = create<StoreState>((set, get) => {
     reload(db);
   }
 
-  /** Finds (or lazily creates) the hidden pool that carries a discipline's "N people, no role picked" requirement. */
+  /**
+   * Finds (or lazily creates) the hidden pool that carries a discipline's "N people, no role
+   * picked" requirement. Matched by disciplineId + isGenericPoolName only (same convention as the
+   * v5->v6 migration and every other generic-pool lookup in the app) — NOT by an exact name match
+   * against the discipline's current name, since a discipline rename doesn't rename its generic
+   * pool. Matching by name would silently spawn a second generic pool after a rename, splitting a
+   * discipline's need across two rows so "Overwrite needs from assignments" could never fully zero
+   * out the stale one.
+   */
   function resolveGenericPoolId(db: PlannerDatabase, disciplineId: string): string | null {
     const discipline = get().data.disciplines.find((d) => d.id === disciplineId);
     if (!discipline) return null;
-    const name = genericPoolName(discipline.name);
-    const existing = get().data.pools.find((p) => p.disciplineId === disciplineId && normalizeKey(p.name) === normalizeKey(name));
+    const existing = get().data.pools.find((p) => p.disciplineId === disciplineId && isGenericPoolName(p.name));
     if (existing) return existing.id;
-    const pool = repoCreatePool(db, { name, disciplineId, color: discipline.color, capacityFte: 0 });
+    const pool = repoCreatePool(db, { name: genericPoolName(discipline.name), disciplineId, color: discipline.color, capacityFte: 0 });
     return pool.id;
   }
 

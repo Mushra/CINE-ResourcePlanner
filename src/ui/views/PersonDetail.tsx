@@ -31,6 +31,7 @@ export function PersonDetail({ personId }: { personId: string }) {
   const disciplines = useStore((s) => s.data.disciplines);
   const projects = useStore((s) => s.data.projects);
   const deletePerson = useStore((s) => s.deletePerson);
+  const createDiscipline = useStore((s) => s.createDiscipline);
   const setPersonAssignment = useStore((s) => s.setPersonAssignment);
   const setPersonAssignmentRange = useStore((s) => s.setPersonAssignmentRange);
   const clearPersonAssignment = useStore((s) => s.clearPersonAssignment);
@@ -175,6 +176,7 @@ export function PersonDetail({ personId }: { personId: string }) {
           person={person}
           pools={visiblePools}
           disciplines={disciplines}
+          onCreateDiscipline={createDiscipline}
           onClose={() => setEditing(false)}
           onSave={(v: PersonFormValue) => { savePersonEdit(person, v); setEditing(false); }}
         />

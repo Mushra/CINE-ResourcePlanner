@@ -21,7 +21,6 @@ import type { ImportReport } from '../../import/rpmImport';
 export function Dashboard() {
   const { engine, options } = useFilteredEngine();
   const projects = useStore((s) => s.data.projects);
-  const people = useStore((s) => s.data.people);
   const lastImportReport = useStore((s) => s.lastImportReport);
   const navigate = useUiStore((s) => s.navigate);
   const openProject = useUiStore((s) => s.openProject);
@@ -60,7 +59,7 @@ export function Dashboard() {
   const overAllocatedProjectIdsNow = new Set(
     checks.filter((c) => c.category === 'over_allocated' && c.period === period).map((c) => c.projectId),
   );
-  const unstaffedPeopleNow = people.filter(
+  const unstaffedPeopleNow = engine.people().filter(
     (p) => p.active && p.capacityFte > 0.001 && engine.getPersonAssignedExcludingDispo(p.id, period) <= 0.001,
   );
 
@@ -118,56 +117,56 @@ export function Dashboard() {
 
       <div className="dashboard-grid dashboard-grid-projects">
         <ProjectMix engine={engine} periods={trendPeriods} openProject={openProject} />
-        <ProjectCapacity engine={engine} />
+        <div className="dashboard-stack">
+          <ProjectCapacity engine={engine} />
+
+          <section className="card panel">
+            <div className="panel-header">
+              <h2>Needs attention</h2>
+              <span className="panel-sub">{critical.length} critical · {warnings.length} warnings</span>
+            </div>
+            {checks.length === 0 ? (
+              <EmptyState icon="check" title="All clear" description="No capacity conflicts or staffing gaps detected." />
+            ) : (
+              <div className="issue-groups">
+                {groupedChecks.map((group, idx) => (
+                  <Collapsible
+                    key={group.id}
+                    scopeKey={`dashboard:need:${group.id}`}
+                    className="issue-group"
+                    defaultOpen={idx === 0 || group.checks.some((c) => c.severity === 'critical')}
+                    summary={<span className="issue-group-name">{group.name}</span>}
+                    count={group.checks.length}
+                  >
+                    <ul className="issue-list">
+                      {group.checks.map((check) => (
+                        <li key={check.id} className="issue-row">
+                          <StatusPill tone={check.severity}>{check.severity}</StatusPill>
+                          <div className="issue-body">
+                            <button
+                              type="button"
+                              className="issue-message"
+                              onClick={() => (check.projectId ? openProject(check.projectId) : navigate('people'))}
+                            >
+                              {check.message}
+                            </button>
+                            <div className="issue-impact">{check.impact}</div>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </Collapsible>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
       </div>
 
       <TeamTensionHeatmap engine={engine} periods={trendPeriods} />
       <NamedAvailability engine={engine} periods={trendPeriods} openPerson={openPerson} />
 
-      <div className="dashboard-grid">
-        <DisciplineCapacity engine={engine} />
-
-        <section className="card panel">
-          <div className="panel-header">
-            <h2>Needs attention</h2>
-            <span className="panel-sub">{critical.length} critical · {warnings.length} warnings</span>
-          </div>
-          {checks.length === 0 ? (
-            <EmptyState icon="check" title="All clear" description="No capacity conflicts or staffing gaps detected." />
-          ) : (
-            <div className="issue-groups">
-              {groupedChecks.map((group, idx) => (
-                <Collapsible
-                  key={group.id}
-                  scopeKey={`dashboard:need:${group.id}`}
-                  className="issue-group"
-                  defaultOpen={idx === 0 || group.checks.some((c) => c.severity === 'critical')}
-                  summary={<span className="issue-group-name">{group.name}</span>}
-                  count={group.checks.length}
-                >
-                  <ul className="issue-list">
-                    {group.checks.map((check) => (
-                      <li key={check.id} className="issue-row">
-                        <StatusPill tone={check.severity}>{check.severity}</StatusPill>
-                        <div className="issue-body">
-                          <button
-                            type="button"
-                            className="issue-message"
-                            onClick={() => (check.projectId ? openProject(check.projectId) : navigate('people'))}
-                          >
-                            {check.message}
-                          </button>
-                          <div className="issue-impact">{check.impact}</div>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </Collapsible>
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
+      <DisciplineCapacity engine={engine} />
     </div>
   );
 }

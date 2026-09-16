@@ -76,6 +76,7 @@
   align-items: start;
 }
 .dashboard-grid-projects { grid-template-columns: 1fr 1fr; }
+.dashboard-stack { display: flex; flex-direction: column; gap: 14px; }
 
 .panel { padding: 16px 18px; }
 .panel-header {

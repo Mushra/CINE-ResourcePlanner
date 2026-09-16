@@ -452,6 +452,7 @@ export function Team() {
           disciplines={disciplines}
           defaultDisciplineId={newPoolDisciplineId}
           existingColors={pools.filter((p) => p.disciplineId === newPoolDisciplineId).map((p) => p.color)}
+          onCreateDiscipline={createDiscipline}
           onClose={() => setShowNewPool(false)}
           onSave={(v: PoolFormValue) => { savePoolEdit(undefined, v); setShowNewPool(false); }}
         />
@@ -472,6 +473,7 @@ export function Team() {
               if (target) setPoolPersonPool(editingPool.name, target.name);
             }}
             onClearMoveRule={() => clearOverrideByKey('pool_person_pool', normalizeKey(editingPool.name))}
+            onCreateDiscipline={createDiscipline}
             onClose={() => setEditingPool(null)}
             onSave={(v: PoolFormValue) => { savePoolEdit(editingPool, v); setEditingPool(null); }}
           />
@@ -484,6 +486,7 @@ export function Team() {
           defaultPoolId={newPersonForPool}
           teamOptions={knownTeamNames}
           siteOptions={knownSiteNames}
+          onCreateDiscipline={createDiscipline}
           onClose={() => setNewPersonForPool(null)}
           onSave={(v: PersonFormValue) => { savePersonEdit(undefined, v); setNewPersonForPool(null); }}
         />
@@ -495,6 +498,7 @@ export function Team() {
           disciplines={disciplines}
           teamOptions={knownTeamNames}
           siteOptions={knownSiteNames}
+          onCreateDiscipline={createDiscipline}
           onClose={() => setEditingPerson(null)}
           onSave={(v: PersonFormValue) => { savePersonEdit(editingPerson, v); setEditingPerson(null); }}
         />

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Drawer } from './Drawer';
 import { Button } from './Button';
+import { DisciplinePicker } from './DisciplinePicker';
 import { pickContrastingColor } from '../lib/colors';
 import type { Discipline, ResourcePool } from '../../domain/types';
 
@@ -16,7 +17,7 @@ function fromPool(pool: ResourcePool | undefined, defaultDisciplineId: string | 
 }
 
 export function PoolFormDrawer({
-  pool, disciplines, defaultDisciplineId, existingColors = [], otherPools, moveRule, onSetMoveRule, onClearMoveRule, onClose, onSave,
+  pool, disciplines, defaultDisciplineId, existingColors = [], otherPools, moveRule, onSetMoveRule, onClearMoveRule, onCreateDiscipline, onClose, onSave,
 }: {
   pool?: ResourcePool;
   disciplines: Discipline[];
@@ -29,6 +30,9 @@ export function PoolFormDrawer({
   moveRule?: { targetPoolId: string | null; targetPoolName: string } | null;
   onSetMoveRule?: (targetPoolId: string) => void;
   onClearMoveRule?: () => void;
+  /** Backs the Discipline picker's "+ New discipline…" option — creates the discipline and returns
+   * it so it can be assigned to this role immediately, without leaving this drawer. */
+  onCreateDiscipline?: (input: { name: string; color: string }) => Discipline;
   onClose: () => void;
   onSave: (value: PoolFormValue) => void;
 }) {
@@ -54,14 +58,14 @@ export function PoolFormDrawer({
       <div className="field-row">
         <div className="field">
           <label htmlFor="pool-discipline">Discipline</label>
-          <select
+          <DisciplinePicker
             id="pool-discipline"
+            disciplines={disciplines}
             value={value.disciplineId ?? ''}
-            onChange={(e) => set('disciplineId', e.target.value || null)}
-          >
-            <option value="">Unassigned</option>
-            {disciplines.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
+            emptyOption={{ value: '', label: 'Unassigned' }}
+            onChange={(raw) => set('disciplineId', raw || null)}
+            onCreateDiscipline={onCreateDiscipline}
+          />
           {pool && pool.importDisciplineId !== pool.disciplineId && (
             <p className="field-hint field-hint-warning">
               A remapping override is active — this role was imported into a different discipline.{' '}
