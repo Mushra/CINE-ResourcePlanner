@@ -27,6 +27,32 @@ the committed window as a fallback.
 Do not attempt to collapse LOQ scheduling into the monthly `Period` string. LOQ dates are real ISO
 dates; the monthly rollup is a derived view for the capacity-comparison purpose only.
 
+### 1.1 Demand/assigned intensity rules (implemented)
+
+`src/engine/loqRollup.ts::getCinematicDisciplineRollup()` implements both signals above. Neither is
+prorated across months a window/committed range spans — the same flat-per-month intensity applies to
+the first, middle, and last month it touches, matching how `RequirementAllocation`/
+`PersonAssignmentAllocation` already treat `fte` as a flat monthly intensity rather than a
+total-effort-days quantity to be redistributed.
+
+- **Assigned**: the flat `loq_resources.fte` value, added to whichever month(s) its
+  `[start_date, finish_date]` window touches. A window-less row (null dates) contributes 0 — never a
+  fallback spread over the LOQ's committed window.
+- **Demand**: intensity = `estimate_days / (working days in the committed window)`, Mon-Fri only,
+  applied flat to every month `[committed_start, committed_finish]` touches. When `committed_finish`
+  is null but `committed_start` and `estimate_days` are set, an implicit finish is derived as
+  `committed_start + estimate_days` working days, for rollup placement only — never stored back to
+  the LOQ. Demand is 0 when `committed_start` or `estimate_days` is missing, or the resulting window
+  has no working days.
+
+This mirrors MS Project's own implicit model: a task has no stored "units"/FTE field, only `Work`
+(total effort) and `Duration` — the effective intensity is `Work ÷ Duration`. Confirmed against a real
+example (`CIA_Safehouse-Anim-L2`, `NEW-OVR-MACRO-RELEASE-27.mpp`): ~424.15h total work over 102
+working days ≈ 0.5 FTE, matching the usual 0.5/1/2 FTE values production actually assigns.
+
+This is a computed signal with no consumer yet — the `capacity_conflict_cinematic` sanity check that
+will read it (§8) stays a later, separate slice.
+
 ## 2. State model per LOQ
 
 Every LOQ carries four date-bearing states, matching brief §5 exactly:
