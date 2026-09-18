@@ -57,5 +57,7 @@
 
 .tbd-text { color: var(--text-tertiary); font-style: italic; }
 
+.cell-actions { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+
 .health-cell { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
 .tbd-inline { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; color: var(--text-tertiary); }

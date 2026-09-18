@@ -3,7 +3,7 @@ import type { GlobalFilter } from '../domain/filter';
 import { EMPTY_GLOBAL_FILTER } from '../domain/filter';
 import type { Period } from '../domain/types';
 
-export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'people' | 'project-detail' | 'person-detail';
+export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'people' | 'project-detail' | 'person-detail' | 'cinematic-detail';
 export type PeopleMode = 'availability' | 'assignments';
 /** Percentage zoom level, 10-200. 100 = the previous "Compact" scale (3px/day). */
 export type TimelineZoom = number;
@@ -101,11 +101,15 @@ interface UiState {
   view: ViewName;
   selectedProjectId: string | null;
   selectedPersonId: string | null;
+  selectedCinematicId: string | null;
   navigate: (view: ViewName) => void;
   openProject: (projectId: string) => void;
   backToProjects: () => void;
   openPerson: (personId: string) => void;
   backToTeam: () => void;
+  /** Drill in from ProjectDetail — keeps selectedProjectId so backToProject can return there. */
+  openCinematic: (cinematicId: string) => void;
+  backToProject: () => void;
 
   /** Keyed by a stable scope string (e.g. "team:disc:<id>"). true = collapsed. */
   collapsed: Record<string, boolean>;
@@ -147,11 +151,14 @@ export const useUiStore = create<UiState>((set, get) => ({
   view: 'dashboard',
   selectedProjectId: null,
   selectedPersonId: null,
-  navigate: (view) => set({ view, selectedProjectId: null, selectedPersonId: null }),
-  openProject: (projectId) => set({ view: 'project-detail', selectedProjectId: projectId, selectedPersonId: null }),
-  backToProjects: () => set({ view: 'projects', selectedProjectId: null }),
+  selectedCinematicId: null,
+  navigate: (view) => set({ view, selectedProjectId: null, selectedPersonId: null, selectedCinematicId: null }),
+  openProject: (projectId) => set({ view: 'project-detail', selectedProjectId: projectId, selectedPersonId: null, selectedCinematicId: null }),
+  backToProjects: () => set({ view: 'projects', selectedProjectId: null, selectedCinematicId: null }),
   openPerson: (personId) => set({ view: 'person-detail', selectedPersonId: personId, selectedProjectId: null }),
   backToTeam: () => set({ view: 'team', selectedPersonId: null }),
+  openCinematic: (cinematicId) => set({ view: 'cinematic-detail', selectedCinematicId: cinematicId }),
+  backToProject: () => set({ view: 'project-detail', selectedCinematicId: null }),
 
   collapsed: loadCollapsed(),
   isCollapsed: (key) => get().collapsed[key] === true,

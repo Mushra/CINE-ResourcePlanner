@@ -11,8 +11,10 @@ import { StatusPill } from '../components/StatusPill';
 import { ConfirmButton } from '../components/ConfirmButton';
 import { Collapsible } from '../components/Collapsible';
 import { ProjectFormDrawer, type ProjectFormValue } from '../components/ProjectFormDrawer';
+import { CinematicFormDrawer, type CinematicFormValue } from '../components/CinematicFormDrawer';
 import { RequirementTimeline, type AssignmentPoolGroup, type RequirementGroup, type RequirementLane } from '../components/RequirementTimeline';
 import { deriveProjectStatus, STATUS_LABEL } from '../../domain/projectStatus';
+import type { Cinematic } from '../../domain/types';
 
 const CERTAINTY_LABEL: Record<string, string> = { confirmed: 'Confirmed', estimated: 'Estimated', tbd: 'TBD' };
 const UNASSIGNED_COLOR = '#9ca3af';
@@ -23,8 +25,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const disciplines = useStore((s) => s.data.disciplines);
   const pools = useStore((s) => s.data.pools);
   const people = useStore((s) => s.data.people);
+  const cinematics = useStore((s) => s.data.cinematics);
+  const loqs = useStore((s) => s.data.loqs);
   const updateProject = useStore((s) => s.updateProject);
   const deleteProject = useStore((s) => s.deleteProject);
+  const createCinematic = useStore((s) => s.createCinematic);
+  const updateCinematic = useStore((s) => s.updateCinematic);
+  const deleteCinematic = useStore((s) => s.deleteCinematic);
   const setDisciplineRequirement = useStore((s) => s.setDisciplineRequirement);
   const setDisciplineRequirementRange = useStore((s) => s.setDisciplineRequirementRange);
   const setPersonAssignment = useStore((s) => s.setPersonAssignment);
@@ -33,7 +40,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const clearPersonAssignment = useStore((s) => s.clearPersonAssignment);
   const feedRequirementsFromAssignments = useStore((s) => s.feedRequirementsFromAssignments);
   const backToProjects = useUiStore((s) => s.backToProjects);
+  const openCinematic = useUiStore((s) => s.openCinematic);
   const [editing, setEditing] = useState(false);
+  const [newCinematic, setNewCinematic] = useState(false);
+  const [editingCinematic, setEditingCinematic] = useState<Cinematic | null>(null);
 
   const checks = project ? getSanityChecks(engine).filter((c) => c.projectId === project.id) : [];
 
@@ -151,6 +161,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     .filter((d) => !disciplineIdsWithSignal.has(d.id))
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  const projectCinematics = cinematics
+    .filter((c) => c.projectId === project.id)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+  const loqCountByCinematic = new Map<string, number>();
+  for (const loq of loqs) loqCountByCinematic.set(loq.cinematicId, (loqCountByCinematic.get(loq.cinematicId) ?? 0) + 1);
+
   return (
     <div className="project-detail-view">
       <button type="button" className="back-link" onClick={backToProjects}><Icon name="arrow-left" size={14} /> Back to projects</button>
@@ -199,6 +215,46 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         )}
       </div>
 
+      <div className="card cinematics-card">
+        <div className="panel-header">
+          <h2>Cinematics</h2>
+          <span className="panel-sub">LOQ-level milestones under this project</span>
+          <div className="panel-header-toggles">
+            <Button variant="primary" size="sm" icon="plus" onClick={() => setNewCinematic(true)}>New cinematic</Button>
+          </div>
+        </div>
+
+        {projectCinematics.length === 0 ? (
+          <p className="empty-inline">No cinematics yet. Add one to start scheduling LOQs.</p>
+        ) : (
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Target date</th>
+                  <th>LOQs</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {projectCinematics.map((cinematic) => (
+                  <tr key={cinematic.id} className="clickable-row" onClick={() => openCinematic(cinematic.id)}>
+                    <td className="cell-name">{cinematic.name}</td>
+                    <td>{cinematic.targetDate ?? <span className="tbd-text">TBD</span>}</td>
+                    <td>{loqCountByCinematic.get(cinematic.id) ?? 0}</td>
+                    <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
+                      <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditingCinematic(cinematic)}>Edit</Button>
+                      <ConfirmButton label="Delete" onConfirm={() => deleteCinematic(cinematic.id)} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       <div className="card requirements-card">
         <div className="panel-header">
           <h2>Staffing</h2>
@@ -244,6 +300,27 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           onSave={(value: ProjectFormValue) => {
             updateProject({ ...project, ...value });
             setEditing(false);
+          }}
+        />
+      )}
+
+      {newCinematic && (
+        <CinematicFormDrawer
+          onClose={() => setNewCinematic(false)}
+          onSave={(value: CinematicFormValue) => {
+            createCinematic({ projectId: project.id, ...value });
+            setNewCinematic(false);
+          }}
+        />
+      )}
+
+      {editingCinematic && (
+        <CinematicFormDrawer
+          cinematic={editingCinematic}
+          onClose={() => setEditingCinematic(null)}
+          onSave={(value: CinematicFormValue) => {
+            updateCinematic({ ...editingCinematic, ...value });
+            setEditingCinematic(null);
           }}
         />
       )}

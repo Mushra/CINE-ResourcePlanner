@@ -10,6 +10,7 @@ import { ProjectDetail } from './ui/views/ProjectDetail';
 import { Team } from './ui/views/Team';
 import { People } from './ui/views/People';
 import { PersonDetail } from './ui/views/PersonDetail';
+import { CinematicDetail } from './ui/views/CinematicDetail';
 
 function App() {
   const status = useStore((s) => s.status);
@@ -19,6 +20,7 @@ function App() {
   const view = useUiStore((s) => s.view);
   const selectedProjectId = useUiStore((s) => s.selectedProjectId);
   const selectedPersonId = useUiStore((s) => s.selectedPersonId);
+  const selectedCinematicId = useUiStore((s) => s.selectedCinematicId);
 
   useEffect(() => {
     void init();
@@ -51,6 +53,7 @@ function App() {
         {view === 'team' && <Team />}
         {view === 'people' && <People />}
         {view === 'person-detail' && selectedPersonId && <PersonDetail personId={selectedPersonId} />}
+        {view === 'cinematic-detail' && selectedCinematicId && <CinematicDetail cinematicId={selectedCinematicId} />}
       </AppShell>
       <Toaster />
     </>
