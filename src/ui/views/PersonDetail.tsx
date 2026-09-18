@@ -4,7 +4,8 @@ import { useUiStore } from '../../store/useUiStore';
 import { formatPeriodLabel, todayPeriod } from '../../domain/periods';
 import { buildTimelineWindow } from '../timeline/timelineMath';
 import { isGenericPoolName } from '../../domain/identity';
-import { deriveProjectStatus } from '../../domain/projectStatus';
+import { deriveProjectStatus, STATUS_LABEL } from '../../domain/projectStatus';
+import type { ProjectStatus } from '../../domain/types';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
 import { ConfirmButton } from '../components/ConfirmButton';
@@ -57,7 +58,7 @@ export function PersonDetail({ personId }: { personId: string }) {
 
   const projectById = new Map(projects.map((p) => [p.id, p] as const));
   const window = buildTimelineWindow(engine.personAllocatedPeriods(person.id));
-  const rows = new Map<string, { name: string; status: string; fte: number[] }>();
+  const rows = new Map<string, { name: string; status: ProjectStatus; fte: number[] }>();
   window.forEach((p, idx) => {
     for (const line of engine.getPersonProjectStaffing(person.id, p)) {
       if (!rows.has(line.projectId)) {
@@ -141,7 +142,7 @@ export function PersonDetail({ personId }: { personId: string }) {
                   months={window}
                   lane={{
                     key: projectId,
-                    label: row.name,
+                    label: `${row.name} — ${STATUS_LABEL[row.status]}`,
                     color: STATUS_DOT_COLOR[row.status] ?? 'var(--text-tertiary)',
                     values: row.fte,
                     onCommitRange: (periods, fte) => setPersonAssignmentRange(person.id, projectId, periods, fte),

@@ -167,6 +167,19 @@ export function RequirementTimeline({ months, groups, projectId }: {
 
 type DragMode = 'create' | 'move' | 'resize-start' | 'resize-end';
 
+/** The [min, max] index the drag may not cross — the nearest other block's edge on each side, so a
+ * create/move/resize can never overlap an existing block: it stops at the wall instead of
+ * overwriting it. */
+function dragWalls(others: Block[], fromIdx: number, toIdx: number, monthCount: number): { min: number; max: number } {
+  let min = 0;
+  let max = monthCount - 1;
+  for (const b of others) {
+    if (b.endIdx < fromIdx) min = Math.max(min, b.endIdx + 1);
+    if (b.startIdx > toIdx) max = Math.min(max, b.startIdx - 1);
+  }
+  return { min, max };
+}
+
 /** Draggable FTE lane: create/move/resize blocks over month columns, click a block to edit its FTE.
  * Exported so PersonDetail can reuse the exact same editable primitive for a person's own timeline. */
 export function RequirementLaneRow({ lane, months, assignedValues, collapseToggle }: {
@@ -181,7 +194,7 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
   const rowRef = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<{ block: Block; replaceIdx: number } | null>(null);
   const [editingBlock, setEditingBlock] = useState<Block | null>(null);
-  const dragRef = useRef<{ mode: DragMode; anchorIdx: number; replaceIdx: number; orig: Block } | null>(null);
+  const dragRef = useRef<{ mode: DragMode; anchorIdx: number; replaceIdx: number; orig: Block; wallMin: number; wallMax: number } | null>(null);
   const movedRef = useRef(false);
   const startDateInputRef = useRef<HTMLInputElement>(null);
   const endDateInputRef = useRef<HTMLInputElement>(null);
@@ -201,7 +214,8 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
     e.preventDefault();
     movedRef.current = false;
     const orig: Block = { startIdx: anchorIdx, endIdx: anchorIdx, fte: 1 };
-    dragRef.current = { mode: 'create', anchorIdx, replaceIdx: -1, orig };
+    const { min, max } = dragWalls(baseBlocks, anchorIdx, anchorIdx, months.length);
+    dragRef.current = { mode: 'create', anchorIdx, replaceIdx: -1, orig, wallMin: min, wallMax: max };
     setPreview({ block: orig, replaceIdx: -1 });
     (e.target as Element).setPointerCapture(e.pointerId);
   }
@@ -215,7 +229,9 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
     // block tracks the cursor from wherever it was grabbed instead of snapping to align its edge
     // with the pointer on the very first move.
     const anchorIdx = mode === 'move' ? idxFromClientX(e.clientX) : block.startIdx;
-    dragRef.current = { mode, anchorIdx, replaceIdx, orig: block };
+    const others = baseBlocks.filter((_, i) => i !== replaceIdx);
+    const { min, max } = dragWalls(others, block.startIdx, block.endIdx, months.length);
+    dragRef.current = { mode, anchorIdx, replaceIdx, orig: block, wallMin: min, wallMax: max };
     setPreview({ block, replaceIdx });
     (e.target as Element).setPointerCapture(e.pointerId);
   }
@@ -227,18 +243,19 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
     movedRef.current = true;
     let next: Block;
     if (drag.mode === 'create') {
-      next = { startIdx: Math.min(drag.anchorIdx, idx), endIdx: Math.max(drag.anchorIdx, idx), fte: drag.orig.fte };
+      const clamped = Math.max(drag.wallMin, Math.min(drag.wallMax, idx));
+      next = { startIdx: Math.min(drag.anchorIdx, clamped), endIdx: Math.max(drag.anchorIdx, clamped), fte: drag.orig.fte };
     } else if (drag.mode === 'move') {
       const deltaIdx = idx - drag.anchorIdx;
       const span = drag.orig.endIdx - drag.orig.startIdx;
       let start = drag.orig.startIdx + deltaIdx;
-      start = Math.max(0, Math.min(months.length - 1 - span, start));
+      start = Math.max(drag.wallMin, Math.min(drag.wallMax - span, start));
       next = { startIdx: start, endIdx: start + span, fte: drag.orig.fte };
     } else if (drag.mode === 'resize-start') {
-      const start = Math.max(0, Math.min(drag.orig.endIdx, idx));
+      const start = Math.max(drag.wallMin, Math.min(drag.orig.endIdx, idx));
       next = { startIdx: start, endIdx: drag.orig.endIdx, fte: drag.orig.fte };
     } else {
-      const end = Math.min(months.length - 1, Math.max(drag.orig.startIdx, idx));
+      const end = Math.min(drag.wallMax, Math.max(drag.orig.startIdx, idx));
       next = { startIdx: drag.orig.startIdx, endIdx: end, fte: drag.orig.fte };
     }
     setPreview({ block: next, replaceIdx: drag.replaceIdx });
@@ -361,10 +378,7 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
       {editingBlock && (
         <div className="req-block-editor" style={{ left: 168 + editingBlock.startIdx * MONTH_W }}>
           <span className="req-block-editor-label">FTE for</span>
-          <span className="req-block-editor-date-wrap">
-            <span className="req-block-editor-date" aria-hidden="true">
-              {formatPeriodLabel(months[editingBlock.startIdx], { withYear: true })}
-            </span>
+          <span className="req-block-editor-date-wrap" title={formatPeriodLabel(months[editingBlock.startIdx], { withYear: true })}>
             <input
               ref={startDateInputRef}
               type="date"
@@ -382,10 +396,7 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
           {editingBlock.endIdx !== editingBlock.startIdx && (
             <>
               <span className="req-block-editor-sep">–</span>
-              <span className="req-block-editor-date-wrap">
-                <span className="req-block-editor-date" aria-hidden="true">
-                  {formatPeriodLabel(months[editingBlock.endIdx], { withYear: true })}
-                </span>
+              <span className="req-block-editor-date-wrap" title={formatPeriodLabel(months[editingBlock.endIdx], { withYear: true })}>
                 <input
                   ref={endDateInputRef}
                   type="date"
@@ -416,6 +427,17 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
               setEditingBlock(null);
             }}
           />
+          <button
+            type="button"
+            className="req-block-editor-delete"
+            title="Delete"
+            onClick={() => {
+              lane.onCommitRange(months.slice(editingBlock.startIdx, editingBlock.endIdx + 1), 0);
+              setEditingBlock(null);
+            }}
+          >
+            <Icon name="trash" size={11} />
+          </button>
           <button type="button" className="req-block-editor-close" onClick={() => setEditingBlock(null)}>
             <Icon name="close" size={11} />
           </button>

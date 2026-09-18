@@ -128,6 +128,10 @@ function buildMenu(win, updater) {
       submenu: [{ role: 'quit' }],
     },
     {
+      label: 'View',
+      submenu: [{ role: 'toggleDevTools' }],
+    },
+    {
       label: 'Help',
       submenu: [
         {

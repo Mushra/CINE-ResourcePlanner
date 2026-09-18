@@ -236,9 +236,8 @@
 .req-block-editor input[type="number"] { width: 56px; }
 .req-block-editor-label,
 .req-block-editor-sep { color: var(--text-tertiary); }
-.req-block-editor-date-wrap { position: relative; display: inline-flex; }
-.req-block-editor-date {
-  display: inline-flex;
+.req-block-editor-date-wrap { display: inline-flex; }
+.req-block-editor-date-input {
   border: 1px solid var(--border);
   background: var(--surface-1);
   border-radius: 4px;
@@ -246,23 +245,11 @@
   font: inherit;
   font-weight: 600;
   color: var(--text-primary);
-}
-.req-block-editor-date-wrap:hover .req-block-editor-date { background: var(--surface-2); border-color: var(--border-strong); }
-/* The real <input type="date"> sits transparent on top of the label above — clicking it is a
-   direct click on the native control (so the browser's own picker-opening behavior just works),
-   while its native rendering stays invisible so the formatted label shows through underneath. */
-.req-block-editor-date-input {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  opacity: 0;
   cursor: pointer;
 }
-.req-block-editor-close { border: none; background: none; cursor: pointer; color: var(--text-tertiary); display: inline-flex; }
+.req-block-editor-date-input:hover { background: var(--surface-2); border-color: var(--border-strong); }
+.req-block-editor-close, .req-block-editor-delete { border: none; background: none; cursor: pointer; color: var(--text-tertiary); display: inline-flex; }
+.req-block-editor-delete:hover { color: var(--status-critical); }
 .pool-add-select { font-size: 12.5px; }
 .empty-inline { color: var(--text-tertiary); font-size: 12.5px; margin: 4px 0; }
 
