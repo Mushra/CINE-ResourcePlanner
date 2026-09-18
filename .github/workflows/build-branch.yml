@@ -1,0 +1,30 @@
+name: Build branch artifact
+
+on:
+  push:
+    branches:
+      - feature/cinematic-production-planner
+  workflow_dispatch:
+
+# Produces a downloadable Windows installer for this branch's in-progress work, without touching
+# package.json's version, creating a tag, or publishing a GitHub Release — main's tag-driven
+# release.yml is the only workflow allowed to do any of that.
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.2.0'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc -b
+      - run: npm test
+      - run: npm run electron:build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cine-resource-planner-${{ github.sha }}
+          path: release/*.exe
+          retention-days: 14
