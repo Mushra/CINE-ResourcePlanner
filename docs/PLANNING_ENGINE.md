@@ -18,6 +18,12 @@ meet at exactly one integration point:
 > *reads* LOQ data and *produces* numbers in the same shape `Requirement`/`RequirementAllocation`
 > already use — it does not require changing the existing monthly engine at all.
 
+This discipline+month rollup actually has two distinct inputs, kept separate: **demand** comes from
+each LOQ's own `committed_start`/`committed_finish`/`estimate_days` and exists even with no resource
+assigned yet; **assigned** comes strictly from `loq_resources` assignment windows (`DATA_MODEL.md`
+§`loq_resources`) and is zero for any month a LOQ has no window covering it — never a spread over
+the committed window as a fallback.
+
 Do not attempt to collapse LOQ scheduling into the monthly `Period` string. LOQ dates are real ISO
 dates; the monthly rollup is a derived view for the capacity-comparison purpose only.
 

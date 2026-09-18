@@ -98,19 +98,28 @@ CREATE TABLE loq_resources (
   id           TEXT PRIMARY KEY,
   loq_id       TEXT NOT NULL REFERENCES loqs(id) ON DELETE CASCADE,
   person_id    TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
-  fte          REAL NOT NULL DEFAULT 1.0,   -- share of this person's time on this LOQ
-  UNIQUE (loq_id, person_id)
+  start_date   TEXT,                        -- ISO date; null = not yet scheduled
+  finish_date  TEXT,                         -- ISO date; null = not yet scheduled
+  fte          REAL NOT NULL DEFAULT 1.0    -- share of this person's time during this window
 );
 CREATE INDEX idx_loq_resources_person ON loq_resources(person_id);
 ```
 
+Each row is one assignment **window**, not one row per `(loq_id, person_id)` — there is no longer a
+uniqueness constraint on that pair, since a person may have several disjoint windows on the same
+LOQ (e.g. worked it in May, someone else covered a gap, they came back in November). `start_date`/
+`finish_date` are nullable: a row with no window is "not yet scheduled" and contributes 0 to every
+month, never a fallback spread over the LOQ's `committed_start`/`committed_finish`.
+
 Supports brief §11 ("multiple resources may contribute to the same Cinematic and/or LOQ... may work
 in parallel... sequential work where necessary" — sequencing between two people on the same LOQ is
-just two rows with non-overlapping implied time, nothing more structural is needed for V1). This
-table is the bottom-up demand source described in `PLANNING_ENGINE.md` §1: summing `loq_resources`
-by the LOQ's discipline and month (derived from `committed_start`/`finish` or forecast window) is
-the new aggregation that produces `Requirement`-shaped numbers for the top-down/bottom-up capacity
-comparison, without changing `Requirement` itself.
+just two rows with disjoint windows, nothing more structural is needed for V1). This table is the
+**assigned** side of the bottom-up rollup described in `PLANNING_ENGINE.md` §1: summing
+`loq_resources` by the LOQ's discipline and month, strictly over each row's own `start_date`/
+`finish_date` — a LOQ with no resource rows contributes zero, never the committed window or
+`estimate_days` as a fallback. The separate **demand** side of that same rollup reads the LOQ's own
+`committed_start`/`committed_finish`/`estimate_days` instead, and exists independently of whether
+any `loq_resources` row exists yet.
 
 ### `loq_dependencies`
 

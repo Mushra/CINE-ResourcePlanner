@@ -192,9 +192,26 @@ Resolved 2026-09-18 directly with the product owner:
 5. **`scenarios` table repurposing** — **confirmed: keep separate.** `scenarios` stays reserved for
    a genuine what-if-planning feature; collaboration/local-edit isolation (if ever built in Phase 7)
    gets its own mechanism, not `scenarios`. (`COLLABORATION_MODEL.md` §5)
-6. **Discipline Production Plan as computed rollup** — **deferred, not yet confirmed.** The product
-   owner didn't have enough context on first pass to sign off; revisit together with a concrete
-   example before Phase 2 relies on this assumption. (`PRODUCT_MODEL.md` §4)
+6. **Discipline Production Plan as computed rollup** — **resolved 2026-09-18.** Checked against the
+   real `.mpp` reference file (`NEW-OVR-MACRO-RELEASE-27.mpp`): MS Project's own outline goes
+   straight from Cinematic to Discipline×LOQ tasks, no intermediate "Discipline Production Plan"
+   node — so this stays a computed/filtered view over `LOQ` (never a stored table), shaped like
+   `Requirement`/`RequirementAllocation` so it can feed the existing top-down/bottom-up comparison
+   (`getProjectDisciplineStaffing`) rather than becoming a separate screen. Whether it eventually
+   replaces manually-entered `required` for LOQ-tracked disciplines, or sits alongside it as a
+   cross-check, is left open for Phase 2 design — not a blocking product question.
+
+   Also resolved, same session — the monthly aggregation rule: a LOQ's assigned effort must be
+   derived strictly from real `loq_resources` assignment windows. A LOQ with no resource assigned
+   contributes zero to every month; never a fallback spread across `committed_start`/
+   `committed_finish` or `estimateDays`. Confirmed against a real example in the reference file:
+   task `CIA_Safehouse-Anim-L2` (committed 2025-05-26 → 2026-06-26) was actually worked by two
+   different people in two disjoint windows eight months apart, with nobody on it in between. No
+   Cinematic-level status is needed to represent that gap — it's simply the absence of
+   `loq_resources` coverage for that period. This means `loq_resources` needs a date range per
+   resource row (today it's a single dateless `fte` per person) — tracked as a Phase 2 schema
+   follow-up, not part of Phase 1's already-shipped schema. (`PRODUCT_MODEL.md` §4,
+   `PLANNING_ENGINE.md` §1)
 
 ## What this plan deliberately does not include
 
