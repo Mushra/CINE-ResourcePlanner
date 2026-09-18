@@ -3,6 +3,7 @@ import { PlanningEngine, round2 } from '../engine/planning';
 import { getForecastWindowPeriods } from '../engine/forecast';
 import { getSanityChecks, type SanityCheck } from '../engine/validation';
 import { formatPeriodLabel } from '../domain/periods';
+import { deriveProjectStatus, STATUS_LABEL } from '../domain/projectStatus';
 import type { Severity } from '../domain/types';
 
 const HEADER_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F2937' } };
@@ -68,7 +69,7 @@ function buildOverviewSheet(wb: ExcelJS.Workbook, engine: PlanningEngine): void 
     const summary = engine.getProjectStaffingSummary(project.id);
     const row: Record<string, unknown> = {
       name: project.name,
-      status: project.status,
+      status: STATUS_LABEL[deriveProjectStatus(project)],
       priority: project.priority,
       start: project.startDate ?? 'TBD',
       end: project.endDate ?? 'TBD',

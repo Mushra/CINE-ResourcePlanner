@@ -11,6 +11,7 @@ import type {
   ResourcePool,
 } from '../domain/types';
 import { periodRange, periodFromISODate, comparePeriod } from '../domain/periods';
+import { deriveProjectStatus } from '../domain/projectStatus';
 
 export const UNASSIGNED_DISCIPLINE_ID = '__unassigned__';
 
@@ -386,7 +387,7 @@ export class PlanningEngine {
         personAssignmentId: pa.id,
         projectId: pa.projectId,
         projectName: project?.name ?? pa.projectId,
-        projectStatus: project?.status ?? 'planned',
+        projectStatus: project ? deriveProjectStatus(project) : 'planned',
         fte,
       });
     }
