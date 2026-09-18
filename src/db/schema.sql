@@ -147,12 +147,17 @@ CREATE TABLE IF NOT EXISTS loq_commitment_events (
   comment           TEXT NOT NULL DEFAULT ''
 );
 
+-- One row per assignment window, not per (loq, person): a person can appear more than once with
+-- disjoint windows (see v7->v8 migration in database.ts). start_date/finish_date are nullable —
+-- a window-less row is "not yet scheduled" and contributes 0 to the assigned rollup; it is never
+-- spread across the LOQ's own committed_start/finish.
 CREATE TABLE IF NOT EXISTS loq_resources (
   id           TEXT PRIMARY KEY,
   loq_id       TEXT NOT NULL REFERENCES loqs(id) ON DELETE CASCADE,
   person_id    TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
-  fte          REAL NOT NULL DEFAULT 1.0,   -- share of this person's time on this LOQ
-  UNIQUE (loq_id, person_id)
+  start_date   TEXT,                        -- ISO date; null = not yet scheduled
+  finish_date  TEXT,                         -- ISO date; null = not yet scheduled
+  fte          REAL NOT NULL DEFAULT 1.0    -- share of this person's time during this window
 );
 
 CREATE TABLE IF NOT EXISTS loq_dependencies (

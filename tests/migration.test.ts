@@ -215,16 +215,19 @@ const V7_TABLES = [
 ];
 
 describe('v6 -> v7 migration', () => {
-  it('a fresh database has all 8 new tables and schema_version 7', async () => {
+  it('a fresh database has all 8 new tables and schema_version 8', async () => {
     const db = await PlannerDatabase.createNew();
     expect(db.getSetting('schema_version')).toBe(SCHEMA_VERSION);
-    expect(SCHEMA_VERSION).toBe('7');
+    expect(SCHEMA_VERSION).toBe('8');
 
     const tables = new Set(db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table'").map((r) => r.name));
     for (const t of V7_TABLES) expect(tables.has(t)).toBe(true);
 
     const loqColumns = db.query<{ name: string }>('PRAGMA table_info(loqs)').map((c) => c.name);
     expect(loqColumns).toEqual(expect.arrayContaining(['committed_start', 'committed_finish', 'jira_key', 'dod_ref', 'discipline_id']));
+
+    const loqResourceColumns = db.query<{ name: string }>('PRAGMA table_info(loq_resources)').map((c) => c.name);
+    expect(loqResourceColumns).toEqual(expect.arrayContaining(['start_date', 'finish_date', 'fte']));
 
     const jiraColumns = db.query<{ name: string; pk: number }>('PRAGMA table_info(jira_sync_state)');
     expect(jiraColumns.find((c) => c.name === 'loq_id')?.pk).toBe(1);
@@ -237,7 +240,7 @@ describe('v6 -> v7 migration', () => {
     const { bytes, poolId, projectId } = await buildV6Bytes();
 
     const db = await PlannerDatabase.openFromBytes(bytes);
-    expect(db.getSetting('schema_version')).toBe('7');
+    expect(db.getSetting('schema_version')).toBe('8');
 
     for (const t of V7_TABLES) {
       expect(db.query(`SELECT COUNT(*) as c FROM ${t}`)[0]).toMatchObject({ c: 0 });
@@ -255,12 +258,12 @@ describe('v6 -> v7 migration', () => {
     expect(data.projects.find((p) => p.id === projectId)?.name).toBe('Cinematic Alpha');
   });
 
-  it('is idempotent when re-opening an already-migrated v7 database', async () => {
+  it('is idempotent when re-opening an already-migrated database', async () => {
     const { bytes } = await buildV6Bytes();
     const migrated = await PlannerDatabase.openFromBytes(bytes);
     const reopened = await PlannerDatabase.openFromBytes(migrated.export());
 
-    expect(reopened.getSetting('schema_version')).toBe('7');
+    expect(reopened.getSetting('schema_version')).toBe('8');
     for (const t of V7_TABLES) {
       expect(reopened.query(`SELECT COUNT(*) as c FROM ${t}`)[0]).toMatchObject({ c: 0 });
     }
@@ -303,5 +306,118 @@ describe('v6 -> v7 migration', () => {
     const reopened = await PlannerDatabase.openFromBytes(db.export());
     expect(reopened.query('SELECT * FROM cinematics')).toHaveLength(0);
     expect(reopened.query('SELECT * FROM loqs')).toHaveLength(0);
+  });
+});
+
+const V7_SCHEMA = `
+${V6_SCHEMA}
+CREATE TABLE cinematics (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, target_date TEXT, sort_order INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE loqs (
+  id TEXT PRIMARY KEY, cinematic_id TEXT NOT NULL REFERENCES cinematics(id) ON DELETE CASCADE,
+  discipline_id TEXT NOT NULL REFERENCES disciplines(id) ON DELETE RESTRICT,
+  jira_key TEXT, type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'TODO', estimate_days REAL,
+  committed_start TEXT, committed_finish TEXT, actual_finish TEXT, dod_ref TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE dependency_templates (
+  id TEXT PRIMARY KEY, predecessor_discipline_id TEXT NOT NULL REFERENCES disciplines(id) ON DELETE CASCADE,
+  predecessor_loq_type TEXT NOT NULL, successor_discipline_id TEXT NOT NULL REFERENCES disciplines(id) ON DELETE CASCADE,
+  successor_loq_type TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'finish_to_start', lag_days INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE loq_commitment_events (
+  id TEXT PRIMARY KEY, loq_id TEXT NOT NULL REFERENCES loqs(id) ON DELETE CASCADE,
+  committed_start TEXT, committed_finish TEXT, changed_by TEXT NOT NULL, changed_at TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT '', comment TEXT NOT NULL DEFAULT ''
+);
+-- Old (pre-v8) shape: dateless, one row per (loq, person).
+CREATE TABLE loq_resources (
+  id TEXT PRIMARY KEY, loq_id TEXT NOT NULL REFERENCES loqs(id) ON DELETE CASCADE,
+  person_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE, fte REAL NOT NULL DEFAULT 1.0,
+  UNIQUE (loq_id, person_id)
+);
+CREATE TABLE loq_dependencies (
+  id TEXT PRIMARY KEY, predecessor_loq_id TEXT NOT NULL REFERENCES loqs(id) ON DELETE CASCADE,
+  successor_loq_id TEXT NOT NULL REFERENCES loqs(id) ON DELETE CASCADE, type TEXT NOT NULL DEFAULT 'finish_to_start',
+  lag_days INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL DEFAULT 'override',
+  template_id TEXT REFERENCES dependency_templates(id) ON DELETE SET NULL,
+  UNIQUE (predecessor_loq_id, successor_loq_id)
+);
+CREATE TABLE variance_events (
+  id TEXT PRIMARY KEY, loq_id TEXT NOT NULL REFERENCES loqs(id) ON DELETE CASCADE, category TEXT NOT NULL,
+  comment TEXT NOT NULL DEFAULT '', declared_by TEXT NOT NULL, declared_at TEXT NOT NULL,
+  committed_date_at_declaration TEXT, forecast_date_at_declaration TEXT, delta_days INTEGER NOT NULL
+);
+CREATE TABLE jira_sync_state (
+  loq_id TEXT PRIMARY KEY REFERENCES loqs(id) ON DELETE CASCADE, jira_status TEXT, jira_assignee TEXT,
+  jira_updated_at TEXT, last_synced_at TEXT NOT NULL, raw_snapshot TEXT NOT NULL DEFAULT '{}'
+);
+`;
+
+/** Hand-builds a v7-shaped byte blob: v6 base + the 8 v7 tables in their original shape, with one
+ * loq_resources row in the OLD dateless/unique-pair shape — to prove the v7->v8 rebuild migration. */
+async function buildV7Bytes(): Promise<{ bytes: Uint8Array; loqId: string; personId: string }> {
+  const SQL = await initSqlJs();
+  const db = new SQL.Database();
+  for (const stmt of V7_SCHEMA.split(';').map((s) => s.trim()).filter(Boolean)) {
+    db.run(stmt);
+  }
+
+  const disciplineId = 'disc_v7_animation';
+  const projectId = 'proj_v7_alpha';
+  const cinematicId = 'cine_v7_1';
+  const loqId = 'loq_v7_1';
+  const personId = 'person_v7_1';
+
+  db.run("INSERT INTO settings (key, value) VALUES ('schema_version', '7')");
+  db.run("INSERT INTO scenarios (id, name, is_base) VALUES ('base', 'Current Plan', 1)");
+  db.run('INSERT INTO disciplines (id, name, color, sort_order) VALUES (?, ?, ?, ?)', [disciplineId, 'Animation', '#4f7cff', 0]);
+  db.run(
+    'INSERT INTO projects (id, name, status, start_date, start_certainty, end_date, end_certainty, priority, notes, sort_order, is_dispo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [projectId, 'Cinematic Alpha', 'active', '2026-09-01', 'confirmed', '2026-12-31', 'confirmed', 'medium', '', 0, 0],
+  );
+  db.run('INSERT INTO cinematics (id, project_id, name) VALUES (?, ?, ?)', [cinematicId, projectId, 'Seq01']);
+  db.run('INSERT INTO loqs (id, cinematic_id, discipline_id, type) VALUES (?, ?, ?, ?)', [loqId, cinematicId, disciplineId, 'L1']);
+  db.run('INSERT INTO people (id, name) VALUES (?, ?)', [personId, 'Alice']);
+  db.run('INSERT INTO loq_resources (id, loq_id, person_id, fte) VALUES (?, ?, ?, ?)', ['lres_v7_1', loqId, personId, 0.5]);
+
+  const bytes = db.export();
+  db.close();
+  return { bytes, loqId, personId };
+}
+
+describe('v7 -> v8 migration', () => {
+  it('rebuilds loq_resources with date columns and drops the (loq, person) uniqueness', async () => {
+    const { bytes, loqId, personId } = await buildV7Bytes();
+
+    const db = await PlannerDatabase.openFromBytes(bytes);
+    expect(db.getSetting('schema_version')).toBe('8');
+
+    const columns = db.query<{ name: string }>('PRAGMA table_info(loq_resources)').map((c) => c.name);
+    expect(columns).toEqual(expect.arrayContaining(['id', 'loq_id', 'person_id', 'start_date', 'finish_date', 'fte']));
+
+    const rows = db.query<{ id: string; fte: number; start_date: string | null; finish_date: string | null }>(
+      'SELECT * FROM loq_resources WHERE loq_id = ?', [loqId],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: 'lres_v7_1', fte: 0.5, start_date: null, finish_date: null });
+
+    // The UNIQUE(loq_id, person_id) constraint is gone: a second window for the same pair now inserts fine.
+    db.exec(
+      'INSERT INTO loq_resources (id, loq_id, person_id, start_date, finish_date, fte) VALUES (?, ?, ?, ?, ?, ?)',
+      ['lres_v7_2', loqId, personId, '2026-09-01', '2026-09-15', 1],
+    );
+    expect(db.query('SELECT * FROM loq_resources WHERE loq_id = ?', [loqId])).toHaveLength(2);
+  });
+
+  it('is idempotent when re-opening an already-migrated v8 database', async () => {
+    const { bytes, loqId } = await buildV7Bytes();
+    const migrated = await PlannerDatabase.openFromBytes(bytes);
+    const reopened = await PlannerDatabase.openFromBytes(migrated.export());
+
+    expect(reopened.getSetting('schema_version')).toBe('8');
+    expect(reopened.query('SELECT * FROM loq_resources WHERE loq_id = ?', [loqId])).toHaveLength(1);
   });
 });

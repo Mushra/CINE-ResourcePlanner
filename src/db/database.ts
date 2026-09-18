@@ -22,7 +22,10 @@ async function getSqlJs(): Promise<SqlJsStatic> {
 
 // v7 adds cinematics/LOQ tables; purely additive (all CREATE TABLE IF NOT EXISTS), so no
 // migrateV6toV7() step is needed — see migrate() below.
-export const SCHEMA_VERSION = '7';
+// v8 reshapes loq_resources into one row per assignment window (adds start_date/finish_date,
+// drops UNIQUE(loq_id, person_id) so a person can have several disjoint windows) — this needs an
+// actual migrate step, see migrateV7toV8() below.
+export const SCHEMA_VERSION = '8';
 
 /** Thin wrapper around a sql.js Database: schema bootstrap, typed helpers, byte export. */
 export class PlannerDatabase {
@@ -183,6 +186,7 @@ export class PlannerDatabase {
     if (Number(from) < 4) this.migrateV3toV4();
     if (Number(from) < 5) this.migrateV4toV5();
     if (Number(from) < 6) this.migrateV5toV6();
+    if (Number(from) < 8) this.migrateV7toV8();
   }
 
   /**
@@ -333,6 +337,36 @@ export class PlannerDatabase {
         this.exec('DELETE FROM requirements WHERE id = ?', [reqId]);
       }
     }
+  }
+
+  /**
+   * v8 reshapes loq_resources into one row per assignment window: adds start_date/finish_date and
+   * drops UNIQUE(loq_id, person_id) (a person may now have several disjoint windows on the same
+   * LOQ). SQLite can't drop a constraint or add columns with a bare ALTER TABLE for this shape, so
+   * this rebuilds the table — existing rows keep their id/loq_id/person_id/fte, with both new date
+   * columns NULL (an unscheduled window, matching the "not yet scheduled" v8 convention, not a
+   * guess at a window). Guarded on the column already existing so a fresh v8 DB (schemaSql already
+   * created the new shape) or an already-migrated one is a no-op.
+   */
+  private migrateV7toV8(): void {
+    const columns = this.query<{ name: string }>('PRAGMA table_info(loq_resources)');
+    if (columns.some((c) => c.name === 'start_date')) return;
+
+    this.db.exec(`
+      CREATE TABLE loq_resources_new (
+        id           TEXT PRIMARY KEY,
+        loq_id       TEXT NOT NULL REFERENCES loqs(id) ON DELETE CASCADE,
+        person_id    TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+        start_date   TEXT,
+        finish_date  TEXT,
+        fte          REAL NOT NULL DEFAULT 1.0
+      );
+      INSERT INTO loq_resources_new (id, loq_id, person_id, start_date, finish_date, fte)
+      SELECT id, loq_id, person_id, NULL, NULL, fte FROM loq_resources;
+      DROP TABLE loq_resources;
+      ALTER TABLE loq_resources_new RENAME TO loq_resources;
+      CREATE INDEX IF NOT EXISTS idx_loq_resources_person ON loq_resources(person_id);
+    `);
   }
 
   exec(sql: string, params: unknown[] = []): void {
