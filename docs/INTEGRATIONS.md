@@ -34,6 +34,14 @@ Before finalizing field mappings, someone needs to hand over **one real exported
 studio's actual MS Project usage (either `.mpp` or MS Project's XML interchange format) so the
 following can be answered directly instead of guessed:
 
+> **Update (2026-09-18, product-owner decision)**: a real sample is now available —
+> `NEW-OVR-MACRO-RELEASE-27.mpp`, provided by the product owner on their local machine. This
+> answers the "no real file exists" gap; the discovery-spike prerequisite for Phase 6 can start by
+> inspecting this file's actual field usage (`.mpp` is a binary/proprietary format — needs a parser
+> library, e.g. `mpxj`, to read; not something to hand-parse). Jira: the product owner confirmed
+> they can generate a real API token when a discovery spike for Phase 5 is scheduled — no token has
+> been generated or used yet.
+
 - Does the studio's usage populate `Duration` and `Work` as genuinely distinct fields, or are they
   always proportional (i.e. effectively just one number today)?
 - Are dependencies (`Predecessors`) actually used in the source files, or is the plan currently

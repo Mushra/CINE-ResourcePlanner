@@ -172,23 +172,30 @@ rewriting working functionality.
 
 ## Decisions requiring product-owner validation (collected from all documents)
 
-1. **Is the "shared SQL backend" (Phase 7) actually needed for the first release**, or does the
-   current one-file-per-Producer model remain acceptable while the domain model (Phases 1-4)
-   stabilizes first? (`COLLABORATION_MODEL.md` §1, §4)
-2. **Can we get one real MS Project export and read access to one real Jira project** before Phases
-   5-6 are scheduled, so the adapters are built against real structure instead of assumptions?
-   (`INTEGRATIONS.md` §2.1, §3.1)
-3. **Should Jira's status ever be allowed to overwrite `LOQ.status` directly**, or should the two
-   always stay separate values that get compared (this document's recommendation)?
-   (`INTEGRATIONS.md` §3.2)
-4. **Is the variance-category taxonomy in `PLANNING_ENGINE.md` §4.1 correct**, or does the
-   Productrice/AP team have a different working vocabulary already in use informally?
-5. **Should the dormant `scenarios` table be repurposed for local-edit isolation**, or kept reserved
-   for a genuine what-if-planning feature and kept separate from collaboration concerns?
-   (`COLLABORATION_MODEL.md` §5)
-6. **Discipline Production Plan** — confirmed here as a computed rollup, not a stored entity
-   (`PRODUCT_MODEL.md` §4) — flagging for explicit sign-off since it's a direct simplification of
-   the brief's stated hierarchy.
+Resolved 2026-09-18 directly with the product owner:
+
+1. **Shared SQL backend (Phase 7)** — **not needed now.** Current one-file-per-Producer model stays
+   acceptable while the domain model (Phases 1-4) stabilizes first. Phase 7 stays last/gated, as
+   planned. (`COLLABORATION_MODEL.md` §1, §4)
+2. **Real MS Project export / Jira access** — **partially resolved.** A real `.mpp` sample
+   (`NEW-OVR-MACRO-RELEASE-27.mpp`) is now available from the product owner (see `INTEGRATIONS.md`
+   §2.1 update) — Phase 6's discovery spike can start whenever scheduled. Jira: no access exists yet,
+   but the product owner can generate an API token on demand when Phase 5's discovery spike is
+   scheduled. (`INTEGRATIONS.md` §2.1, §3.1)
+3. **Jira status vs. `LOQ.status`** — **confirmed: keep them separate.** Jira status is never
+   allowed to overwrite `LOQ.status` directly; the two stay distinct values that get compared, per
+   this document's recommendation. (`INTEGRATIONS.md` §3.2)
+4. **Variance-category taxonomy (`PLANNING_ENGINE.md` §4.1)** — **not confirmed as-is.** The
+   product owner indicates the Productrice/AP team uses a different working vocabulary informally.
+   **Open sub-task**: the actual vocabulary still needs to be collected from that team before Phase 2
+   locks in the taxonomy — proposed categories in `PLANNING_ENGINE.md` §4.1 should be treated as a
+   draft/strawman, not final, until that happens.
+5. **`scenarios` table repurposing** — **confirmed: keep separate.** `scenarios` stays reserved for
+   a genuine what-if-planning feature; collaboration/local-edit isolation (if ever built in Phase 7)
+   gets its own mechanism, not `scenarios`. (`COLLABORATION_MODEL.md` §5)
+6. **Discipline Production Plan as computed rollup** — **deferred, not yet confirmed.** The product
+   owner didn't have enough context on first pass to sign off; revisit together with a concrete
+   example before Phase 2 relies on this assumption. (`PRODUCT_MODEL.md` §4)
 
 ## What this plan deliberately does not include
 
