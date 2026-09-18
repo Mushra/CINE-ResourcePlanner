@@ -1,6 +1,9 @@
 import type { PlannerDatabase } from './database';
 import {
+  createCinematic,
   createDiscipline,
+  createLoq,
+  createLoqResource,
   createPerson,
   createPool,
   createProject,
@@ -138,6 +141,39 @@ export function seedDemoData(db: PlannerDatabase): void {
 
   // Cinematic Delta — TBD dates; a pencilled-in Tech Design need with no assignment yet.
   setRequired(db, delta.id, techDesign.id, { '2027-03': 1, '2027-04': 1 });
+
+  // Alpha's Cinematics (the LOQ layer): Seq010 is on track and done; Seq030 runs animation LOQ
+  // demand hot enough (4 FTE over a 7-day window) to exceed Alpha's November requirement (3 FTE)
+  // and trip capacity_conflict_cinematic — the same VFX/Animation crunch the project notes call out.
+  const alphaOpening = createCinematic(db, { projectId: alpha.id, name: 'Seq010 — Opening', targetDate: '2026-09-30', notes: '' });
+  createLoq(db, {
+    cinematicId: alphaOpening.id, disciplineId: animationDisc.id, jiraKey: 'ALPHA-101', type: 'L1',
+    status: 'DONE', estimateDays: 5, committedStart: '2026-09-01', committedFinish: '2026-09-05', actualFinish: '2026-09-05', dodRef: 'Approved by director',
+  });
+  const alphaL2 = createLoq(db, {
+    cinematicId: alphaOpening.id, disciplineId: animationDisc.id, jiraKey: 'ALPHA-102', type: 'L2',
+    status: 'IN_PROGRESS', estimateDays: 8, committedStart: '2026-10-05', committedFinish: '2026-10-16', actualFinish: null, dodRef: '',
+  });
+  createLoqResource(db, { loqId: alphaL2.id, personId: ava.id, startDate: '2026-10-05', finishDate: '2026-10-16', fte: 1 });
+
+  const alphaClimax = createCinematic(db, { projectId: alpha.id, name: 'Seq030 — Climax', targetDate: null, notes: 'VFX-heavy beat, still gathering shots.' });
+  createLoq(db, {
+    cinematicId: alphaClimax.id, disciplineId: animationDisc.id, jiraKey: null, type: 'L1',
+    status: 'TODO', estimateDays: 20, committedStart: '2026-11-02', committedFinish: '2026-11-08', actualFinish: null, dodRef: '',
+  });
+  createLoq(db, {
+    cinematicId: alphaClimax.id, disciplineId: vfxDisc.id, jiraKey: null, type: 'Final',
+    status: 'TODO', estimateDays: null, committedStart: null, committedFinish: null, actualFinish: null, dodRef: 'Awaiting previz lock',
+  });
+
+  // Bravo's Cinematic: fully staffed, two people sharing one LOQ's window at different FTE shares.
+  const bravoEstablishing = createCinematic(db, { projectId: bravo.id, name: 'Seq020 — Establishing', targetDate: '2026-11-15', notes: '' });
+  const bravoL1 = createLoq(db, {
+    cinematicId: bravoEstablishing.id, disciplineId: animationDisc.id, jiraKey: 'BRAVO-055', type: 'L1',
+    status: 'IN_PROGRESS', estimateDays: 6, committedStart: '2026-10-12', committedFinish: '2026-10-19', actualFinish: null, dodRef: '',
+  });
+  createLoqResource(db, { loqId: bravoL1.id, personId: mia.id, startDate: '2026-10-12', finishDate: '2026-10-19', fte: 1 });
+  createLoqResource(db, { loqId: bravoL1.id, personId: noah.id, startDate: '2026-10-12', finishDate: '2026-10-16', fte: 0.5 });
 }
 
 export function isDatabaseEmpty(db: PlannerDatabase): boolean {

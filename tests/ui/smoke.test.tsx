@@ -10,4 +10,11 @@ describe('smoke', () => {
 
     expect(await screen.findByText('Active projects')).toBeInTheDocument();
   });
+
+  it('surfaces a capacity_conflict_cinematic check from the seeded LOQ demand', async () => {
+    await seedDemoStore();
+    renderView(<Dashboard />);
+
+    expect(await screen.findByText(/Cinematic Alpha's LOQ demand for Animation exceeds its requirement in Nov 2026/)).toBeInTheDocument();
+  });
 });
