@@ -109,6 +109,9 @@ This taxonomy is a proposal to validate with the Productrice/APs (brief's own in
 deliberately flat and deliberately not implemented yet, but it is the shape the `variance_reasons`
 table/enum in `DATA_MODEL.md` assumes.
 
+**Validated as-is for now** (product owner, 2026-09-18) — no changes to the list above; it may still
+evolve once the AP team's working vocabulary surfaces through real usage.
+
 ### 4.2 Early completion is also a variance-shaped event, but never auto-applied
 
 Brief §8 requires detecting "Lighting L1 could start 2 days earlier" without moving it

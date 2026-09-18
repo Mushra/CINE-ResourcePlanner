@@ -185,11 +185,10 @@ Resolved 2026-09-18 directly with the product owner:
 3. **Jira status vs. `LOQ.status`** — **confirmed: keep them separate.** Jira status is never
    allowed to overwrite `LOQ.status` directly; the two stay distinct values that get compared, per
    this document's recommendation. (`INTEGRATIONS.md` §3.2)
-4. **Variance-category taxonomy (`PLANNING_ENGINE.md` §4.1)** — **not confirmed as-is.** The
-   product owner indicates the Productrice/AP team uses a different working vocabulary informally.
-   **Open sub-task**: the actual vocabulary still needs to be collected from that team before Phase 2
-   locks in the taxonomy — proposed categories in `PLANNING_ENGINE.md` §4.1 should be treated as a
-   draft/strawman, not final, until that happens.
+4. **Variance-category taxonomy (`PLANNING_ENGINE.md` §4.1)** — **validated as-is for now.**
+   Re-confirmed 2026-09-18 with the product owner: keep the proposed categories as they stand: no
+   further changes at this time. It may still evolve once the Productrice/AP team's actual working
+   vocabulary surfaces through real usage.
 5. **`scenarios` table repurposing** — **confirmed: keep separate.** `scenarios` stays reserved for
    a genuine what-if-planning feature; collaboration/local-edit isolation (if ever built in Phase 7)
    gets its own mechanism, not `scenarios`. (`COLLABORATION_MODEL.md` §5)

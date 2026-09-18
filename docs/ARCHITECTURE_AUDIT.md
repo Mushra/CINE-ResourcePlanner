@@ -227,19 +227,23 @@ Ordered by how directly they'd undermine the new work if left unaddressed:
 
 1. **`deleteProject` doesn't cascade-clean dependents** (§4) — will produce phantom FTE/LOQ rows
    once Cinematics/LOQs hang off Project; should be fixed before LOQ data starts accumulating.
+   **Resolved** (`ec5f0b1`).
 2. **`PoolCapacityOverride` is stored, editable in the UI, and even collected into
    `allKnownPeriods()`, but is never read by `getCapacity()`** (`planning.ts:191-196` ignores its
    `period` argument and never queries the override table) — a live, silent no-op feature. Anyone
    extending capacity logic should not assume this table has any effect today.
+   **Resolved** — removed entirely (`55fcbbf`).
 3. **Dual project-status representation** — `Project.status` (stored) vs. `deriveProjectStatus()`
    (computed live from dates, source of truth for validation) can silently disagree, because new
    imports always write `status: 'active'` regardless of actual dates. This exact "stored value that
    can drift from a computed one" failure mode is the strongest argument in this whole audit for
    making **LOQ forecast dates computed-only**, never a stored field a human can also edit directly
-   — see `PLANNING_ENGINE.md`.
+   — see `PLANNING_ENGINE.md`. **Resolved** — every remaining raw read now routes through
+   `deriveProjectStatus()` (`6bbfedb`).
 4. **No CI on ordinary pushes**, only on release tags — a broken `main` could sit unnoticed for a
    while. Worth tightening once new domain logic starts landing, but out of scope for the audit
-   itself.
+   itself. **Resolved** — lint/typecheck/tests now run on every push and PR (`60aa02b`).
 5. **Zero UI test coverage** — acceptable historically because the engine is the part with real
    logic, but the new Cinematic/LOQ/variance UI will need at least some interaction coverage before
-   it's safe to iterate on quickly.
+   it's safe to iterate on quickly. **Resolved** — `tests/ui/` harness plus coverage suites across
+   Projects, ProjectDetail, People, Team and Dashboard (`1190ab1`).
