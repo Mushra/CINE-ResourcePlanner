@@ -10,6 +10,9 @@ import {
   getOrCreatePersonAssignment, setPersonAssignmentAllocation as repoSetPersonAssignmentAllocation, setPersonAssignmentAllocations as repoSetPersonAssignmentAllocations, deletePersonAssignment as repoDeletePersonAssignment,
   upsertStructureOverride as repoUpsertStructureOverride, deleteStructureOverride as repoDeleteStructureOverride,
   deleteStructureOverrideByKey as repoDeleteStructureOverrideByKey,
+  createCinematic as repoCreateCinematic, updateCinematic as repoUpdateCinematic, deleteCinematic as repoDeleteCinematic,
+  createLoq as repoCreateLoq, updateLoq as repoUpdateLoq, deleteLoq as repoDeleteLoq,
+  createLoqResource as repoCreateLoqResource, updateLoqResource as repoUpdateLoqResource, deleteLoqResource as repoDeleteLoqResource,
 } from '../db/repository';
 import { applyRpmImport, type ImportMode } from '../db/applyImport';
 import { seedDemoData } from '../db/seed';
@@ -20,7 +23,7 @@ import type { ImportReport, NormalizedImport } from '../import/rpmImport';
 import { parseRpmWorkbook } from '../import/rpmImport';
 import { parseStaffingWorkbook } from '../import/staffingImport';
 import { PlanningEngine, round2 } from '../engine/planning';
-import type { Discipline, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
+import type { Cinematic, Discipline, Loq, LoqResource, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
 import { emptyPlanningData } from '../domain/types';
 import { applyStructureOverrides } from '../domain/overrides';
 import { normalizeKey, genericPoolName, isGenericPoolName } from '../domain/identity';
@@ -108,6 +111,18 @@ interface StoreState {
   /** Fills newly-added months (when a project's end is dragged later) from the last recorded value at
    * each pool/person, for needs and/or assignments per the user's choice. */
   autofillProjectExtension: (projectId: string, fromPeriod: Period, toPeriod: Period, opts: { needs: boolean; assignments: boolean }) => void;
+
+  createCinematic: (input: Omit<Cinematic, 'id' | 'sortOrder'>) => Cinematic;
+  updateCinematic: (cinematic: Cinematic) => void;
+  deleteCinematic: (cinematicId: string) => void;
+
+  createLoq: (input: Omit<Loq, 'id' | 'sortOrder'>) => Loq;
+  updateLoq: (loq: Loq) => void;
+  deleteLoq: (loqId: string) => void;
+
+  createLoqResource: (input: Omit<LoqResource, 'id'>) => LoqResource;
+  updateLoqResource: (resource: LoqResource) => void;
+  deleteLoqResource: (resourceId: string) => void;
 
   setPoolDiscipline: (poolName: string, disciplineName: string) => void;
   setPersonPool: (personName: string, poolName: string) => void;
@@ -529,6 +544,61 @@ export const useStore = create<StoreState>((set, get) => {
       repoDeletePerson(db, personId);
       persist();
       get().toast('info', `${name} removed`);
+    },
+
+    createCinematic: (input) => {
+      const db = get().db!;
+      const cinematic = repoCreateCinematic(db, input);
+      persist();
+      get().toast('success', `${cinematic.name} created`);
+      return cinematic;
+    },
+    updateCinematic: (cinematic) => {
+      const db = get().db!;
+      repoUpdateCinematic(db, cinematic);
+      persist();
+    },
+    deleteCinematic: (cinematicId) => {
+      const db = get().db!;
+      const name = get().data.cinematics.find((c) => c.id === cinematicId)?.name ?? 'Cinematic';
+      repoDeleteCinematic(db, cinematicId);
+      persist();
+      get().toast('info', `${name} deleted`);
+    },
+
+    createLoq: (input) => {
+      const db = get().db!;
+      const loq = repoCreateLoq(db, input);
+      persist();
+      return loq;
+    },
+    updateLoq: (loq) => {
+      const db = get().db!;
+      repoUpdateLoq(db, loq);
+      persist();
+    },
+    deleteLoq: (loqId) => {
+      const db = get().db!;
+      repoDeleteLoq(db, loqId);
+      persist();
+      get().toast('info', 'LOQ deleted');
+    },
+
+    createLoqResource: (input) => {
+      const db = get().db!;
+      const resource = repoCreateLoqResource(db, input);
+      persist();
+      return resource;
+    },
+    updateLoqResource: (resource) => {
+      const db = get().db!;
+      repoUpdateLoqResource(db, resource);
+      persist();
+    },
+    deleteLoqResource: (resourceId) => {
+      const db = get().db!;
+      repoDeleteLoqResource(db, resourceId);
+      persist();
     },
 
     setRequirement: (projectId, poolId, period, fte) => {
