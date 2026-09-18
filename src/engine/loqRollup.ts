@@ -75,7 +75,10 @@ function loqDemandIntensity(loq: Loq): number {
   return loq.estimateDays / days;
 }
 
-function loqEffectiveFinish(loq: Loq): string | null {
+/** The finish date a LOQ's window uses for rollup/display purposes: the explicit committedFinish
+ * when set, else derived from committedStart + estimateDays (working days). Exported so UI code
+ * (LoqTimeline) can render the same implicit window without duplicating this derivation. */
+export function loqEffectiveFinish(loq: Loq): string | null {
   if (!loq.committedStart || loq.estimateDays == null) return loq.committedFinish;
   return loq.committedFinish ?? addWorkingDays(loq.committedStart, loq.estimateDays);
 }

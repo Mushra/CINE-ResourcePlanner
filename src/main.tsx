@@ -5,6 +5,7 @@ import './ui/components/components.css';
 import './ui/components/drawer.css';
 import './ui/components/confirm-dialog.css';
 import './ui/components/table.css';
+import './ui/components/loq-timeline.css';
 import './ui/layout/layout.css';
 import './ui/views/views.css';
 import './ui/views/dashboard.css';

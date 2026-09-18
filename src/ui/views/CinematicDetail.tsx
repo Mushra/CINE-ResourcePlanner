@@ -6,6 +6,7 @@ import { Icon } from '../components/Icon';
 import { ConfirmButton } from '../components/ConfirmButton';
 import { CinematicFormDrawer, type CinematicFormValue } from '../components/CinematicFormDrawer';
 import { LoqFormDrawer, type LoqFormValue } from '../components/LoqFormDrawer';
+import { LoqTimeline } from '../components/LoqTimeline';
 import type { Loq } from '../../domain/types';
 
 const LOQ_STATUS_LABEL: Record<Loq['status'], string> = { TODO: 'To do', IN_PROGRESS: 'In progress', DONE: 'Done' };
@@ -109,6 +110,16 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
           </div>
         )}
       </div>
+
+      {cinematicLoqs.length > 0 && (
+        <div className="card timeline-card">
+          <div className="panel-header">
+            <h2>Schedule</h2>
+            <span className="panel-sub">Drag to move or resize committed windows and person assignments</span>
+          </div>
+          <LoqTimeline cinematicId={cinematic.id} onEditLoq={setEditingLoq} />
+        </div>
+      )}
 
       {editing && (
         <CinematicFormDrawer

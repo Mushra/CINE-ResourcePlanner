@@ -64,7 +64,8 @@ describe('CinematicDetail — LOQ list', () => {
 
     expect(screen.getByText('Unscheduled')).toBeInTheDocument();
 
-    const row = screen.getByText('L1').closest('tr')!;
+    const table = screen.getByRole('table');
+    const row = within(table).getByText('L1').closest('tr')!;
     await user.click(within(row).getByRole('button', { name: 'Edit' }));
     await user.selectOptions(screen.getByLabelText('Status'), 'IN_PROGRESS');
     const startInput = screen.getByLabelText('Committed start');
@@ -74,7 +75,7 @@ describe('CinematicDetail — LOQ list', () => {
     expect(await screen.findByText('In progress')).toBeInTheDocument();
     expect(screen.getByText(/2026-09-01/)).toBeInTheDocument();
 
-    const updatedRow = screen.getByText('L1').closest('tr')!;
+    const updatedRow = within(table).getByText('L1').closest('tr')!;
     await user.click(within(updatedRow).getByRole('button', { name: 'Delete' }));
     await user.click(within(updatedRow).getByRole('button', { name: 'Confirm?' }));
 
