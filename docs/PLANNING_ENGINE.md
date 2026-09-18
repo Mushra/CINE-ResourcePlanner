@@ -68,6 +68,14 @@ COMMITTED  →  CURRENT REALITY  →  FORECAST  →  ACTUAL
 | **Forecast** | **Computed, always.** Never a field a human edits directly. | The forecast function (§5), recomputed on read from committed + variances + dependency propagation + Jira state. | Cannot drift from its inputs by construction, because it is never itself a source of truth. |
 | **Actual** | **Stored**, but only ever written by the Jira sync adapter (or explicit "mark done" if no Jira link exists), never by a planning user editing a date field. | Jira completion date, or explicit manual completion. | Immutable once set, except by re-sync if Jira's own actual date changes (itself logged as a variance-adjacent event, not a silent overwrite). |
 
+> **V1 shortcut, shipped (`feature/cinematic-production-planner`, `loq_ui` commits 1-7):** the
+> `LoqTimeline` drag editor and `LoqFormDrawer` both write `committedStart`/`committedFinish` straight
+> through `updateLoq` — an in-place overwrite, not a "re-commit" event. There is no
+> `loq_commitment_events` table yet and no reason/justification capture. This is a known, deliberate
+> gap against the rule above, tracked so it doesn't get mistaken for the real design: the append-only
+> commitment-event history this section describes is still unbuilt, and building it means swapping
+> that direct `updateLoq` write for a real re-commit action before this can be considered done.
+
 ### Why forecast must be computed, not stored-and-edited
 
 This is the single most important rule in this document, and it is directly evidenced by a real bug
