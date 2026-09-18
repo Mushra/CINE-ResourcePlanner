@@ -2,6 +2,7 @@ import type {
   Cinematic,
   Discipline,
   Loq,
+  LoqResource,
   Person,
   PersonAssignment,
   PersonAssignmentAllocation,
@@ -148,6 +149,18 @@ export function loq(overrides: Partial<Loq> = {}): Loq {
     actualFinish: null,
     dodRef: '',
     sortOrder: 0,
+    ...overrides,
+  };
+}
+
+export function loqResource(overrides: Partial<LoqResource> = {}): LoqResource {
+  return {
+    id: nextId('lres'),
+    loqId: '',
+    personId: '',
+    startDate: null,
+    finishDate: null,
+    fte: 1,
     ...overrides,
   };
 }

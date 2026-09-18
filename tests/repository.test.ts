@@ -7,15 +7,16 @@ import {
   createLoq,
   createLoqCommitmentEvent,
   createLoqDependency,
+  createLoqResource,
   createPerson,
   createProject,
   createVarianceEvent,
   deleteLoq,
+  deleteLoqResource,
   deleteProject,
   listLoqCommitmentEvents,
   loadPlanningData,
-  removeLoqResource,
-  setLoqResource,
+  updateLoqResource,
   upsertJiraSyncState,
 } from '../src/db/repository';
 
@@ -65,7 +66,7 @@ describe('cinematics/LOQ repository CRUD', () => {
       estimateDays: null, committedStart: null, committedFinish: null, actualFinish: null, dodRef: '',
     });
 
-    setLoqResource(db, loqA.id, person.id, 0.5);
+    createLoqResource(db, { loqId: loqA.id, personId: person.id, startDate: null, finishDate: null, fte: 0.5 });
     createLoqCommitmentEvent(db, { loqId: loqA.id, committedStart: '2026-09-01', committedFinish: '2026-09-15', changedBy: 'Alice', changedAt: '2026-09-01T00:00:00Z', reason: '', comment: '' });
     createVarianceEvent(db, { loqId: loqA.id, category: 'scope', comment: '', declaredBy: 'Alice', declaredAt: '2026-09-02T00:00:00Z', committedDateAtDeclaration: null, forecastDateAtDeclaration: null, deltaDays: 2 });
     upsertJiraSyncState(db, { loqId: loqA.id, jiraStatus: 'In Progress', jiraAssignee: 'Alice', jiraUpdatedAt: null, lastSyncedAt: '2026-09-02T00:00:00Z', rawSnapshot: '{}' });
@@ -84,7 +85,7 @@ describe('cinematics/LOQ repository CRUD', () => {
     expect(data.loqDependencies).toHaveLength(0);
   });
 
-  it('append-only and upsert shapes: commitment events accumulate, jira/resource rows upsert in place', async () => {
+  it('append-only, upsert, and window shapes: commitment events accumulate, jira upserts in place, resources are per-window rows', async () => {
     const db = await PlannerDatabase.createNew();
     const { discipline, project } = await seedDisciplineAndProject(db);
     const person = createPerson(db, { name: 'Alice', poolId: null, capacityFte: 1, active: true, notes: '', team: '', site: '' });
@@ -109,13 +110,27 @@ describe('cinematics/LOQ repository CRUD', () => {
     expect(jiraStates).toHaveLength(1);
     expect(jiraStates[0]).toMatchObject({ jiraStatus: 'In Progress', jiraAssignee: 'Alice' });
 
-    setLoqResource(db, loq.id, person.id, 0.5);
-    setLoqResource(db, loq.id, person.id, 0.75);
-    const resources = loadPlanningData(db).loqResources.filter((r) => r.loqId === loq.id);
+    // Same (loq, person) pair, two disjoint windows: both rows persist, not an upsert.
+    const window1 = createLoqResource(db, { loqId: loq.id, personId: person.id, startDate: '2026-09-01', finishDate: '2026-09-10', fte: 1 });
+    const window2 = createLoqResource(db, { loqId: loq.id, personId: person.id, startDate: '2026-11-01', finishDate: '2026-11-10', fte: 0.5 });
+    let resources = loadPlanningData(db).loqResources.filter((r) => r.loqId === loq.id);
+    expect(resources).toHaveLength(2);
+    expect(resources.map((r) => ({ startDate: r.startDate, finishDate: r.finishDate, fte: r.fte }))).toEqual(
+      expect.arrayContaining([
+        { startDate: '2026-09-01', finishDate: '2026-09-10', fte: 1 },
+        { startDate: '2026-11-01', finishDate: '2026-11-10', fte: 0.5 },
+      ]),
+    );
+
+    updateLoqResource(db, { ...window2, startDate: '2026-12-01', finishDate: '2026-12-15', fte: 0.75 });
+    resources = loadPlanningData(db).loqResources.filter((r) => r.loqId === loq.id);
+    const updated = resources.find((r) => r.id === window2.id);
+    expect(updated).toMatchObject({ startDate: '2026-12-01', finishDate: '2026-12-15', fte: 0.75 });
+
+    deleteLoqResource(db, window1.id);
+    resources = loadPlanningData(db).loqResources.filter((r) => r.loqId === loq.id);
     expect(resources).toHaveLength(1);
-    expect(resources[0].fte).toBe(0.75);
-    removeLoqResource(db, loq.id, person.id);
-    expect(loadPlanningData(db).loqResources.filter((r) => r.loqId === loq.id)).toHaveLength(0);
+    expect(resources[0].id).toBe(window2.id);
 
     // Materializing the same template edge twice upserts instead of duplicating.
     createLoqDependency(db, { predecessorLoqId: loq.id, successorLoqId: loq.id, type: 'finish_to_start', lagDays: 0, source: 'template', templateId: template.id });

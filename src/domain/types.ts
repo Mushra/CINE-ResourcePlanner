@@ -199,11 +199,19 @@ export interface LoqCommitmentEvent {
   comment: string;
 }
 
+/** One assignment window (not one row per person — a person may have several disjoint windows on
+ * the same LOQ). `startDate`/`finishDate` null means "not yet scheduled": the row contributes 0 to
+ * the assigned-effort rollup for every month, never a fallback spread over the LOQ's own
+ * committedStart/committedFinish. */
 export interface LoqResource {
   id: string;
   loqId: string;
   personId: string;
-  /** Share of this person's time on this LOQ. */
+  /** ISO date (yyyy-mm-dd) or null when not yet scheduled. */
+  startDate: string | null;
+  /** ISO date (yyyy-mm-dd) or null when not yet scheduled. */
+  finishDate: string | null;
+  /** Share of this person's time during this window. */
   fte: number;
 }
 

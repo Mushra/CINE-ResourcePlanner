@@ -141,8 +141,12 @@ export function loadPlanningData(db: PlannerDatabase): PlanningData {
     }));
 
   const loqResources = db
-    .query<{ id: string; loq_id: string; person_id: string; fte: number }>('SELECT * FROM loq_resources')
-    .map((r): LoqResource => ({ id: r.id, loqId: r.loq_id, personId: r.person_id, fte: r.fte }));
+    .query<{ id: string; loq_id: string; person_id: string; start_date: string | null; finish_date: string | null; fte: number }>(
+      'SELECT * FROM loq_resources',
+    )
+    .map((r): LoqResource => ({
+      id: r.id, loqId: r.loq_id, personId: r.person_id, startDate: r.start_date, finishDate: r.finish_date, fte: r.fte,
+    }));
 
   const loqDependencies = db
     .query<{ id: string; predecessor_loq_id: string; successor_loq_id: string; type: string; lag_days: number; source: string; template_id: string | null }>(
@@ -549,20 +553,29 @@ export function listLoqCommitmentEvents(db: PlannerDatabase, loqId: string): Loq
 }
 
 // ---------------------------------------------------------------------------
-// LOQ resources — upsert on the (loq_id, person_id) pair rather than create/update/delete, since a
-// person's share of a LOQ is a single value that either exists or doesn't.
+// LOQ resources — one row per assignment window, not one per (loq_id, person_id): a person may
+// appear more than once with disjoint windows, so this is id-based create/update/delete rather
+// than an upsert keyed on the pair.
 // ---------------------------------------------------------------------------
 
-export function setLoqResource(db: PlannerDatabase, loqId: string, personId: string, fte: number): void {
+export function createLoqResource(db: PlannerDatabase, input: Omit<LoqResource, 'id'>): LoqResource {
+  const id = newId('lres');
   db.exec(
-    `INSERT INTO loq_resources (id, loq_id, person_id, fte) VALUES (?, ?, ?, ?)
-     ON CONFLICT(loq_id, person_id) DO UPDATE SET fte = excluded.fte`,
-    [newId('lres'), loqId, personId, fte],
+    'INSERT INTO loq_resources (id, loq_id, person_id, start_date, finish_date, fte) VALUES (?, ?, ?, ?, ?, ?)',
+    [id, input.loqId, input.personId, input.startDate, input.finishDate, input.fte],
+  );
+  return { ...input, id };
+}
+
+export function updateLoqResource(db: PlannerDatabase, resource: LoqResource): void {
+  db.exec(
+    'UPDATE loq_resources SET loq_id=?, person_id=?, start_date=?, finish_date=?, fte=? WHERE id=?',
+    [resource.loqId, resource.personId, resource.startDate, resource.finishDate, resource.fte, resource.id],
   );
 }
 
-export function removeLoqResource(db: PlannerDatabase, loqId: string, personId: string): void {
-  db.exec('DELETE FROM loq_resources WHERE loq_id = ? AND person_id = ?', [loqId, personId]);
+export function deleteLoqResource(db: PlannerDatabase, resourceId: string): void {
+  db.exec('DELETE FROM loq_resources WHERE id = ?', [resourceId]);
 }
 
 // ---------------------------------------------------------------------------
