@@ -16,22 +16,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '26.2.0'
-      - name: Install dependencies
-        shell: bash
-        # Works around npm/cli's intermittent "Exit handler never called!" crash — reported
-        # non-deterministic with heavy optionalDependencies trees (oxlint/rolldown/electron all
-        # ship one package per platform here) and mitigated upstream across npm point releases.
-        run: |
-          npm install -g npm@latest
-          n=0
-          until [ "$n" -ge 3 ]; do
-            npm ci --no-audit --no-fund && exit 0
-            n=$((n + 1))
-            echo "npm ci failed (attempt $n/3) — retrying in 5s"
-            sleep 5
-          done
-          echo "npm ci failed after 3 attempts"
-          exit 1
+      - run: npm ci
       - run: npm test
       - name: Ensure GitHub release exists
         shell: bash
