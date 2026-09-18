@@ -13,7 +13,9 @@ async function getSqlJs(): Promise<SqlJsStatic> {
   return sqlJsModule;
 }
 
-export const SCHEMA_VERSION = '6';
+// v7 adds cinematics/LOQ tables; purely additive (all CREATE TABLE IF NOT EXISTS), so no
+// migrateV6toV7() step is needed — see migrate() below.
+export const SCHEMA_VERSION = '7';
 
 /** Thin wrapper around a sql.js Database: schema bootstrap, typed helpers, byte export. */
 export class PlannerDatabase {
@@ -122,7 +124,11 @@ export class PlannerDatabase {
    * repair anything a save from before the relevant delete-path fix left behind: a pool/person
    * pointing at a gone discipline/pool falls back to "Unassigned"/"no role" like any other
    * unset value, and a requirement/assignment/override pointing at a gone pool/person/requirement
-   * (nothing sensible to fall back to) is removed along with it.
+   * (nothing sensible to fall back to) is removed along with it. Same rules extend to the v7
+   * cinematics/LOQ tables below: a LOQ has no "Unassigned" fallback for a gone cinematic or
+   * discipline (it's fundamentally typed by both), so it's removed along with its own children;
+   * a resource/dependency-template edge that only loses a person/discipline falls back the same
+   * way an existing pool/person reference does.
    */
   private healDanglingReferences(): void {
     this.db.exec('UPDATE resource_pools SET discipline_id = NULL WHERE discipline_id IS NOT NULL AND discipline_id NOT IN (SELECT id FROM disciplines)');
@@ -142,6 +148,25 @@ export class PlannerDatabase {
     // some other reason.
     this.db.exec('DELETE FROM requirement_allocations WHERE requirement_id NOT IN (SELECT id FROM requirements)');
     this.db.exec('DELETE FROM person_assignment_allocations WHERE person_assignment_id NOT IN (SELECT id FROM person_assignments)');
+
+    // v7 cinematics/LOQ tables — same defensive sweep, run parent-first so each statement also
+    // catches anything newly orphaned by the one before it.
+    this.db.exec('DELETE FROM cinematics WHERE project_id NOT IN (SELECT id FROM projects)');
+    this.db.exec('DELETE FROM loqs WHERE cinematic_id NOT IN (SELECT id FROM cinematics)');
+    // A LOQ is fundamentally typed by its discipline (unlike a pool/person, there's no sensible
+    // "Unassigned" fallback), so a discipline-less LOQ is removed rather than nulled.
+    this.db.exec('DELETE FROM loqs WHERE discipline_id NOT IN (SELECT id FROM disciplines)');
+    this.db.exec('DELETE FROM loq_commitment_events WHERE loq_id NOT IN (SELECT id FROM loqs)');
+    this.db.exec('DELETE FROM loq_resources WHERE loq_id NOT IN (SELECT id FROM loqs)');
+    this.db.exec('DELETE FROM variance_events WHERE loq_id NOT IN (SELECT id FROM loqs)');
+    this.db.exec('DELETE FROM jira_sync_state WHERE loq_id NOT IN (SELECT id FROM loqs)');
+    this.db.exec('DELETE FROM loq_dependencies WHERE predecessor_loq_id NOT IN (SELECT id FROM loqs) OR successor_loq_id NOT IN (SELECT id FROM loqs)');
+    // A gone person just drops the resource row — the LOQ itself survives.
+    this.db.exec('DELETE FROM loq_resources WHERE person_id NOT IN (SELECT id FROM people)');
+    this.db.exec('DELETE FROM dependency_templates WHERE predecessor_discipline_id NOT IN (SELECT id FROM disciplines) OR successor_discipline_id NOT IN (SELECT id FROM disciplines)');
+    // template_id is ON DELETE SET NULL (an override without a template is still a valid,
+    // independently-editable edge), unlike the deletes above.
+    this.db.exec('UPDATE loq_dependencies SET template_id = NULL WHERE template_id IS NOT NULL AND template_id NOT IN (SELECT id FROM dependency_templates)');
   }
 
   /** Fresh DBs (from === null) never had the legacy tables — nothing to migrate. */
