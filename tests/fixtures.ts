@@ -1,5 +1,7 @@
 import type {
+  Cinematic,
   Discipline,
+  Loq,
   Person,
   PersonAssignment,
   PersonAssignmentAllocation,
@@ -109,6 +111,44 @@ export function planningData(partial: Partial<PlanningData> = {}): PlanningData 
     personAssignments: partial.personAssignments ?? [],
     personAssignmentAllocations: partial.personAssignmentAllocations ?? [],
     structureOverrides: partial.structureOverrides ?? [],
+    cinematics: partial.cinematics ?? [],
+    loqs: partial.loqs ?? [],
+    loqCommitmentEvents: partial.loqCommitmentEvents ?? [],
+    loqResources: partial.loqResources ?? [],
+    loqDependencies: partial.loqDependencies ?? [],
+    dependencyTemplates: partial.dependencyTemplates ?? [],
+    varianceEvents: partial.varianceEvents ?? [],
+    jiraSyncStates: partial.jiraSyncStates ?? [],
+  };
+}
+
+export function cinematic(overrides: Partial<Cinematic> = {}): Cinematic {
+  return {
+    id: nextId('cine'),
+    projectId: '',
+    name: 'Seq01',
+    targetDate: null,
+    sortOrder: 0,
+    notes: '',
+    ...overrides,
+  };
+}
+
+export function loq(overrides: Partial<Loq> = {}): Loq {
+  return {
+    id: nextId('loq'),
+    cinematicId: '',
+    disciplineId: '',
+    jiraKey: null,
+    type: 'L1',
+    status: 'TODO',
+    estimateDays: null,
+    committedStart: null,
+    committedFinish: null,
+    actualFinish: null,
+    dodRef: '',
+    sortOrder: 0,
+    ...overrides,
   };
 }
 

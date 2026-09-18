@@ -1,6 +1,16 @@
 import type {
+  Cinematic,
   DateCertainty,
+  DependencySource,
+  DependencyTemplate,
+  DependencyType,
   Discipline,
+  JiraSyncState,
+  Loq,
+  LoqCommitmentEvent,
+  LoqDependency,
+  LoqResource,
+  LoqStatus,
   Person,
   PersonAssignment,
   PersonAssignmentAllocation,
@@ -15,6 +25,7 @@ import type {
   Scenario,
   StructureOverride,
   StructureOverrideKind,
+  VarianceEvent,
 } from '../domain/types';
 import type { PlannerDatabase } from './database';
 
@@ -102,6 +113,77 @@ export function loadPlanningData(db: PlannerDatabase): PlanningData {
     .query<{ id: string; kind: string; source_key: string; target_key: string }>('SELECT * FROM structure_overrides')
     .map((r): StructureOverride => ({ id: r.id, kind: r.kind as StructureOverrideKind, sourceKey: r.source_key, targetKey: r.target_key }));
 
+  const cinematics = db
+    .query<{ id: string; project_id: string; name: string; target_date: string | null; sort_order: number; notes: string }>(
+      'SELECT * FROM cinematics ORDER BY sort_order, name',
+    )
+    .map((r): Cinematic => ({ id: r.id, projectId: r.project_id, name: r.name, targetDate: r.target_date, sortOrder: r.sort_order, notes: r.notes }));
+
+  const loqs = db
+    .query<{
+      id: string; cinematic_id: string; discipline_id: string; jira_key: string | null; type: string; status: string;
+      estimate_days: number | null; committed_start: string | null; committed_finish: string | null; actual_finish: string | null;
+      dod_ref: string; sort_order: number;
+    }>('SELECT * FROM loqs ORDER BY sort_order')
+    .map((r): Loq => ({
+      id: r.id, cinematicId: r.cinematic_id, disciplineId: r.discipline_id, jiraKey: r.jira_key, type: r.type,
+      status: r.status as LoqStatus, estimateDays: r.estimate_days, committedStart: r.committed_start, committedFinish: r.committed_finish,
+      actualFinish: r.actual_finish, dodRef: r.dod_ref, sortOrder: r.sort_order,
+    }));
+
+  const loqCommitmentEvents = db
+    .query<{ id: string; loq_id: string; committed_start: string | null; committed_finish: string | null; changed_by: string; changed_at: string; reason: string; comment: string }>(
+      'SELECT * FROM loq_commitment_events ORDER BY changed_at',
+    )
+    .map((r): LoqCommitmentEvent => ({
+      id: r.id, loqId: r.loq_id, committedStart: r.committed_start, committedFinish: r.committed_finish,
+      changedBy: r.changed_by, changedAt: r.changed_at, reason: r.reason, comment: r.comment,
+    }));
+
+  const loqResources = db
+    .query<{ id: string; loq_id: string; person_id: string; fte: number }>('SELECT * FROM loq_resources')
+    .map((r): LoqResource => ({ id: r.id, loqId: r.loq_id, personId: r.person_id, fte: r.fte }));
+
+  const loqDependencies = db
+    .query<{ id: string; predecessor_loq_id: string; successor_loq_id: string; type: string; lag_days: number; source: string; template_id: string | null }>(
+      'SELECT * FROM loq_dependencies',
+    )
+    .map((r): LoqDependency => ({
+      id: r.id, predecessorLoqId: r.predecessor_loq_id, successorLoqId: r.successor_loq_id,
+      type: r.type as DependencyType, lagDays: r.lag_days, source: r.source as DependencySource, templateId: r.template_id,
+    }));
+
+  const dependencyTemplates = db
+    .query<{
+      id: string; predecessor_discipline_id: string; predecessor_loq_type: string;
+      successor_discipline_id: string; successor_loq_type: string; type: string; lag_days: number;
+    }>('SELECT * FROM dependency_templates')
+    .map((r): DependencyTemplate => ({
+      id: r.id, predecessorDisciplineId: r.predecessor_discipline_id, predecessorLoqType: r.predecessor_loq_type,
+      successorDisciplineId: r.successor_discipline_id, successorLoqType: r.successor_loq_type,
+      type: r.type as DependencyType, lagDays: r.lag_days,
+    }));
+
+  const varianceEvents = db
+    .query<{
+      id: string; loq_id: string; category: string; comment: string; declared_by: string; declared_at: string;
+      committed_date_at_declaration: string | null; forecast_date_at_declaration: string | null; delta_days: number;
+    }>('SELECT * FROM variance_events ORDER BY declared_at')
+    .map((r): VarianceEvent => ({
+      id: r.id, loqId: r.loq_id, category: r.category, comment: r.comment, declaredBy: r.declared_by, declaredAt: r.declared_at,
+      committedDateAtDeclaration: r.committed_date_at_declaration, forecastDateAtDeclaration: r.forecast_date_at_declaration,
+      deltaDays: r.delta_days,
+    }));
+
+  const jiraSyncStates = db
+    .query<{ loq_id: string; jira_status: string | null; jira_assignee: string | null; jira_updated_at: string | null; last_synced_at: string; raw_snapshot: string }>(
+      'SELECT * FROM jira_sync_state',
+    )
+    .map((r): JiraSyncState => ({
+      loqId: r.loq_id, jiraStatus: r.jira_status, jiraAssignee: r.jira_assignee, jiraUpdatedAt: r.jira_updated_at,
+      lastSyncedAt: r.last_synced_at, rawSnapshot: r.raw_snapshot,
+    }));
+
   return {
     projects,
     pools,
@@ -113,6 +195,14 @@ export function loadPlanningData(db: PlannerDatabase): PlanningData {
     personAssignments,
     personAssignmentAllocations,
     structureOverrides,
+    cinematics,
+    loqs,
+    loqCommitmentEvents,
+    loqResources,
+    loqDependencies,
+    dependencyTemplates,
+    varianceEvents,
+    jiraSyncStates,
   };
 }
 
