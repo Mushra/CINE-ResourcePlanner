@@ -233,11 +233,16 @@ New `SanityCheck`-style categories, added the same way the README already docume
   downstream dependent that could, if a human chooses, be pulled earlier (§4.2).
 - `jira_inconsistency` (warning/critical depending on direction — see `INTEGRATIONS.md` §3 for the
   specific inconsistency cases) — planning state disagrees with Jira's reported state.
-- `capacity_conflict_cinematic` (critical) — bottom-up Cinematic-level LOQ demand for a
-  discipline/month exceeds the existing top-down `Requirement` for that discipline/month (the
-  integration point described in §1).
+- `capacity_conflict_cinematic` (critical) — **implemented** (`src/engine/validation.ts::checkCinematicCapacityConflict`,
+  reading `src/engine/planning.ts::PlanningEngine.getProjectLoqDemand`, which sums
+  `loqRollup.ts::getCinematicDisciplineRollup` across every Cinematic of a project). `Requirement` is
+  provisioned per-project, not per-Cinematic, so the comparison is project-summed LOQ demand vs. that
+  project's `Requirement`, per discipline/month — never demand vs. `assigned` (the integration point
+  described in §1). Runs over the union of the project's Requirement-active months and its LOQs'
+  demand months (`loqDemandPeriods`), so a demand month with zero Requirement coverage is still
+  caught. Flat critical severity, no priority tiering — matches `over_capacity`.
 
-All five follow the existing pattern exactly: pure functions reading a snapshot, returning
+The remaining four follow the existing pattern exactly: pure functions reading a snapshot, returning
 `SanityCheck[]`, sortable by severity, addable to the Dashboard's existing "Needs attention" panel
 with zero new UI mechanism required.
 
