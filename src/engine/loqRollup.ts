@@ -11,7 +11,7 @@
 // flat monthly intensity rather than a total-effort-days quantity.
 
 import type { Discipline, Loq, LoqResource, Period } from '../domain/types';
-import { comparePeriod, periodFromISODate } from '../domain/periods';
+import { comparePeriod, periodFromISODate, periodRange } from '../domain/periods';
 import { round2 } from './planning';
 
 export interface LoqDisciplineRollupLine {
@@ -78,6 +78,24 @@ function loqDemandIntensity(loq: Loq): number {
 function loqEffectiveFinish(loq: Loq): string | null {
   if (!loq.committedStart || loq.estimateDays == null) return loq.committedFinish;
   return loq.committedFinish ?? addWorkingDays(loq.committedStart, loq.estimateDays);
+}
+
+/**
+ * Every month any of these LOQs' demand window touches, sorted — lets a caller (the
+ * capacity_conflict_cinematic check) also examine months that have LOQ demand but zero Requirement,
+ * which a Requirement-driven period list alone would never surface. A LOQ with no placeable window
+ * (see loqDemandIntensity's 0-cases) contributes nothing.
+ */
+export function loqDemandPeriods(loqs: Loq[]): Period[] {
+  const periods = new Set<Period>();
+  for (const loq of loqs) {
+    if (!loq.committedStart) continue;
+    const startPeriod = periodFromISODate(loq.committedStart);
+    const finishPeriod = periodFromISODate(loqEffectiveFinish(loq));
+    if (!startPeriod || !finishPeriod) continue;
+    for (const period of periodRange(startPeriod, finishPeriod)) periods.add(period);
+  }
+  return [...periods].sort(comparePeriod);
 }
 
 /**

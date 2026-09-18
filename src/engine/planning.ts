@@ -1,4 +1,5 @@
 import type {
+  Cinematic,
   Discipline,
   Person,
   PersonAssignment,
@@ -12,6 +13,7 @@ import type {
 } from '../domain/types';
 import { periodRange, periodFromISODate, comparePeriod } from '../domain/periods';
 import { deriveProjectStatus } from '../domain/projectStatus';
+import { getCinematicDisciplineRollup, loqDemandPeriods, type LoqDisciplineRollupLine } from './loqRollup';
 
 export const UNASSIGNED_DISCIPLINE_ID = '__unassigned__';
 
@@ -84,6 +86,7 @@ export class PlanningEngine {
   private readonly requirementsByPool: Map<string, Requirement[]>;
   private readonly requirementsByProject: Map<string, Requirement[]>;
   private readonly requirementAllocationsByRequirementId: Map<string, RequirementAllocation[]>;
+  private readonly cinematicsByProject: Map<string, Cinematic[]>;
 
   constructor(data: PlanningData, scenarioId?: string) {
     this.data = data;
@@ -137,6 +140,13 @@ export class PlanningEngine {
       const list = this.requirementAllocationsByRequirementId.get(alloc.requirementId) ?? [];
       list.push(alloc);
       this.requirementAllocationsByRequirementId.set(alloc.requirementId, list);
+    }
+
+    this.cinematicsByProject = new Map();
+    for (const cinematic of data.cinematics) {
+      const list = this.cinematicsByProject.get(cinematic.projectId) ?? [];
+      list.push(cinematic);
+      this.cinematicsByProject.set(cinematic.projectId, list);
     }
   }
 
@@ -355,6 +365,39 @@ export class PlanningEngine {
     return [...byDiscipline.values()]
       .map((l) => ({ ...l, required: round2(l.required), assigned: round2(l.assigned), gap: round2(l.assigned - l.required) }))
       .sort((a, b) => a.disciplineName.localeCompare(b.disciplineName));
+  }
+
+  /**
+   * Bottom-up LOQ demand per discipline for one project at one period — summed across every
+   * Cinematic of the project (Requirement is provisioned per-project, not per-Cinematic, so this is
+   * the granularity that actually reconciles against getProjectDisciplineStaffing's `required`). See
+   * docs/PLANNING_ENGINE.md §1/§8. `assigned` is carried through for shape parity with
+   * LoqDisciplineRollupLine but has no defined project-level meaning yet — only `demand` is consumed
+   * by the capacity_conflict_cinematic check.
+   */
+  getProjectLoqDemand(projectId: string, period: Period): LoqDisciplineRollupLine[] {
+    const byDiscipline = new Map<string, LoqDisciplineRollupLine>();
+    for (const cinematic of this.cinematicsByProject.get(projectId) ?? []) {
+      for (const line of getCinematicDisciplineRollup(cinematic.id, this.data.loqs, this.data.loqResources, this.data.disciplines, period)) {
+        const existing = byDiscipline.get(line.disciplineId);
+        if (existing) {
+          existing.demand += line.demand;
+          existing.assigned += line.assigned;
+        } else {
+          byDiscipline.set(line.disciplineId, { ...line });
+        }
+      }
+    }
+    return [...byDiscipline.values()]
+      .map((l) => ({ ...l, demand: round2(l.demand), assigned: round2(l.assigned) }))
+      .sort((a, b) => a.disciplineName.localeCompare(b.disciplineName));
+  }
+
+  /** Every month any of this project's Cinematics' LOQs has demand — see loqRollup.ts::loqDemandPeriods. */
+  projectLoqDemandPeriods(projectId: string): Period[] {
+    const cinematicIds = new Set((this.cinematicsByProject.get(projectId) ?? []).map((c) => c.id));
+    const loqs = this.data.loqs.filter((l) => cinematicIds.has(l.cinematicId));
+    return loqDemandPeriods(loqs);
   }
 
   /** Per-person assigned FTE for one project at one period — drives the ProjectDetail UI. */

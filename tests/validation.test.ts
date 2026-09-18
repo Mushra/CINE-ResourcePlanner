@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PlanningEngine } from '../src/engine/planning';
 import { getSanityChecks } from '../src/engine/validation';
-import { discipline, person, personAssignment, planningData, pool, project, requirement } from './fixtures';
+import { cinematic, discipline, loq, person, personAssignment, planningData, pool, project, requirement } from './fixtures';
 
 describe('getSanityChecks — over capacity', () => {
   it('emits a critical check when demand exceeds discipline capacity', () => {
@@ -203,5 +203,103 @@ describe('getSanityChecks — dates', () => {
     const checks = getSanityChecks(engine).filter((c) => c.category === 'tbd_dates');
     expect(checks).toHaveLength(1);
     expect(checks[0].severity).toBe('warning');
+  });
+});
+
+describe('getSanityChecks — cinematic capacity conflict', () => {
+  // 2026-09-01 (Tue) .. 2026-09-10 (Thu) = 8 working days, used throughout so estimateDays/8 is a
+  // clean intensity.
+  const WINDOW = { committedStart: '2026-09-01', committedFinish: '2026-09-10' };
+
+  it('flags LOQ demand that exceeds the project requirement for a discipline/month', () => {
+    const animation = discipline({ name: 'Animation' });
+    const animationPool = pool({ name: 'Animation', disciplineId: animation.id });
+    const p1 = project({ name: 'Alpha', startDate: '2026-09-01', endDate: '2026-09-30' });
+    const r1 = requirement(p1.id, animationPool.id, { '2026-09': 0.5 });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, estimateDays: 8, ...WINDOW });
+
+    const engine = new PlanningEngine(
+      planningData({
+        disciplines: [animation], pools: [animationPool], projects: [p1],
+        requirements: [r1.requirement], requirementAllocations: r1.allocations,
+        cinematics: [cine], loqs: [l1],
+      }),
+    );
+
+    const checks = getSanityChecks(engine).filter((c) => c.category === 'capacity_conflict_cinematic');
+    expect(checks).toHaveLength(1);
+    expect(checks[0]).toMatchObject({ severity: 'critical', disciplineId: animation.id, period: '2026-09' });
+    expect(checks[0].impact).toContain('1'); // demand 1.0 FTE
+    expect(checks[0].impact).toContain('0.5'); // requirement 0.5 FTE
+  });
+
+  it('does not flag when demand stays within the requirement', () => {
+    const animation = discipline({ name: 'Animation' });
+    const animationPool = pool({ name: 'Animation', disciplineId: animation.id });
+    const p1 = project({ startDate: '2026-09-01', endDate: '2026-09-30' });
+    const r1 = requirement(p1.id, animationPool.id, { '2026-09': 1.5 });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, estimateDays: 8, ...WINDOW });
+
+    const engine = new PlanningEngine(
+      planningData({
+        disciplines: [animation], pools: [animationPool], projects: [p1],
+        requirements: [r1.requirement], requirementAllocations: r1.allocations,
+        cinematics: [cine], loqs: [l1],
+      }),
+    );
+
+    expect(getSanityChecks(engine).filter((c) => c.category === 'capacity_conflict_cinematic')).toHaveLength(0);
+  });
+
+  it('still flags a month with LOQ demand but zero requirement coverage', () => {
+    const animation = discipline({ name: 'Animation' });
+    // TBD project dates + no requirement/assignment at all => projectActivePeriods() is empty; only
+    // the LOQ's own demand period brings this month into the check at all.
+    const p1 = project({ startDate: null, endDate: null, startCertainty: 'tbd', endCertainty: 'tbd' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, estimateDays: 8, ...WINDOW });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1] }));
+
+    const checks = getSanityChecks(engine).filter((c) => c.category === 'capacity_conflict_cinematic');
+    expect(checks).toHaveLength(1);
+    expect(checks[0].impact).toContain('requirement 0 FTE');
+  });
+
+  it('sums demand across every Cinematic of the project before comparing to the requirement', () => {
+    const animation = discipline({ name: 'Animation' });
+    const animationPool = pool({ name: 'Animation', disciplineId: animation.id });
+    const p1 = project({ startDate: '2026-09-01', endDate: '2026-09-30' });
+    const r1 = requirement(p1.id, animationPool.id, { '2026-09': 1 });
+    const cineA = cinematic({ projectId: p1.id, name: 'Seq A' });
+    const cineB = cinematic({ projectId: p1.id, name: 'Seq B' });
+    // 4.8 / 8 working days = 0.6 FTE each; neither alone exceeds the requirement, but 0.6 + 0.6 = 1.2 does.
+    const loqA = loq({ cinematicId: cineA.id, disciplineId: animation.id, estimateDays: 4.8, ...WINDOW });
+    const loqB = loq({ cinematicId: cineB.id, disciplineId: animation.id, estimateDays: 4.8, ...WINDOW });
+
+    const engine = new PlanningEngine(
+      planningData({
+        disciplines: [animation], pools: [animationPool], projects: [p1],
+        requirements: [r1.requirement], requirementAllocations: r1.allocations,
+        cinematics: [cineA, cineB], loqs: [loqA, loqB],
+      }),
+    );
+
+    const checks = getSanityChecks(engine).filter((c) => c.category === 'capacity_conflict_cinematic');
+    expect(checks).toHaveLength(1);
+    expect(checks[0].impact).toContain('1.2');
+  });
+
+  it('skips cancelled projects', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ status: 'cancelled', startDate: '2026-09-01', endDate: '2026-09-30' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, estimateDays: 8, ...WINDOW });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1] }));
+
+    expect(getSanityChecks(engine).filter((c) => c.category === 'capacity_conflict_cinematic')).toHaveLength(0);
   });
 });

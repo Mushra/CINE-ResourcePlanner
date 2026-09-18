@@ -15,7 +15,8 @@ export type CheckCategory =
   | 'assignment_without_requirement'
   | 'duration_mismatch'
   | 'unstaffed_person'
-  | 'over_allocated_person';
+  | 'over_allocated_person'
+  | 'capacity_conflict_cinematic';
 
 export interface SanityCheck {
   id: string;
@@ -49,6 +50,7 @@ export function getSanityChecks(engine: PlanningEngine): SanityCheck[] {
   checks.push(...checkTbdDates(engine));
   checks.push(...checkUnstaffedPeople(engine));
   checks.push(...checkOverAllocatedPeople(engine));
+  checks.push(...checkCinematicCapacityConflict(engine));
 
   for (const check of checks) {
     if (check.disciplineId) continue;
@@ -205,6 +207,46 @@ function checkProjectStaffing(engine: PlanningEngine): SanityCheck[] {
             });
           }
         }
+      }
+    }
+  }
+  return checks;
+}
+
+/**
+ * capacity_conflict_cinematic (PLANNING_ENGINE.md §1/§8): bottom-up LOQ demand for a discipline/month
+ * (summed across all of a project's Cinematics — Requirement is provisioned per-project, not per-
+ * Cinematic) exceeds the project's top-down Requirement for that discipline/month. Demand-vs-
+ * Requirement only, never demand-vs-assigned. Runs over the union of Requirement periods and LOQ
+ * demand periods, so a demand month with zero Requirement coverage is still caught.
+ */
+function checkCinematicCapacityConflict(engine: PlanningEngine): SanityCheck[] {
+  const checks: SanityCheck[] = [];
+  for (const project of engine.projects()) {
+    const status = deriveProjectStatus(project);
+    if (status === 'cancelled' || status === 'completed') continue;
+
+    const periods = new Set<Period>([...engine.projectActivePeriods(project.id), ...engine.projectLoqDemandPeriods(project.id)]);
+    if (periods.size === 0) continue;
+
+    for (const period of [...periods].sort(comparePeriod)) {
+      const requiredByDiscipline = new Map(engine.getProjectDisciplineStaffing(project.id, period).map((l) => [l.disciplineId, l.required]));
+      for (const line of engine.getProjectLoqDemand(project.id, period)) {
+        const required = requiredByDiscipline.get(line.disciplineId) ?? 0;
+        const overage = round2(line.demand - required);
+        if (overage <= 0.001) continue;
+        checks.push({
+          id: `capacity-conflict-cinematic:${project.id}:${line.disciplineId}:${period}`,
+          severity: 'critical',
+          category: 'capacity_conflict_cinematic',
+          projectId: project.id,
+          projectName: project.name,
+          disciplineId: line.disciplineId,
+          disciplineName: line.disciplineName,
+          period,
+          message: `${project.name}'s LOQ demand for ${line.disciplineName} exceeds its requirement in ${formatPeriodLabel(period)}`,
+          impact: `LOQ demand ${line.demand} FTE exceeds requirement ${required} FTE by ${overage} FTE`,
+        });
       }
     }
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getCinematicDisciplineRollup } from '../src/engine/loqRollup';
+import { getCinematicDisciplineRollup, loqDemandPeriods } from '../src/engine/loqRollup';
 import { discipline, loq, loqResource } from './fixtures';
 
 const CINE = 'cine-1';
@@ -141,6 +141,32 @@ describe('getCinematicDisciplineRollup — discipline grouping', () => {
 
     const lines = getCinematicDisciplineRollup(CINE, [mine, other], [], [anim], '2026-09');
     expect(lines).toHaveLength(1);
+  });
+});
+
+describe('loqDemandPeriods', () => {
+  it('returns every month a committed window touches, spanning multiple LOQs', () => {
+    const l1 = loq({ committedStart: '2026-09-01', committedFinish: '2026-09-10', estimateDays: 4 });
+    const l2 = loq({ committedStart: '2026-11-05', committedFinish: '2026-11-20', estimateDays: 3 });
+    expect(loqDemandPeriods([l1, l2])).toEqual(['2026-09', '2026-11']);
+  });
+
+  it('derives the implicit finish (working days) when committedFinish is null', () => {
+    // 2026-09-01 (Tue) + 5 working days => 2026-09-07 (Mon), still within September.
+    const l1 = loq({ committedStart: '2026-09-01', committedFinish: null, estimateDays: 5 });
+    expect(loqDemandPeriods([l1])).toEqual(['2026-09']);
+  });
+
+  it('skips a LOQ that cannot be placed (no committedStart, or no estimateDays with no committedFinish)', () => {
+    const noStart = loq({ committedStart: null, committedFinish: null, estimateDays: 5 });
+    const noFinishNoEstimate = loq({ committedStart: '2026-09-01', committedFinish: null, estimateDays: null });
+    expect(loqDemandPeriods([noStart, noFinishNoEstimate])).toEqual([]);
+  });
+
+  it('dedupes and sorts across overlapping/out-of-order LOQs', () => {
+    const l1 = loq({ committedStart: '2026-10-01', committedFinish: '2026-10-31', estimateDays: 20 });
+    const l2 = loq({ committedStart: '2026-09-15', committedFinish: '2026-10-15', estimateDays: 20 });
+    expect(loqDemandPeriods([l1, l2])).toEqual(['2026-09', '2026-10']);
   });
 });
 
