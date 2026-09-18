@@ -233,12 +233,16 @@ export function updateProject(db: PlannerDatabase, project: Project): void {
  * phantom FTE that keeps inflating other totals forever (the same bug class fixed for
  * pools/disciplines/people; projects were missed). There's no "orphan to a bucket" choice here
  * (unlike deletePool/deleteDiscipline) since there's no equivalent of "Unassigned" for a project's
- * own requirements/assignments — deleting a project always takes its staffing data with it. */
+ * own requirements/assignments — deleting a project always takes its staffing data with it.
+ * Also cascades the project's cinematics (and everything under each of their LOQs) via
+ * deleteCinematic, so that single cascade lives in one place. */
 export function deleteProject(db: PlannerDatabase, projectId: string): void {
   db.exec('DELETE FROM requirement_allocations WHERE requirement_id IN (SELECT id FROM requirements WHERE project_id = ?)', [projectId]);
   db.exec('DELETE FROM requirements WHERE project_id = ?', [projectId]);
   db.exec('DELETE FROM person_assignment_allocations WHERE person_assignment_id IN (SELECT id FROM person_assignments WHERE project_id = ?)', [projectId]);
   db.exec('DELETE FROM person_assignments WHERE project_id = ?', [projectId]);
+  const cinematicIds = db.query<{ id: string }>('SELECT id FROM cinematics WHERE project_id = ?', [projectId]).map((r) => r.id);
+  for (const cinematicId of cinematicIds) deleteCinematic(db, cinematicId);
   db.exec('DELETE FROM projects WHERE id = ?', [projectId]);
 }
 
@@ -451,4 +455,213 @@ export function setPersonAssignmentAllocations(db: PlannerDatabase, personAssign
      ON CONFLICT(person_assignment_id, period) DO UPDATE SET fte = excluded.fte`,
     periods.map((period) => [personAssignmentId, period, fte]),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Cinematics — sort_order is scoped per-project (unlike the global MAX used by
+// createPool/createProject), since a cinematic is ordered within its project, not plan-wide.
+// ---------------------------------------------------------------------------
+
+export function createCinematic(db: PlannerDatabase, input: Omit<Cinematic, 'id' | 'sortOrder'>): Cinematic {
+  const id = newId('cine');
+  const maxOrder = db.query<{ m: number | null }>('SELECT MAX(sort_order) as m FROM cinematics WHERE project_id = ?', [input.projectId])[0]?.m ?? -1;
+  db.exec('INSERT INTO cinematics (id, project_id, name, target_date, sort_order, notes) VALUES (?, ?, ?, ?, ?, ?)', [
+    id, input.projectId, input.name, input.targetDate, maxOrder + 1, input.notes,
+  ]);
+  return { ...input, id, sortOrder: maxOrder + 1 };
+}
+
+export function updateCinematic(db: PlannerDatabase, cinematic: Cinematic): void {
+  db.exec('UPDATE cinematics SET project_id=?, name=?, target_date=?, sort_order=?, notes=? WHERE id=?', [
+    cinematic.projectId, cinematic.name, cinematic.targetDate, cinematic.sortOrder, cinematic.notes, cinematic.id,
+  ]);
+}
+
+/** Deletes the cinematic and every LOQ under it (each with its own resources/history) — mirrors
+ * deletePoolCascade/deleteDisciplineCascade. There's no "orphan to a bucket" choice: a LOQ has no
+ * meaning outside its cinematic. */
+export function deleteCinematic(db: PlannerDatabase, cinematicId: string): void {
+  const loqIds = db.query<{ id: string }>('SELECT id FROM loqs WHERE cinematic_id = ?', [cinematicId]).map((r) => r.id);
+  for (const loqId of loqIds) deleteLoq(db, loqId);
+  db.exec('DELETE FROM cinematics WHERE id = ?', [cinematicId]);
+}
+
+// ---------------------------------------------------------------------------
+// LOQs — sort_order is scoped per-cinematic, same reasoning as cinematics above.
+// ---------------------------------------------------------------------------
+
+export function createLoq(db: PlannerDatabase, input: Omit<Loq, 'id' | 'sortOrder'>): Loq {
+  const id = newId('loq');
+  const maxOrder = db.query<{ m: number | null }>('SELECT MAX(sort_order) as m FROM loqs WHERE cinematic_id = ?', [input.cinematicId])[0]?.m ?? -1;
+  db.exec(
+    `INSERT INTO loqs (id, cinematic_id, discipline_id, jira_key, type, status, estimate_days, committed_start, committed_finish, actual_finish, dod_ref, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, input.cinematicId, input.disciplineId, input.jiraKey, input.type, input.status, input.estimateDays, input.committedStart, input.committedFinish, input.actualFinish, input.dodRef, maxOrder + 1],
+  );
+  return { ...input, id, sortOrder: maxOrder + 1 };
+}
+
+/** Persists every column as given, including the committed_start/finish cache. Recomputing that
+ * cache from the newest loq_commitment_events row (rather than trusting the caller) is Phase 2
+ * (engine) work — this is a plain field-for-field update. */
+export function updateLoq(db: PlannerDatabase, loq: Loq): void {
+  db.exec(
+    `UPDATE loqs SET cinematic_id=?, discipline_id=?, jira_key=?, type=?, status=?, estimate_days=?, committed_start=?, committed_finish=?, actual_finish=?, dod_ref=?, sort_order=?
+     WHERE id=?`,
+    [loq.cinematicId, loq.disciplineId, loq.jiraKey, loq.type, loq.status, loq.estimateDays, loq.committedStart, loq.committedFinish, loq.actualFinish, loq.dodRef, loq.sortOrder, loq.id],
+  );
+}
+
+/** Deletes the LOQ and every row that hangs off it — the single-LOQ analog of deletePerson. */
+export function deleteLoq(db: PlannerDatabase, loqId: string): void {
+  db.exec('DELETE FROM loq_resources WHERE loq_id = ?', [loqId]);
+  db.exec('DELETE FROM loq_commitment_events WHERE loq_id = ?', [loqId]);
+  db.exec('DELETE FROM variance_events WHERE loq_id = ?', [loqId]);
+  db.exec('DELETE FROM jira_sync_state WHERE loq_id = ?', [loqId]);
+  db.exec('DELETE FROM loq_dependencies WHERE predecessor_loq_id = ? OR successor_loq_id = ?', [loqId, loqId]);
+  db.exec('DELETE FROM loqs WHERE id = ?', [loqId]);
+}
+
+// ---------------------------------------------------------------------------
+// LOQ commitment events — append-only audit trail. No update/delete: a correction is a new row,
+// removed only as part of deleteLoq's cascade.
+// ---------------------------------------------------------------------------
+
+export function createLoqCommitmentEvent(db: PlannerDatabase, input: Omit<LoqCommitmentEvent, 'id'>): LoqCommitmentEvent {
+  const id = newId('lce');
+  db.exec(
+    'INSERT INTO loq_commitment_events (id, loq_id, committed_start, committed_finish, changed_by, changed_at, reason, comment) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, input.loqId, input.committedStart, input.committedFinish, input.changedBy, input.changedAt, input.reason, input.comment],
+  );
+  return { ...input, id };
+}
+
+export function listLoqCommitmentEvents(db: PlannerDatabase, loqId: string): LoqCommitmentEvent[] {
+  return db
+    .query<{ id: string; loq_id: string; committed_start: string | null; committed_finish: string | null; changed_by: string; changed_at: string; reason: string; comment: string }>(
+      'SELECT * FROM loq_commitment_events WHERE loq_id = ? ORDER BY changed_at',
+      [loqId],
+    )
+    .map((r): LoqCommitmentEvent => ({
+      id: r.id, loqId: r.loq_id, committedStart: r.committed_start, committedFinish: r.committed_finish,
+      changedBy: r.changed_by, changedAt: r.changed_at, reason: r.reason, comment: r.comment,
+    }));
+}
+
+// ---------------------------------------------------------------------------
+// LOQ resources — upsert on the (loq_id, person_id) pair rather than create/update/delete, since a
+// person's share of a LOQ is a single value that either exists or doesn't.
+// ---------------------------------------------------------------------------
+
+export function setLoqResource(db: PlannerDatabase, loqId: string, personId: string, fte: number): void {
+  db.exec(
+    `INSERT INTO loq_resources (id, loq_id, person_id, fte) VALUES (?, ?, ?, ?)
+     ON CONFLICT(loq_id, person_id) DO UPDATE SET fte = excluded.fte`,
+    [newId('lres'), loqId, personId, fte],
+  );
+}
+
+export function removeLoqResource(db: PlannerDatabase, loqId: string, personId: string): void {
+  db.exec('DELETE FROM loq_resources WHERE loq_id = ? AND person_id = ?', [loqId, personId]);
+}
+
+// ---------------------------------------------------------------------------
+// LOQ dependencies
+// ---------------------------------------------------------------------------
+
+/** Upsert on (predecessor, successor) so re-materializing a dependency_template edge is
+ * idempotent — creating it again just refreshes type/lag/source/template_id in place. */
+export function createLoqDependency(db: PlannerDatabase, input: Omit<LoqDependency, 'id'>): LoqDependency {
+  const id = newId('ldep');
+  db.exec(
+    `INSERT INTO loq_dependencies (id, predecessor_loq_id, successor_loq_id, type, lag_days, source, template_id) VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(predecessor_loq_id, successor_loq_id) DO UPDATE SET type = excluded.type, lag_days = excluded.lag_days, source = excluded.source, template_id = excluded.template_id`,
+    [id, input.predecessorLoqId, input.successorLoqId, input.type, input.lagDays, input.source, input.templateId],
+  );
+  return { ...input, id };
+}
+
+export function updateLoqDependency(db: PlannerDatabase, dependency: LoqDependency): void {
+  db.exec('UPDATE loq_dependencies SET predecessor_loq_id=?, successor_loq_id=?, type=?, lag_days=?, source=?, template_id=? WHERE id=?', [
+    dependency.predecessorLoqId, dependency.successorLoqId, dependency.type, dependency.lagDays, dependency.source, dependency.templateId, dependency.id,
+  ]);
+}
+
+export function deleteLoqDependency(db: PlannerDatabase, dependencyId: string): void {
+  db.exec('DELETE FROM loq_dependencies WHERE id = ?', [dependencyId]);
+}
+
+// ---------------------------------------------------------------------------
+// Dependency templates
+// ---------------------------------------------------------------------------
+
+export function createDependencyTemplate(db: PlannerDatabase, input: Omit<DependencyTemplate, 'id'>): DependencyTemplate {
+  const id = newId('dtpl');
+  db.exec(
+    `INSERT INTO dependency_templates (id, predecessor_discipline_id, predecessor_loq_type, successor_discipline_id, successor_loq_type, type, lag_days)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [id, input.predecessorDisciplineId, input.predecessorLoqType, input.successorDisciplineId, input.successorLoqType, input.type, input.lagDays],
+  );
+  return { ...input, id };
+}
+
+export function updateDependencyTemplate(db: PlannerDatabase, template: DependencyTemplate): void {
+  db.exec(
+    'UPDATE dependency_templates SET predecessor_discipline_id=?, predecessor_loq_type=?, successor_discipline_id=?, successor_loq_type=?, type=?, lag_days=? WHERE id=?',
+    [template.predecessorDisciplineId, template.predecessorLoqType, template.successorDisciplineId, template.successorLoqType, template.type, template.lagDays, template.id],
+  );
+}
+
+/** template_id is ON DELETE SET NULL — an override without a template is still a valid,
+ * independently-editable edge, so null the reference (mirrors deleteDiscipline's pattern) rather
+ * than deleting the dependency rows themselves. */
+export function deleteDependencyTemplate(db: PlannerDatabase, templateId: string): void {
+  db.exec('UPDATE loq_dependencies SET template_id = NULL WHERE template_id = ?', [templateId]);
+  db.exec('DELETE FROM dependency_templates WHERE id = ?', [templateId]);
+}
+
+// ---------------------------------------------------------------------------
+// Variance events — append-only, same shape as loq_commitment_events: no update/delete, a
+// correction is a new row, removed only as part of deleteLoq's cascade.
+// ---------------------------------------------------------------------------
+
+export function createVarianceEvent(db: PlannerDatabase, input: Omit<VarianceEvent, 'id'>): VarianceEvent {
+  const id = newId('ve');
+  db.exec(
+    `INSERT INTO variance_events (id, loq_id, category, comment, declared_by, declared_at, committed_date_at_declaration, forecast_date_at_declaration, delta_days)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, input.loqId, input.category, input.comment, input.declaredBy, input.declaredAt, input.committedDateAtDeclaration, input.forecastDateAtDeclaration, input.deltaDays],
+  );
+  return { ...input, id };
+}
+
+export function listVarianceEvents(db: PlannerDatabase, loqId: string): VarianceEvent[] {
+  return db
+    .query<{
+      id: string; loq_id: string; category: string; comment: string; declared_by: string; declared_at: string;
+      committed_date_at_declaration: string | null; forecast_date_at_declaration: string | null; delta_days: number;
+    }>('SELECT * FROM variance_events WHERE loq_id = ? ORDER BY declared_at', [loqId])
+    .map((r): VarianceEvent => ({
+      id: r.id, loqId: r.loq_id, category: r.category, comment: r.comment, declaredBy: r.declared_by, declaredAt: r.declared_at,
+      committedDateAtDeclaration: r.committed_date_at_declaration, forecastDateAtDeclaration: r.forecast_date_at_declaration,
+      deltaDays: r.delta_days,
+    }));
+}
+
+// ---------------------------------------------------------------------------
+// Jira sync state — 1:1 with a LOQ (loq_id is the primary key), so it's upsert-shaped rather than
+// create/update.
+// ---------------------------------------------------------------------------
+
+export function upsertJiraSyncState(db: PlannerDatabase, state: JiraSyncState): void {
+  db.exec(
+    `INSERT INTO jira_sync_state (loq_id, jira_status, jira_assignee, jira_updated_at, last_synced_at, raw_snapshot) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(loq_id) DO UPDATE SET jira_status = excluded.jira_status, jira_assignee = excluded.jira_assignee,
+       jira_updated_at = excluded.jira_updated_at, last_synced_at = excluded.last_synced_at, raw_snapshot = excluded.raw_snapshot`,
+    [state.loqId, state.jiraStatus, state.jiraAssignee, state.jiraUpdatedAt, state.lastSyncedAt, state.rawSnapshot],
+  );
+}
+
+export function deleteJiraSyncState(db: PlannerDatabase, loqId: string): void {
+  db.exec('DELETE FROM jira_sync_state WHERE loq_id = ?', [loqId]);
 }

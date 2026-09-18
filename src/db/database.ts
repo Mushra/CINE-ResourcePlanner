@@ -6,9 +6,16 @@ let sqlJsModule: SqlJsStatic | null = null;
 
 async function getSqlJs(): Promise<SqlJsStatic> {
   if (!sqlJsModule) {
-    sqlJsModule = await initSqlJs({
-      locateFile: (file: string) => `${import.meta.env.BASE_URL}${file}`,
-    });
+    // The custom locateFile only makes sense in a browser-like renderer (Electron's window global
+    // is defined there): it turns the wasm filename into a fetchable URL relative to BASE_URL.
+    // Under Node (tests), BASE_URL is always "/" regardless of this file's actual location, which
+    // turns into an absolute drive-root path and breaks — sql.js's own default locateFile already
+    // resolves the wasm file correctly there via a plain fs.readFileSync, so skip the override.
+    sqlJsModule = await initSqlJs(
+      typeof window === 'undefined'
+        ? undefined
+        : { locateFile: (file: string) => `${import.meta.env.BASE_URL}${file}` },
+    );
   }
   return sqlJsModule;
 }
