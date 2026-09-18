@@ -123,14 +123,14 @@ existing architecture to preserve and extend.
   missed (`src/db/database.ts:62-139`). This has already caused two real, shipped data-corruption
   bugs (duplicate generic pools from a name-matching mismatch; dangling assignment/requirement rows
   after delete) — both fixed reactively, not by turning on FK enforcement.
-- **`deleteProject` still has the same bug class**, unfixed: it issues a bare
-  `DELETE FROM projects WHERE id = ?` (`src/db/repository.ts:146-148`) with no cleanup of dependent
-  `requirements`/`requirement_allocations`/`person_assignments`/`person_assignment_allocations`, and
-  `healDanglingReferences()` doesn't check `project_id` against `projects` either — so deleting a
-  project today can leave "phantom FTE" rows exactly like the bug `5d85a77` fixed for
-  people/pools/disciplines. **Flagged here, not fixed** — per the audit-phase instruction not to make
-  broad code changes yet; this should be the first small bugfix scheduled once implementation
-  starts (see `IMPLEMENTATION_PLAN.md` Phase 1).
+- **`deleteProject` had the same bug class** — it used to issue a bare `DELETE FROM projects WHERE
+  id = ?` with no cleanup of dependent `requirements`/`requirement_allocations`/`person_assignments`/
+  `person_assignment_allocations`, and `healDanglingReferences()` didn't check `project_id` against
+  `projects` either, so deleting a project could leave "phantom FTE" rows exactly like the bug
+  `5d85a77` fixed for people/pools/disciplines. **Resolved** (`ec5f0b1`): `deleteProject` now cascades
+  both dependent tables, and `healDanglingReferences()` sweeps any pre-existing phantom rows left by
+  a save from before the fix. Phase 1's schema work extended the same cascade to cover
+  `cinematics`/`loqs` and their own children once those tables landed.
 - **No row-level IDs beyond `newId()`** (`repository.ts:23-26`, `Date.now()` base36 + random suffix)
   — collision-safe enough for a single synchronous single-user process, not designed for concurrent
   writers.
