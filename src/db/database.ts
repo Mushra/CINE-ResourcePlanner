@@ -132,6 +132,13 @@ export class PlannerDatabase {
     this.db.exec('DELETE FROM pool_capacity_overrides WHERE pool_id NOT IN (SELECT id FROM resource_pools)');
     this.db.exec('DELETE FROM person_assignment_allocations WHERE person_assignment_id IN (SELECT id FROM person_assignments WHERE person_id NOT IN (SELECT id FROM people))');
     this.db.exec('DELETE FROM person_assignments WHERE person_id NOT IN (SELECT id FROM people)');
+    // Same class of dangling reference, but against a deleted project — deleteProject() only
+    // started cleaning these up itself once this heal was added; sweep up anything a save from
+    // before that fix already left behind.
+    this.db.exec('DELETE FROM requirement_allocations WHERE requirement_id IN (SELECT id FROM requirements WHERE project_id NOT IN (SELECT id FROM projects))');
+    this.db.exec('DELETE FROM requirements WHERE project_id NOT IN (SELECT id FROM projects)');
+    this.db.exec('DELETE FROM person_assignment_allocations WHERE person_assignment_id IN (SELECT id FROM person_assignments WHERE project_id NOT IN (SELECT id FROM projects))');
+    this.db.exec('DELETE FROM person_assignments WHERE project_id NOT IN (SELECT id FROM projects)');
     // Defensive: catch any allocation left orphaned by a requirement/assignment already gone for
     // some other reason.
     this.db.exec('DELETE FROM requirement_allocations WHERE requirement_id NOT IN (SELECT id FROM requirements)');

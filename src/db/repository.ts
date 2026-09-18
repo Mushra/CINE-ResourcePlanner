@@ -143,7 +143,17 @@ export function updateProject(db: PlannerDatabase, project: Project): void {
   );
 }
 
+/** Deletes a project and everything hanging off it — requirements/assignments declare ON DELETE
+ * CASCADE but sql.js doesn't enforce it, so without this cleanup their allocations linger as
+ * phantom FTE that keeps inflating other totals forever (the same bug class fixed for
+ * pools/disciplines/people; projects were missed). There's no "orphan to a bucket" choice here
+ * (unlike deletePool/deleteDiscipline) since there's no equivalent of "Unassigned" for a project's
+ * own requirements/assignments — deleting a project always takes its staffing data with it. */
 export function deleteProject(db: PlannerDatabase, projectId: string): void {
+  db.exec('DELETE FROM requirement_allocations WHERE requirement_id IN (SELECT id FROM requirements WHERE project_id = ?)', [projectId]);
+  db.exec('DELETE FROM requirements WHERE project_id = ?', [projectId]);
+  db.exec('DELETE FROM person_assignment_allocations WHERE person_assignment_id IN (SELECT id FROM person_assignments WHERE project_id = ?)', [projectId]);
+  db.exec('DELETE FROM person_assignments WHERE project_id = ?', [projectId]);
   db.exec('DELETE FROM projects WHERE id = ?', [projectId]);
 }
 
