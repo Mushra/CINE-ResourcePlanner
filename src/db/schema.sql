@@ -41,13 +41,6 @@ CREATE TABLE IF NOT EXISTS people (
   site         TEXT NOT NULL DEFAULT ''
 );
 
-CREATE TABLE IF NOT EXISTS pool_capacity_overrides (
-  pool_id      TEXT NOT NULL REFERENCES resource_pools(id) ON DELETE CASCADE,
-  period       TEXT NOT NULL,
-  capacity_fte REAL NOT NULL,
-  PRIMARY KEY (pool_id, period)
-);
-
 CREATE TABLE IF NOT EXISTS projects (
   id              TEXT PRIMARY KEY,
   name            TEXT NOT NULL,

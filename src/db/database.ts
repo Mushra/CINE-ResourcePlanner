@@ -129,7 +129,6 @@ export class PlannerDatabase {
     this.db.exec('UPDATE people SET pool_id = NULL WHERE pool_id IS NOT NULL AND pool_id NOT IN (SELECT id FROM resource_pools)');
     this.db.exec('DELETE FROM requirement_allocations WHERE requirement_id IN (SELECT id FROM requirements WHERE pool_id NOT IN (SELECT id FROM resource_pools))');
     this.db.exec('DELETE FROM requirements WHERE pool_id NOT IN (SELECT id FROM resource_pools)');
-    this.db.exec('DELETE FROM pool_capacity_overrides WHERE pool_id NOT IN (SELECT id FROM resource_pools)');
     this.db.exec('DELETE FROM person_assignment_allocations WHERE person_assignment_id IN (SELECT id FROM person_assignments WHERE person_id NOT IN (SELECT id FROM people))');
     this.db.exec('DELETE FROM person_assignments WHERE person_id NOT IN (SELECT id FROM people)');
     // Same class of dangling reference, but against a deleted project — deleteProject() only

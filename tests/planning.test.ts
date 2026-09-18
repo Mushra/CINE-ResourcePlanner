@@ -25,18 +25,6 @@ describe('PlanningEngine — capacity (headcount-derived)', () => {
     expect(engine.getCapacity(animation.id, '2026-09')).toBe(1);
   });
 
-  it('ignores pool capacity overrides — dormant since v2', () => {
-    const animation = pool({ name: 'Animation', capacityFte: 8 });
-    const alice = person({ poolId: animation.id, capacityFte: 1 });
-    const engine = new PlanningEngine(
-      planningData({
-        pools: [animation],
-        people: [alice],
-        poolCapacityOverrides: [{ poolId: animation.id, period: '2026-11', capacityFte: 10 }],
-      }),
-    );
-    expect(engine.getCapacity(animation.id, '2026-11')).toBe(1);
-  });
 });
 
 describe('PlanningEngine — required / assigned / available', () => {

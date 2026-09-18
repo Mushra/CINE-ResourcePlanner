@@ -101,7 +101,6 @@ export function planningData(partial: Partial<PlanningData> = {}): PlanningData 
   return {
     projects: partial.projects ?? [],
     pools: partial.pools ?? [],
-    poolCapacityOverrides: partial.poolCapacityOverrides ?? [],
     disciplines: partial.disciplines ?? [],
     people: partial.people ?? [],
     scenarios: partial.scenarios ?? [BASE_SCENARIO],

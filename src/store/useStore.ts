@@ -4,7 +4,6 @@ import {
   loadPlanningData, BASE_SCENARIO_ID,
   createProject as repoCreateProject, updateProject as repoUpdateProject, deleteProject as repoDeleteProject,
   createPool as repoCreatePool, updatePool as repoUpdatePool, deletePool as repoDeletePool, deletePoolCascade as repoDeletePoolCascade,
-  setPoolCapacityOverride as repoSetPoolCapacityOverride,
   getOrCreateRequirement, setRequirementAllocation as repoSetRequirementAllocation, setRequirementAllocations as repoSetRequirementAllocations, deleteRequirement as repoDeleteRequirement,
   createDiscipline as repoCreateDiscipline, updateDiscipline as repoUpdateDiscipline, deleteDiscipline as repoDeleteDiscipline, deleteDisciplineCascade as repoDeleteDisciplineCascade,
   createPerson as repoCreatePerson, updatePerson as repoUpdatePerson, deletePerson as repoDeletePerson,
@@ -80,7 +79,6 @@ interface StoreState {
   /** cascade=true also deletes every person in the role (and their assignments); otherwise they
    * fall back to "no role", like any other pool-less person. */
   deletePool: (poolId: string, cascade?: boolean) => void;
-  setPoolCapacityOverride: (poolId: string, period: Period, capacityFte: number | null) => void;
 
   createDiscipline: (input: Omit<Discipline, 'id' | 'sortOrder'>) => Discipline;
   updateDiscipline: (discipline: Discipline) => void;
@@ -473,11 +471,6 @@ export const useStore = create<StoreState>((set, get) => {
       else repoDeletePool(db, poolId);
       persist();
       get().toast('info', `${name} pool deleted`);
-    },
-    setPoolCapacityOverride: (poolId, period, capacityFte) => {
-      const db = get().db!;
-      repoSetPoolCapacityOverride(db, poolId, period, capacityFte);
-      persist();
     },
 
     createDiscipline: (input) => {

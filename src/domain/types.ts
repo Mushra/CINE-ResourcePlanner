@@ -76,13 +76,6 @@ export interface Person {
   effectiveDisciplineId?: string | null;
 }
 
-/** Lets a pool's capacity vary over time (e.g. a hire lands in November). */
-export interface PoolCapacityOverride {
-  poolId: string;
-  period: Period;
-  capacityFte: number;
-}
-
 /** Scenario scaffolding for future "what-if" planning. V1 only ever uses the base scenario. */
 export interface Scenario {
   id: string;
@@ -142,7 +135,6 @@ export interface StructureOverride {
 export interface PlanningData {
   projects: Project[];
   pools: ResourcePool[];
-  poolCapacityOverrides: PoolCapacityOverride[];
   disciplines: Discipline[];
   people: Person[];
   scenarios: Scenario[];
@@ -157,7 +149,6 @@ export function emptyPlanningData(): PlanningData {
   return {
     projects: [],
     pools: [],
-    poolCapacityOverrides: [],
     disciplines: [],
     people: [],
     scenarios: [],

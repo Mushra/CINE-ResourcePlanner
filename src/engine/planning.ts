@@ -473,7 +473,6 @@ export class PlanningEngine {
     }
     for (const a of this.data.requirementAllocations) periods.add(a.period);
     for (const a of this.data.personAssignmentAllocations) periods.add(a.period);
-    for (const o of this.data.poolCapacityOverrides) periods.add(o.period);
     return [...periods].sort(comparePeriod);
   }
 

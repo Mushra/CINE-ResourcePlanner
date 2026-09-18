@@ -65,10 +65,6 @@ export function loadPlanningData(db: PlannerDatabase): PlanningData {
       disciplineId: r.discipline_id,
     }));
 
-  const poolCapacityOverrides = db
-    .query<{ pool_id: string; period: string; capacity_fte: number }>('SELECT * FROM pool_capacity_overrides')
-    .map((r) => ({ poolId: r.pool_id, period: r.period, capacityFte: r.capacity_fte }));
-
   const disciplines = db
     .query<{ id: string; name: string; color: string; sort_order: number }>('SELECT * FROM disciplines ORDER BY sort_order, name')
     .map((r): Discipline => ({ id: r.id, name: r.name, color: r.color, sortOrder: r.sort_order }));
@@ -109,7 +105,6 @@ export function loadPlanningData(db: PlannerDatabase): PlanningData {
   return {
     projects,
     pools,
-    poolCapacityOverrides,
     disciplines,
     people,
     scenarios,
@@ -177,13 +172,12 @@ export function updatePool(db: PlannerDatabase, pool: ResourcePool): void {
 }
 
 /** Deletes just the role itself — its people fall back to "no role" (like any other pool-less
- * person) rather than vanishing, and its now-pointless requirements/capacity overrides are
- * cleaned up explicitly since sql.js doesn't enforce the schema's declared CASCADE/SET NULL. */
+ * person) rather than vanishing, and its now-pointless requirements are cleaned up explicitly
+ * since sql.js doesn't enforce the schema's declared CASCADE/SET NULL. */
 export function deletePool(db: PlannerDatabase, poolId: string): void {
   db.exec('UPDATE people SET pool_id = NULL WHERE pool_id = ?', [poolId]);
   db.exec('DELETE FROM requirement_allocations WHERE requirement_id IN (SELECT id FROM requirements WHERE pool_id = ?)', [poolId]);
   db.exec('DELETE FROM requirements WHERE pool_id = ?', [poolId]);
-  db.exec('DELETE FROM pool_capacity_overrides WHERE pool_id = ?', [poolId]);
   db.exec('DELETE FROM resource_pools WHERE id = ?', [poolId]);
 }
 
@@ -193,18 +187,6 @@ export function deletePoolCascade(db: PlannerDatabase, poolId: string): void {
   const personIds = db.query<{ id: string }>('SELECT id FROM people WHERE pool_id = ?', [poolId]).map((r) => r.id);
   for (const personId of personIds) deletePerson(db, personId);
   deletePool(db, poolId);
-}
-
-export function setPoolCapacityOverride(db: PlannerDatabase, poolId: string, period: Period, capacityFte: number | null): void {
-  if (capacityFte === null) {
-    db.exec('DELETE FROM pool_capacity_overrides WHERE pool_id = ? AND period = ?', [poolId, period]);
-    return;
-  }
-  db.exec(
-    `INSERT INTO pool_capacity_overrides (pool_id, period, capacity_fte) VALUES (?, ?, ?)
-     ON CONFLICT(pool_id, period) DO UPDATE SET capacity_fte = excluded.capacity_fte`,
-    [poolId, period, capacityFte],
-  );
 }
 
 // ---------------------------------------------------------------------------
