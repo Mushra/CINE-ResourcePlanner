@@ -58,9 +58,11 @@ public class MppToJson {
 
             ArrayNode tasksNode = mapper.createArrayNode();
             Map<Integer, Boolean> includedTaskUids = new HashMap<>();
+            int nonSummaryTaskCount = 0;
 
             for (Task t : project.getTasks()) {
                 if (t.getName() == null || Boolean.TRUE.equals(t.getSummary())) continue;
+                nonSummaryTaskCount++;
                 String jiraKey = trimOrNull(t.getText(3));
                 boolean included = jiraKey != null && JIRA_KEY.matcher(jiraKey).matches();
                 includedTaskUids.put(t.getUniqueID(), included);
@@ -109,6 +111,7 @@ public class MppToJson {
 
                 tasksNode.add(taskNode);
             }
+            root.put("totalNonSummaryTasks", nonSummaryTaskCount);
             root.set("tasks", tasksNode);
 
             // Roster of every distinct named resource actually assigned to an included task, for
