@@ -159,4 +159,55 @@ describe('CinematicDetail — LOQ list', () => {
     expect(await screen.findByRole('heading', { name: 'Declared variances' })).toBeInTheDocument();
     expect(screen.getByText(/Technical issue.*\+5d/)).toBeInTheDocument();
   });
+
+  it('adds, edits the lag of, and deletes a dependency; rejects one that would create a cycle', async () => {
+    await seedStore();
+    const { discipline, cinematic } = seedProjectAndCinematic();
+    const { createLoq } = useStore.getState();
+    const base = {
+      cinematicId: cinematic.id,
+      disciplineId: discipline.id,
+      jiraKey: null,
+      status: 'TODO' as const,
+      estimateDays: 4,
+      committedStart: null,
+      committedFinish: null,
+      actualFinish: null,
+      dodRef: '',
+    };
+    const first = createLoq({ ...base, type: 'L1' });
+    const second = createLoq({ ...base, type: 'L2' });
+    useUiStore.getState().openCinematic(cinematic.id);
+    const { user } = renderView(<CinematicDetail cinematicId={cinematic.id} />);
+
+    expect(screen.getByText('No dependencies yet.')).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Predecessor'), first.id);
+    await user.selectOptions(screen.getByLabelText('Successor'), second.id);
+    await user.click(screen.getByRole('button', { name: 'Add dependency' }));
+
+    expect(await screen.findByText(new RegExp(`${discipline.name} · L1.*${discipline.name} · L2`))).toBeInTheDocument();
+    const dep = useStore.getState().data.loqDependencies[0];
+    expect(dep.predecessorLoqId).toBe(first.id);
+    expect(dep.successorLoqId).toBe(second.id);
+    expect(dep.lagDays).toBe(0);
+
+    const lagInput = screen.getByLabelText(`Lag for ${discipline.name} · L1 → ${discipline.name} · L2`);
+    await user.clear(lagInput);
+    await user.type(lagInput, '3');
+    await user.tab();
+    expect(useStore.getState().data.loqDependencies.find((d) => d.id === dep.id)?.lagDays).toBe(3);
+
+    await user.selectOptions(screen.getByLabelText('Predecessor'), second.id);
+    await user.selectOptions(screen.getByLabelText('Successor'), first.id);
+    await user.click(screen.getByRole('button', { name: 'Add dependency' }));
+    expect(useStore.getState().data.loqDependencies).toHaveLength(1);
+    expect(useStore.getState().toasts.some((t) => t.kind === 'error')).toBe(true);
+
+    const depRow = screen.getByText(new RegExp(`${discipline.name} · L1.*${discipline.name} · L2`)).closest('li')!;
+    await user.click(within(depRow).getByRole('button', { name: 'Delete' }));
+    await user.click(within(depRow).getByRole('button', { name: 'Confirm?' }));
+    expect(useStore.getState().data.loqDependencies).toHaveLength(0);
+    expect(screen.getByText('No dependencies yet.')).toBeInTheDocument();
+  });
 });

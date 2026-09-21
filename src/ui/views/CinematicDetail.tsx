@@ -9,6 +9,7 @@ import { LoqFormDrawer, type LoqFormValue } from '../components/LoqFormDrawer';
 import { LoqTimeline } from '../components/LoqTimeline';
 import { RecommitDialog } from '../components/RecommitDialog';
 import { VarianceDialog } from '../components/VarianceDialog';
+import { LoqDependencyEditor } from '../components/LoqDependencyEditor';
 import type { Loq } from '../../domain/types';
 
 const LOQ_STATUS_LABEL: Record<Loq['status'], string> = { TODO: 'To do', IN_PROGRESS: 'In progress', DONE: 'Done' };
@@ -128,6 +129,10 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
             onRecommit={(loq, initialStart, initialFinish) => setRecommitTarget({ loq, initialStart, initialFinish })}
           />
         </div>
+      )}
+
+      {cinematicLoqs.length > 1 && (
+        <LoqDependencyEditor loqs={cinematicLoqs} disciplines={disciplines} />
       )}
 
       {editing && (

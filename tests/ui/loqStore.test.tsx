@@ -281,3 +281,76 @@ describe('useStore — LoqResource CRUD', () => {
     expect(useStore.getState().data.loqResources.some((r) => r.id === resource.id)).toBe(false);
   });
 });
+
+describe('useStore — LoqDependency CRUD', () => {
+  function seedTwoLoqs() {
+    const { project, discipline } = seedProjectAndDiscipline();
+    const { createCinematic, createLoq } = useStore.getState();
+    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const base = {
+      cinematicId: cinematic.id,
+      disciplineId: discipline.id,
+      jiraKey: null,
+      status: 'TODO' as const,
+      estimateDays: 4,
+      committedStart: null,
+      committedFinish: null,
+      actualFinish: null,
+      dodRef: '',
+    };
+    const first = createLoq({ ...base, type: 'L1' });
+    const second = createLoq({ ...base, type: 'L2' });
+    return { first, second };
+  }
+
+  it('creates, edits the lag, and deletes a dependency', async () => {
+    await seedStore();
+    const { first, second } = seedTwoLoqs();
+    const { createLoqDependency, updateLoqDependency, deleteLoqDependency } = useStore.getState();
+
+    const dep = createLoqDependency({
+      predecessorLoqId: first.id,
+      successorLoqId: second.id,
+      type: 'finish_to_start',
+      lagDays: 0,
+      source: 'override',
+      templateId: null,
+    });
+    expect(dep).not.toBeNull();
+    expect(useStore.getState().data.loqDependencies).toHaveLength(1);
+
+    updateLoqDependency({ ...dep!, lagDays: 2 });
+    expect(useStore.getState().data.loqDependencies.find((d) => d.id === dep!.id)?.lagDays).toBe(2);
+
+    deleteLoqDependency(dep!.id);
+    expect(useStore.getState().data.loqDependencies).toHaveLength(0);
+  });
+
+  it('rejects a dependency that would create a cycle, writing nothing', async () => {
+    await seedStore();
+    const { first, second } = seedTwoLoqs();
+    const { createLoqDependency } = useStore.getState();
+
+    const dep = createLoqDependency({
+      predecessorLoqId: first.id,
+      successorLoqId: second.id,
+      type: 'finish_to_start',
+      lagDays: 0,
+      source: 'override',
+      templateId: null,
+    });
+    expect(dep).not.toBeNull();
+
+    const cyclical = createLoqDependency({
+      predecessorLoqId: second.id,
+      successorLoqId: first.id,
+      type: 'finish_to_start',
+      lagDays: 0,
+      source: 'override',
+      templateId: null,
+    });
+    expect(cyclical).toBeNull();
+    expect(useStore.getState().data.loqDependencies).toHaveLength(1);
+    expect(useStore.getState().toasts.some((t) => t.kind === 'error')).toBe(true);
+  });
+});

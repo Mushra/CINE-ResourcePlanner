@@ -15,6 +15,7 @@ import {
   createLoqResource as repoCreateLoqResource, updateLoqResource as repoUpdateLoqResource, deleteLoqResource as repoDeleteLoqResource,
   createLoqCommitmentEvent as repoCreateLoqCommitmentEvent,
   createVarianceEvent as repoCreateVarianceEvent,
+  createLoqDependency as repoCreateLoqDependency, updateLoqDependency as repoUpdateLoqDependency, deleteLoqDependency as repoDeleteLoqDependency,
 } from '../db/repository';
 import { applyRpmImport, type ImportMode } from '../db/applyImport';
 import { seedDemoData } from '../db/seed';
@@ -25,7 +26,8 @@ import type { ImportReport, NormalizedImport } from '../import/rpmImport';
 import { parseRpmWorkbook } from '../import/rpmImport';
 import { parseStaffingWorkbook } from '../import/staffingImport';
 import { PlanningEngine, round2 } from '../engine/planning';
-import type { Cinematic, Discipline, Loq, LoqResource, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
+import type { Cinematic, Discipline, Loq, LoqDependency, LoqResource, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
+import { wouldCreateCycle } from '../domain/loqGraph';
 import { emptyPlanningData } from '../domain/types';
 import { applyStructureOverrides } from '../domain/overrides';
 import { normalizeKey, genericPoolName, isGenericPoolName } from '../domain/identity';
@@ -135,6 +137,12 @@ interface StoreState {
   createLoqResource: (input: Omit<LoqResource, 'id'>) => LoqResource;
   updateLoqResource: (resource: LoqResource) => void;
   deleteLoqResource: (resourceId: string) => void;
+
+  /** Rejects (toasts an error, writes nothing) an edge that would create a cycle — a simple
+   * reachability check, not a constraint solver (PLANNING_ENGINE.md §6). Returns null on rejection. */
+  createLoqDependency: (input: Omit<LoqDependency, 'id'>) => LoqDependency | null;
+  updateLoqDependency: (dependency: LoqDependency) => void;
+  deleteLoqDependency: (dependencyId: string) => void;
 
   setPoolDiscipline: (poolName: string, disciplineName: string) => void;
   setPersonPool: (personName: string, poolName: string) => void;
@@ -647,6 +655,32 @@ export const useStore = create<StoreState>((set, get) => {
     deleteLoqResource: (resourceId) => {
       const db = get().db!;
       repoDeleteLoqResource(db, resourceId);
+      persist();
+    },
+
+    createLoqDependency: (input) => {
+      const db = get().db!;
+      if (wouldCreateCycle(get().data.loqDependencies, input.predecessorLoqId, input.successorLoqId)) {
+        get().toast('error', 'That dependency would create a cycle');
+        return null;
+      }
+      const dependency = repoCreateLoqDependency(db, input);
+      persist();
+      return dependency;
+    },
+    updateLoqDependency: (dependency) => {
+      const db = get().db!;
+      const others = get().data.loqDependencies.filter((d) => d.id !== dependency.id);
+      if (wouldCreateCycle(others, dependency.predecessorLoqId, dependency.successorLoqId)) {
+        get().toast('error', 'That dependency would create a cycle');
+        return;
+      }
+      repoUpdateLoqDependency(db, dependency);
+      persist();
+    },
+    deleteLoqDependency: (dependencyId) => {
+      const db = get().db!;
+      repoDeleteLoqDependency(db, dependencyId);
       persist();
     },
 

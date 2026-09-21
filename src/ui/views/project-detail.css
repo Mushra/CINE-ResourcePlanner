@@ -62,6 +62,28 @@
 
 .panel-header-toggles { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 
+.dependency-list { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.dependency-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+}
+.dependency-edge { flex: 1; font-size: 12.5px; color: var(--text-primary); }
+.dependency-lag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.dependency-add { align-items: flex-end; }
+.dependency-add .btn { margin-bottom: 1px; }
+
 .segmented { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
 .segmented button {
   border: none;
