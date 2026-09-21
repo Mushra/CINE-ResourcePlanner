@@ -68,13 +68,14 @@ COMMITTED  →  CURRENT REALITY  →  FORECAST  →  ACTUAL
 | **Forecast** | **Computed, always.** Never a field a human edits directly. | The forecast function (§5), recomputed on read from committed + variances + dependency propagation + Jira state. | Cannot drift from its inputs by construction, because it is never itself a source of truth. |
 | **Actual** | **Stored**, but only ever written by the Jira sync adapter (or explicit "mark done" if no Jira link exists), never by a planning user editing a date field. | Jira completion date, or explicit manual completion. | Immutable once set, except by re-sync if Jira's own actual date changes (itself logged as a variance-adjacent event, not a silent overwrite). |
 
-> **V1 shortcut, shipped (`feature/cinematic-production-planner`, `loq_ui` commits 1-7):** the
-> `LoqTimeline` drag editor and `LoqFormDrawer` both write `committedStart`/`committedFinish` straight
-> through `updateLoq` — an in-place overwrite, not a "re-commit" event. There is no
-> `loq_commitment_events` table yet and no reason/justification capture. This is a known, deliberate
-> gap against the rule above, tracked so it doesn't get mistaken for the real design: the append-only
-> commitment-event history this section describes is still unbuilt, and building it means swapping
-> that direct `updateLoq` write for a real re-commit action before this can be considered done.
+> **V1 shortcut, closed (`feature/cinematic-production-planner`, `loq_events` commits 1-6, on top of
+> `loq_ui` 1-7):** the earlier direct `updateLoq` write for committed dates has been replaced by a real
+> `recommitLoq` store action (§3) that writes an append-only `loq_commitment_events` row and updates
+> the LOQ's denormalized cache in the same call. `LoqFormDrawer` no longer exposes committed-date
+> inputs at all; a "Re-commit dates…" button opens the dedicated `RecommitDialog`, which also shows the
+> LOQ's commitment history. Still deferred: `computeForecast()` (§5) and dependency-delay propagation
+> (§6) — the cache updated by `recommitLoq` is still a stored, human-set field, not yet a value derived
+> live from committed + variances + dependencies.
 
 ### Why forecast must be computed, not stored-and-edited
 
@@ -88,6 +89,15 @@ with no code path forcing it back into agreement. Making forecast a pure functio
 source of truth for "when do we currently think this finishes."
 
 ## 3. Committed-date changes: the overlay pattern, generalized
+
+> **Shipped** (`loq_events` commits 2-3): `useStore.recommitLoq(loqId, { committedStart,
+> committedFinish, reason, comment })` writes a `loq_commitment_events` row (via
+> `createLoqCommitmentEvent`) stamped with the current producer-name preference (§ attribution, below)
+> as `changedBy`, then updates the LOQ's `committedStart`/`committedFinish` cache — the same call, so
+> the two can't diverge. `RecommitDialog` is the only UI path to a committed-date change; it lists the
+> LOQ's full commitment history (newest first) alongside the edit fields. Attribution in this slice is
+> a single global producer-name preference (`useUiStore`, localStorage-backed), not a per-user login —
+> good enough for "who/when/why," not yet a real auth identity.
 
 `src/domain/overrides.ts` already proves the exact mechanism the committed plan needs: a baseline
 that is never silently mutated, layered with named, resolvable overrides, applied once centrally
@@ -107,6 +117,16 @@ committed dates:
   modification must be traceable and justified" in one mechanism.
 
 ## 4. Variance rules
+
+> **Shipped** (`loq_events` commit 4): `useStore.declareVariance(loqId, { category, expectedFinish,
+> comment })` writes a `variance_events` row (via `createVarianceEvent`), computing
+> `committedDateAtDeclaration` (`committedFinish ?? committedStart`), `forecastDateAtDeclaration`
+> (= the producer's manually-entered `expectedFinish` — `computeForecast()` per §5 is not implemented
+> yet, so this is captured by hand rather than derived), and `deltaDays` = `isoDiffDays(committed,
+> expected)`, once, at declaration time, never recomputed. `VarianceDialog` is the entry point (a
+> "Variance" action on each LOQ row) and also lists the LOQ's declared-variance history. The §4.1
+> taxonomy ships as `VARIANCE_CATEGORIES` (`src/domain/variance.ts`); `VarianceCategory` stays `string`
+> so the list can grow without a migration.
 
 A variance is a declared, attributed explanation for why forecast differs from committed. It is
 **not** the same record as a re-commitment (§3) — a variance explains a gap without changing the
@@ -184,12 +204,26 @@ it only ever *reads* those and produces a forecast value for display.
 
 ## 6. Dependency propagation and root-cause attribution
 
+> **Shipped, DAG enforcement only** (`loq_events` commit 5): dependency CRUD
+> (`createLoqDependency`/`updateLoqDependency`/`deleteLoqDependency` in `useStore.ts`) and the cycle
+> check below are implemented and wired to a `LoqDependencyEditor` section on the Cinematic detail
+> view. **Still deferred**: propagation (this section's forecast-delta walk) and root-cause/impact
+> attribution — nothing yet reads these edges to shift a forecast, because `computeForecast()` (§5)
+> itself isn't built. The shipped scope is also narrower than this section's full design: edges are
+> **within a single Cinematic only** (cross-Cinematic edges deferred), `type` is always
+> `'finish_to_start'` (not yet exposed as a choice even though the field allows it), `source` is
+> always `'override'` (templates — §6.1 — unbuilt), and `overridden` is not on the type/schema at all
+> (deferred with propagation, since it has no other consumer yet).
+
 Brief §7 explicitly warns against reporting a propagated delay as N independent incidents. Rule:
 
 - Dependencies form a **DAG** (enforced at write time — reject any edge that would create a cycle;
   do not build a general constraint solver, a simple "would adding this edge make the target
   reachable from the source already" check on the existing adjacency list is sufficient for the
-  LOQ-count this product will ever have).
+  LOQ-count this product will ever have). **Shipped as `wouldCreateCycle()` in
+  `src/domain/loqGraph.ts`**: a reachability walk from the proposed successor forward through existing
+  edges, checking whether it reaches the proposed predecessor (or is a self-loop) — exactly the "simple
+  reachability, not a constraint solver" rule this bullet asks for.
 - Each dependency edge has: `predecessor_loq_id`, `successor_loq_id`, `type` (only `finish_to_start`
   in V1 — brief doesn't ask for more), `lag_days` (default 0), `source` (`'template'` or
   `'override'` — see §6.1), `overridden` (boolean).

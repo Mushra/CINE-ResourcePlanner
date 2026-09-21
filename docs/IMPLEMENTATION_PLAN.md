@@ -104,16 +104,26 @@ rewriting working functionality.
   vertical slice per the audit's own finding that the existing app has zero UI tests — matching
   existing conventions rather than introducing a new testing discipline mid-slice).
 - **Migration considerations**: none.
-- **Status (shipped on `feature/cinematic-production-planner`, `loq_ui` commits 1-7)**: Cinematic +
-  LOQ + LoqResource CRUD shipped for every Cinematic (not scoped to a single one), plus a day-level
-  drag timeline (`src/ui/components/LoqTimeline.tsx`) beyond this phase's original minimal-list scope
-  — one draggable bar per LOQ spanning its committed window (or the implicit
-  `loqEffectiveFinish`-derived window), expandable to per-person `LoqResource` bars, both writing
-  straight through `updateLoq`/`updateLoqResource`. This is a **deliberate V1 shortcut**: committed
-  dates are edited in place, with no `declareVariance`/`recommitLoq`/commitment-event history — that
-  full flow (`PLANNING_ENGINE.md` §3-4) remains unbuilt and is still this phase's real remaining scope.
-  The "declare a dependency" and "see a LOQ's commitment history" acceptance criteria are therefore
-  **not yet met**; only "create LOQs, assign resources, see the forecast/Dashboard react" are.
+- **Status (shipped on `feature/cinematic-production-planner`, `loq_ui` commits 1-7 + `loq_events`
+  commits 1-6)**: Cinematic + LOQ + LoqResource CRUD shipped for every Cinematic (not scoped to a
+  single one), plus a day-level drag timeline (`src/ui/components/LoqTimeline.tsx`) beyond this
+  phase's original minimal-list scope — one draggable bar per LOQ spanning its committed window (or
+  the implicit `loqEffectiveFinish`-derived window), expandable to per-person `LoqResource` bars.
+  The `loq_ui` slice's **V1 shortcut** (committed dates written straight through `updateLoq`, no
+  history) is now **closed**: `recommitLoq` (`useStore.ts`) writes an append-only
+  `loq_commitment_events` row and updates the cache in one call, `LoqFormDrawer` no longer exposes
+  committed-date inputs, and `RecommitDialog` is the only path to a committed-date change — it also
+  shows the LOQ's commitment history. `declareVariance` + `VarianceDialog` ship the §4 variance flow
+  (signed `deltaDays` computed once at declaration, category from the §4.1 taxonomy). LOQ dependency
+  CRUD ships too (`createLoqDependency`/`updateLoqDependency`/`deleteLoqDependency` +
+  `LoqDependencyEditor`), with cycle rejection via `wouldCreateCycle` (`src/domain/loqGraph.ts`) —
+  scoped to edges **within a single Cinematic**, `type` fixed to `finish_to_start`, `source` always
+  `'override'` (no templates). Attribution across all three flows is a single global producer-name
+  preference (`useUiStore`, localStorage), not per-user login.
+  This phase's acceptance criteria are now met **except** "see the forecast update accordingly" and
+  "see the Dashboard's 'Needs attention' panel surface the new check categories" — `computeForecast()`
+  (§5), dependency-delay propagation, root-cause/impact attribution, and the four unimplemented
+  `CheckCategory` values (§8) all remain unbuilt and are deferred to Phase 4.
   Contrary to this phase's original testing note, UI test coverage *was* added
   (`tests/ui/*.test.tsx`, integration-style against a real sql.js-backed store) — the "zero UI tests"
   baseline it cited no longer holds project-wide, so later phases should follow that convention too.
