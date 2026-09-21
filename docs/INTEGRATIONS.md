@@ -24,53 +24,123 @@ completely ignorant of MPP or Jira-specific vocabulary, which is exactly what th
 (§14: "the import/export model should be designed as an adapter rather than making the internal
 domain model dependent on MPP semantics").
 
-## 2. MS Project integration
+## 2. MS Project integration — shipped (Phase 6)
 
-### 2.1 What must be confirmed before designing further
+### 2.1 Discovery findings (confirmed against a real file)
 
-The brief assumes existing MS Project import/export requirements can be inspected from the
-codebase — **there are none to inspect** (`ARCHITECTURE_AUDIT.md` §5, confirmed by exhaustive grep).
-Before finalizing field mappings, someone needs to hand over **one real exported file** from the
-studio's actual MS Project usage (either `.mpp` or MS Project's XML interchange format) so the
-following can be answered directly instead of guessed:
+A half-day discovery spike against a real studio export (`NEW-OVR-MACRO-RELEASE-27.mpp`, 769
+non-summary tasks) settled every mapping question empirically — no field mapping below is a guess:
 
-> **Update (2026-09-18, product-owner decision)**: a real sample is now available —
-> `NEW-OVR-MACRO-RELEASE-27.mpp`, provided by the product owner on their local machine. This
-> answers the "no real file exists" gap; the discovery-spike prerequisite for Phase 6 can start by
-> inspecting this file's actual field usage (`.mpp` is a binary/proprietary format — needs a parser
-> library, e.g. `mpxj`, to read; not something to hand-parse). Jira: the product owner confirmed
-> they can generate a real API token when a discovery spike for Phase 5 is scheduled — no token has
-> been generated or used yet.
+- **Discipline** = task custom field **Text1** (observed codes: `ANIM, LIGHT, VFX, MOCAP, PREPROD,
+  ASSET, SCRIPT, SHOOT, MARKET`).
+- **LOQ type** = **Text2** (e.g. `L0, L1, L2, L3`).
+- **Jira key** = **Text3** (pattern `OVR-\d+`); 78% of leaf tasks carry one — untagged leaf tasks are
+  skipped (structural/organizational rows, not LOQs).
+- **Cinematic** = the leaf task's immediate parent task name (outline level 3) — untagged itself,
+  used purely as a grouping label.
+- **Dependencies are real and load-bearing**: explicit finish-to-start predecessor edges within a
+  discipline (e.g. `Anim-L0 → L1 → L2 → L3`) *and* across disciplines (`Light-L1` needs both
+  `Light-L0` and `Anim-L0`; `VFX-L0` needs `Anim-L0`). Imported verbatim, never synthesized; an edge
+  is only kept when both endpoints resolved to an imported, jira-tagged task.
+- **Effort**: `Work` (hours) is populated for Anim/Light/VFX (~8h/day) but often `0` elsewhere →
+  falls back to `Duration` in days when `Work` is zero.
+- **Resource assignments** to real named people come from `project.getResourceAssignments()` (a
+  task's own `getResource()` is unreliable — returns null in practice). Units are mostly 100% with
+  real variation; assignment dates occasionally differ from task dates and are kept as given.
+- Calendars are plain 5-day weeks with a few holiday exceptions per resource — the flat capacity
+  model (brief §10) is a reasonable v1; per-resource calendar exceptions are explicitly out of scope.
+- Resource-level custom fields (role/job-title) were empty in the validated file — new people are
+  created with a discipline-hinted generic pool (see §2.4), not a job title, since there is nothing
+  more granular to feed from either the file or the domain model.
 
-- Does the studio's usage populate `Duration` and `Work` as genuinely distinct fields, or are they
-  always proportional (i.e. effectively just one number today)?
-- Are dependencies (`Predecessors`) actually used in the source files, or is the plan currently
-  flat/date-only in practice?
-- Is there an existing naming convention in MS Project task names that already encodes
-  Cinematic/Discipline/LOQ-type (the way the RPM importer relies on exact French column headers) —
-  if so, the importer can key off that instead of requiring a manual mapping step.
-- Does the studio use MS Project's resource-calendar features (holidays, part-time resources) in a
-  way that would produce dates the flat 5-day-week capacity model (brief §10) can't reproduce? If
-  so, that's a modeling gap to flag back to the product owner, not something to silently
-  approximate.
+### 2.2 Architecture: bundled MPXJ shim, not a JS parser
 
-### 2.2 Proposed import mapping (provisional, pending §2.1)
+`.mpp` is a binary OLE2 format with no mature pure-JS parser. Decision: use the official, mature
+**MPXJ** Java library (`net.sf.mpxj:mpxj:16.7.0`, LGPL, Maven Central) rather than an unvetted native
+npm package, and bundle a minimal JRE + the jars into the Electron installer so the studio never
+needs its own Java install:
+
+```text
+.mpp file
+  │  (Electron main process, bundled JRE)
+  ▼  java -cp lib/*;shim  MppToJson  <path>   →  JSON on stdout
+JSON  ──parseMppJson()──►  NormalizedMppImport   (pure, fixture-tested)
+                              │  + interactive discipline resolution (UI)
+                              ▼
+                        applyMppImport(db, normalized, targetProjectId, disciplineMap)
+                              ▼  one Project's Cinematics / LOQs / dependencies / resources
+```
+
+- `java/MppToJson.java` reads the file via `UniversalProjectReader` and emits one JSON object per
+  jira-tagged leaf task, plus a resource roster, to stdout.
+- `resources/mpp/lib/*.jar` (vendored, committed) are mpxj + its transitive runtime deps, resolved
+  via a committed `java/pom.xml`. `scripts/prepare-mpp-runtime.mjs` compiles the shim and `jlink`s a
+  minimal JRE at build time (gitignored build output; needs a JDK on the build machine — CI always
+  has one via `actions/setup-java`).
+- `electron/main.cjs` spawns the bundled `java` binary from the renderer's file-picker request
+  (`electron/preload.cjs` exposes `window.mpp.pickAndParse()`); stdout is parsed as JSON, stderr is
+  surfaced verbatim on a non-zero exit.
+- `src/import/mppImport.ts`'s `parseMppJson()` is a pure function from that JSON to
+  `NormalizedMppImport` — no I/O, fixture-tested in `tests/mppImport.test.ts`.
+
+### 2.3 Project scoping — the non-negotiable constraint
+
+**A single `.mpp` import always targets exactly one existing Project, and writes only within that
+Project's own data.** This matters because LOQs are matched globally by `jiraKey` (`DATA_MODEL.md`
+— `jira_key` is globally unique), so a naive "match by key, write the match" reconciler could
+silently rewrite another project's LOQ on a key collision. `src/db/applyMppImport.ts` closes that
+gap structurally, not by convention:
+
+- **Cinematics** are matched/created only among rows where `projectId === targetProjectId` — a
+  same-named cinematic in another project is never reused.
+- **LOQs** are matched by `jiraKey` against the *entire* database. If the match's cinematic belongs
+  to a project other than `targetProjectId`, the import **skips it and records a warning** — it is
+  never rewritten, reassigned, or merged. This is the one case where "matched but skipped" beats
+  "matched and applied."
+- **People** and **disciplines** are shared/global by design (same as every other importer) and are
+  matched or created without project scoping — only their assignment *into* this project's LOQs is
+  scoped.
+- `tests/applyMppImport.test.ts` asserts this with a byte-identical before/after snapshot of a second
+  project's cinematics/LOQs when a jiraKey collision is deliberately seeded.
+
+### 2.4 UX decisions (given directly by the product owner)
+
+1. **Discipline mapping is interactive, not silent.** Each Text1 code is auto-matched to an existing
+   discipline by normalized name (`suggestDisciplineMatches`). If every code auto-matches, the import
+   applies immediately with no extra step. Otherwise the import UI (`MppImportDrawer.tsx`) shows one
+   row per code — including already-matched ones, so a match can still be overridden — with a
+   dropdown of existing disciplines plus a "Create new discipline…" option pre-filled with the code
+   as the name (editable) and a suggested contrasting color, before the user confirms.
+2. **Unmatched resource people are created, and fuzzy-merged into existing ones.** New people get a
+   discipline-hinted generic pool (via `resolveGenericPoolId`/`genericPoolName`) when a discipline is
+   available; there was nothing more granular to feed (§2.1). Matching against existing people uses
+   `personMatchKey()` (`src/domain/identity.ts`): NFD-normalize → strip diacritics → lowercase → sort
+   whitespace-split tokens → join — so `"Éric Dupont"`, `"eric dupont"`, and `"Dupont Eric"` all
+   resolve to the same person. Deliberately a separate function from `normalizeKey()` (used by the
+   RPM/Staffing importers), which needs an exact, stable key rather than a fuzzy one.
+
+### 2.5 Import mapping (confirmed)
 
 | MS Project field | Target field | Notes |
 |---|---|---|
-| Task name | `LOQ.type` + free-text hint for `Cinematic`/`Discipline` matching | Needs the studio's real naming convention (§2.1) to do this reliably; falls back to a manual mapping step in the import UI otherwise. |
-| Start / Finish | `loq_commitment_events.committed_start/finish` (first row) | Import always creates the *initial* commitment event, never writes into `loqs.committed_*` directly — same append-only rule as any other commitment change (`DATA_MODEL.md` §2). |
-| Duration | Not directly mapped — day-level start/finish is what matters to this product; Duration is MS-Project-internal derived data | Confirm with a real file whether Duration ever disagrees with Finish−Start in a way that matters. |
-| Work | `LOQ.estimate_days` | Only if §2.1 confirms Work is populated meaningfully. |
-| Predecessors | `loq_dependencies` (materialized, `source='override'` since these come from a specific plan, not a discipline template) | Requires resolving MS Project's own task IDs to `loq_id`s, which only works if tasks map cleanly to LOQs — see §2.1. |
-| Resource assignments | `loq_resources` | Requires resource names to match existing `people.name` (reuse `normalizeKey()` matching, same as the existing importers). |
+| Text1 | Discipline (mapped via `disciplineMap`, §2.4) | |
+| Text2 | `LOQ.type` | |
+| Text3 | `LOQ.jira_key` | Matched globally; see §2.3 for the cross-project collision rule. |
+| Parent task name | `Cinematic.name` | Matched/created only within `targetProjectId` (§2.3). |
+| Start / Finish | `loq_commitment_events.committed_start/finish` | New LOQ: creates the initial event. Re-import: appends a new event only if the dates actually changed — same append-only rule as any other commitment change (`DATA_MODEL.md` §2). |
+| Work (hours), falling back to Duration (days) | `LOQ.estimate_days` | `estimateDays = Work>0 ? round1(Work/8) : Duration`. |
+| Predecessors | `loq_dependencies` (`source='override'`) | Kept only when both endpoints resolved to LOQs in `targetProjectId`; guarded by `wouldCreateCycle` (skip + warn on a cycle). Upserts on `(predecessor, successor)`, so re-import doesn't duplicate. |
+| Resource assignments (name, dates, units) | `loq_resources` | Person resolved via `personMatchKey()` fuzzy match (§2.4) or created; `fte = units/100`. |
 
-### 2.3 Export (Planner → MS Project)
+Re-importing the same file is idempotent: cinematics/LOQs/dependencies are matched by key before
+being created, and a commitment event is only appended when dates genuinely changed.
 
-Deferred past the first vertical slice (brief explicitly frames this as "eventually," not initial —
-§1, §14). When built, it should reuse the same adapter boundary in reverse: domain → normalized DTO
-→ MPP/XML writer, so the writer is swappable independently of the domain model, symmetric with
-import.
+### 2.6 Export (Planner → MS Project)
+
+Still deferred past the first vertical slice (brief explicitly frames this as "eventually," not
+initial — §1, §14). When built, it should reuse the same adapter boundary in reverse: domain →
+normalized DTO → MPP/XML writer, so the writer is swappable independently of the domain model,
+symmetric with import.
 
 ## 3. Jira integration
 
@@ -138,15 +208,18 @@ done.
 
 ## 4. Sequencing recommendation
 
-Both integrations carry the same risk shape: **the biggest risk is not engineering, it's that the
-target system's real structure is unknown.** Recommend, in this order:
+Both integrations carried the same risk shape: **the biggest risk is not engineering, it's that the
+target system's real structure is unknown.** Recommended order, followed in practice:
 
 1. Get one real MS Project export and (ideally) read access to one real Jira project *before*
    writing any adapter code — a half-day discovery spike each, not a multi-week research phase.
+   **Done for MS Project** (§2.1); still open for Jira.
 2. Build the LOQ/Cinematic/Dependency domain model and the deterministic forecast engine first,
    independent of both integrations, validated with hand-built fixtures (exactly like the existing
-   `tests/fixtures.ts` pattern) standing in for "what Jira/MPP would eventually provide."
+   `tests/fixtures.ts` pattern) standing in for "what Jira/MPP would eventually provide." **Done**
+   (Phases 1-4).
 3. Only then build the adapters, once real sample data exists to validate the mapping tables above
-   against actual field values instead of assumptions.
+   against actual field values instead of assumptions. **Done for MS Project** (§2, Phase 6,
+   shipped); still open for Jira (Phase 5).
 
 This ordering is reflected in `IMPLEMENTATION_PLAN.md`'s phasing.

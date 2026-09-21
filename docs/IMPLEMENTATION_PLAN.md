@@ -197,19 +197,34 @@ rewriting working functionality.
   API responses, once available.
 - **Migration considerations**: none beyond Phase 1's `jira_sync_state` table.
 
-## Phase 6 — MS Project import adapter (discovery-gated)
+## Phase 6 — MS Project import adapter — **shipped**
 
-- **Objective**: per `INTEGRATIONS.md` §2, same discovery-gating caveat as Phase 5.
-- **Files/components affected**: `src/import/mppImport.ts` (new), reusing the existing
-  parse→normalize→apply shape and the existing `ImportDrawer`/`ImportReport` UI pattern rather than
-  inventing a new import UX.
+- **Objective**: per `INTEGRATIONS.md` §2 (confirmed mapping + shipped architecture). A single
+  `.mpp` import always targets exactly one existing Project and writes only within that Project's own
+  Cinematics/LOQs/dependencies/resources — it never modifies any other Project's data
+  (`INTEGRATIONS.md` §2.3 spells out how this is enforced structurally, including the cross-project
+  `jiraKey` collision case).
+- **Files/components affected**: `java/MppToJson.java` (MPXJ shim), `resources/mpp/lib/*.jar`
+  (vendored), `scripts/prepare-mpp-runtime.mjs` (shim compile + jlink at build time),
+  `electron/main.cjs`/`electron/preload.cjs` (IPC bridge, bundled-JRE spawn), `src/import/mppImport.ts`
+  (pure parse layer), `src/db/applyMppImport.ts` (project-scoped reconciler),
+  `src/domain/identity.ts` (`personMatchKey` fuzzy people-matching), `src/store/useStore.ts`
+  (`parseMppFile`/`applyMppImportToProject`), `src/ui/components/MppImportDrawer.tsx` (interactive
+  discipline-mapping UI), wired into `src/ui/views/ProjectDetail.tsx`'s Cinematics card.
 - **Dependencies**: Phase 1 (schema), Phase 3 (something to import into); the sample-file discovery
-  step in `INTEGRATIONS.md` §2.1.
-- **Acceptance criteria**: TBD pending a real sample file.
-- **Tests**: fixture-based, once a real (or anonymized) sample export is available, following
-  `tests/rpmImport.test.ts`'s pattern (build a workbook/XML in-memory, assert the parsed+applied
-  result).
-- **Migration considerations**: none.
+  spike in `INTEGRATIONS.md` §2.1 — complete.
+- **Acceptance criteria**: met — discipline codes (Text1), LOQ type (Text2) and Jira key (Text3) map
+  correctly; cinematic = parent task name; real cross-discipline dependency edges import; Work→Duration
+  effort fallback; resource assignments create/fuzzy-merge people; unmatched disciplines prompt an
+  interactive mapping step (auto-skipped when every code matches by name) with an override always
+  available; re-import is idempotent; another project's data is provably untouched even on a
+  `jiraKey` collision.
+- **Tests**: `tests/mppImport.test.ts` (pure parse layer, fixture modeled on the real file),
+  `tests/applyMppImport.test.ts` (project-scoped reconciler, incl. the cross-project collision and
+  idempotent-re-import cases), `tests/ui/mppImport.test.tsx` (drawer + mapping step via
+  `ProjectDetail`). A full `.exe` walkthrough against the real sample file is a manual step (no
+  browser/Electron automation in this environment).
+- **Migration considerations**: none — writes through the existing repository functions only.
 
 ## Phase 7 — Collaboration backend (product-owner go/no-go before scheduling)
 
@@ -237,11 +252,11 @@ Resolved 2026-09-18 directly with the product owner:
 1. **Shared SQL backend (Phase 7)** — **not needed now.** Current one-file-per-Producer model stays
    acceptable while the domain model (Phases 1-4) stabilizes first. Phase 7 stays last/gated, as
    planned. (`COLLABORATION_MODEL.md` §1, §4)
-2. **Real MS Project export / Jira access** — **partially resolved.** A real `.mpp` sample
-   (`NEW-OVR-MACRO-RELEASE-27.mpp`) is now available from the product owner (see `INTEGRATIONS.md`
-   §2.1 update) — Phase 6's discovery spike can start whenever scheduled. Jira: no access exists yet,
-   but the product owner can generate an API token on demand when Phase 5's discovery spike is
-   scheduled. (`INTEGRATIONS.md` §2.1, §3.1)
+2. **Real MS Project export / Jira access** — **MS Project resolved and shipped.** The discovery
+   spike against the real `.mpp` sample (`NEW-OVR-MACRO-RELEASE-27.mpp`) is complete and Phase 6
+   shipped on its findings (`INTEGRATIONS.md` §2.1-§2.5). Jira: no access exists yet, but the product
+   owner can generate an API token on demand when Phase 5's discovery spike is scheduled.
+   (`INTEGRATIONS.md` §3.1)
 3. **Jira status vs. `LOQ.status`** — **confirmed: keep them separate.** Jira status is never
    allowed to overwrite `LOQ.status` directly; the two stay distinct values that get compared, per
    this document's recommendation. (`INTEGRATIONS.md` §3.2)
