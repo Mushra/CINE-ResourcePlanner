@@ -75,6 +75,20 @@ rewriting working functionality.
   that will consume them, per the brief's working rule ("write tests for planning rules before
   expanding implementation").
 - **Migration considerations**: none (pure logic, no schema change).
+- **Status (shipped on `feature/cinematic-production-planner`, `loq_forecast` commits 1-4, after
+  Phase 3)**: shipped out of the plan's original order — the whole Phase 3 UI slice landed first,
+  deliberately deferring this phase (see Phase 3's status note). `computeForecasts()` and dependency
+  propagation + root-cause attribution live in `src/engine/loqForecast.ts` (not `loqPlanning.ts` as
+  originally named), tested in `tests/loqForecast.test.ts`. Wired into `PlanningEngine.getLoqForecasts()`
+  /`cinematicLoqForecasts()` (`planning.ts`), cached per-instance. Three of the five sanity-check
+  categories are implemented — `loq_at_risk`, `loq_root_cause`, `loq_early_opportunity`
+  (`validation.ts`, tested in `tests/validation.test.ts`); `capacity_conflict_cinematic` shipped
+  earlier as part of Phase 3's slice; `jira_inconsistency` stays deferred (gated on a Jira sync
+  existing at all, Phase 5). See `PLANNING_ENGINE.md` §5/§6/§8 for the exact rules and two documented
+  deviations from this phase's original wording (latest-variance-wins instead of summed deltas;
+  `lagDays` excluded from the propagation shift magnitude). A minimal UI surfacing (forecast overlay
+  bar on the LOQ timeline) also shipped in this same commit sequence, ahead of Phase 4 — see Phase 3's
+  updated acceptance-criteria note.
 
 ## Phase 3 — Minimal UI for one Cinematic
 
@@ -120,15 +134,24 @@ rewriting working functionality.
   scoped to edges **within a single Cinematic**, `type` fixed to `finish_to_start`, `source` always
   `'override'` (no templates). Attribution across all three flows is a single global producer-name
   preference (`useUiStore`, localStorage), not per-user login.
-  This phase's acceptance criteria are now met **except** "see the forecast update accordingly" and
-  "see the Dashboard's 'Needs attention' panel surface the new check categories" — `computeForecast()`
-  (§5), dependency-delay propagation, root-cause/impact attribution, and the four unimplemented
-  `CheckCategory` values (§8) all remain unbuilt and are deferred to Phase 4.
+  This phase's acceptance criteria were initially met **except** "see the forecast update
+  accordingly" and "see the Dashboard's 'Needs attention' panel surface the new check categories" —
+  those two depended on Phase 2's `computeForecast()`/propagation/root-cause work, deferred at the
+  time. **Both are now met** too: Phase 2 shipped afterward (see its status note) and included a
+  minimal forecast overlay on `LoqTimeline.tsx` plus the three new check categories flowing through
+  the existing Dashboard panel unchanged. Only `jira_inconsistency` (Jira-gated) and the Phase 4
+  nested "one root cause / N impacts" view remain outstanding.
   Contrary to this phase's original testing note, UI test coverage *was* added
   (`tests/ui/*.test.tsx`, integration-style against a real sql.js-backed store) — the "zero UI tests"
   baseline it cited no longer holds project-wide, so later phases should follow that convention too.
 
 ## Phase 4 — Dependency-impact UX (root cause vs. downstream impact)
+
+> **Narrowed scope**: the engine side of this phase (root-cause attribution, `impactedLoqIds`,
+> `loq_root_cause` carrying the downstream chain as text) shipped early as part of Phase 2
+> (`loq_forecast` commits 1 and 3). What remains is purely the **nested Dashboard UX** — today
+> `loq_root_cause`/`loq_at_risk` render as flat rows like every other check; this phase turns the
+> `impact` text into an actual nested "one root cause, N impacted LOQs" grouping.
 
 - **Objective**: surface brief §7's "one root cause, N downstream impacts" view, reusing the
   Dashboard's existing severity-grouped "Needs attention" panel rather than building a new visual
@@ -136,12 +159,14 @@ rewriting working functionality.
 - **Files/components affected**: `src/ui/views/Dashboard.tsx` (new grouping for
   `loq_root_cause`/impact chain), possibly a small new `src/ui/components/ImpactChain.tsx` if the
   existing issue-row rendering can't express a nested chain cleanly.
-- **Dependencies**: Phase 3.
+- **Dependencies**: Phase 3 (shipped); the engine data this phase needs (`rootCauseLoqId`,
+  `impactedLoqIds`) is already available from Phase 2's `loq_forecast` work.
 - **Acceptance criteria**: a manually-constructed three-LOQ dependency chain with one declared
   variance shows exactly one root-cause entry with two impacted LOQs listed under it, not three
-  separate issue rows.
-- **Tests**: extend `tests/loqValidation.test.ts` fixtures to cover the three-LOQ chain case
-  end-to-end through `getSanityChecks()`.
+  separate issue rows. (The underlying data already supports this today — `tests/validation.test.ts`'s
+  `loq_root_cause` tests cover it at the `getSanityChecks()` level; this phase is UI grouping only.)
+- **Tests**: `tests/validation.test.ts` already covers the engine-level chain case; this phase adds
+  UI tests for the nested grouping component itself.
 - **Migration considerations**: none.
 
 ## Phase 5 — Jira read adapter (discovery-gated)

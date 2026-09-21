@@ -73,9 +73,10 @@ COMMITTED  →  CURRENT REALITY  →  FORECAST  →  ACTUAL
 > `recommitLoq` store action (§3) that writes an append-only `loq_commitment_events` row and updates
 > the LOQ's denormalized cache in the same call. `LoqFormDrawer` no longer exposes committed-date
 > inputs at all; a "Re-commit dates…" button opens the dedicated `RecommitDialog`, which also shows the
-> LOQ's commitment history. Still deferred: `computeForecast()` (§5) and dependency-delay propagation
-> (§6) — the cache updated by `recommitLoq` is still a stored, human-set field, not yet a value derived
-> live from committed + variances + dependencies.
+> LOQ's commitment history. **`computeForecast()` (§5) and dependency-delay propagation (§6) are now
+> also shipped** (`loq_forecast` 1-4) — a LOQ's committed date (from `recommitLoq`) remains the stored,
+> human-set baseline; forecast is a separate, always-computed read layered on top, never itself
+> written back.
 
 ### Why forecast must be computed, not stored-and-edited
 
@@ -182,38 +183,67 @@ re-commit the downstream LOQ. Nothing writes to the downstream LOQ's committed d
 
 ## 5. Forecast computation
 
-`computeForecast(loq, allLoqs, dependencies, variances, jiraState)` — pure function, deterministic,
-no AI (brief §19). Rules, in priority order:
+> **Shipped** (`loq_forecast` commit 1, `src/engine/loqForecast.ts::computeForecasts`). The signature
+> ended up simpler than this section originally proposed: `computeForecasts(loqs, dependencies,
+> varianceEvents)` — no `jiraState` parameter. There is no Jira integration yet, so rule 1 reads the
+> LOQ's own `actualFinish`/`status === 'DONE'` fields directly; a future Jira sync only needs to write
+> those same fields for rule 1 to pick it up unchanged. Two rules below are **deliberately refined**
+> from the wording as originally written here — both documented at the top of `loqForecast.ts` and
+> covered by `tests/loqForecast.test.ts`:
+> - **Rule 2 refinement**: "sum of undismissed variance deltas" is not what's implemented, because
+>   the shipped `VarianceEvent.deltaDays` (`declareVariance`, §4) is an **absolute** snapshot — the
+>   delta vs. the committed date *at declaration time* — not an incremental delta. Summing multiple
+>   variances would double-count the same slip. The implemented rule instead takes the **latest**
+>   variance's `forecastDateAtDeclaration` per LOQ: the producer's most recently stated reality wins,
+>   superseding earlier variances rather than stacking with them.
+> - **Rule 3 refinement**: propagation shifts a successor's window by its predecessor's resolved
+>   `deltaDays` only — `lagDays` is *not* added to the shift magnitude, even though lag is a real field
+>   on the dependency edge. Lag is a static gap already baked into the successor's own `committedStart`
+>   when the schedule was originally built; adding it again on top of the predecessor's slip would
+>   double-shift the successor.
+>
+> Deltas are calendar days (`isoDiffDays`), matching how variance `deltaDays` was already computed —
+> only the committed *baseline* itself uses working-day math (`loqEffectiveFinish`, §1.1).
 
-1. **If Jira reports the LOQ DONE**, forecast = actual completion date from Jira (the LOQ has
-   already happened; forecast and actual converge).
-2. **Else if the LOQ has open variances that push its own finish date**, forecast = committed date +
-   sum of undismissed variance deltas for this LOQ (a variance's `delta_days` is the *known* slip at
-   declaration time; multiple variances on the same LOQ accumulate).
-3. **Else if an upstream dependency's forecast has moved** (later or earlier) relative to *its own*
-   committed date, and this LOQ has a `finish-to-start` dependency on it, propagate: this LOQ's
-   forecast start shifts by the same delta as the upstream LOQ's forecast-vs-committed delta, unless
-   this LOQ itself already has its own variance/forecast override (a LOQ's own declared reality always
-   wins over inherited propagation — never let an upstream shift silently erase a downstream team's
-   own better information).
-4. **Else** forecast = committed date (no known reason to expect otherwise).
+`computeForecasts(loqs, dependencies, varianceEvents)` — pure function, deterministic, no AI (brief
+§19). Rules, in priority order:
 
-This function must be idempotent and side-effect-free: calling it twice with the same inputs gives
-the same output, and it must never write anything back into `committed_date` or `variance` records —
-it only ever *reads* those and produces a forecast value for display.
+1. **If the LOQ's `actualFinish` is set**, forecast = that date (the LOQ has already happened;
+   forecast and actual converge). `source: 'actual'`.
+2. **Else if the LOQ has a declared variance**, forecast = the latest variance's
+   `forecastDateAtDeclaration` (see refinement above). `source: 'variance'`.
+3. **Else if an upstream `finish_to_start` predecessor's forecast has moved** relative to *its own*
+   committed date, propagate: this LOQ's forecast shifts by the predecessor with the largest-magnitude
+   delta (see refinement above), unless this LOQ itself already resolved via rule 1 or 2 (a LOQ's own
+   declared reality always wins over inherited propagation). `source: 'propagated'`.
+4. **Else** forecast = committed date, delta 0. `source: 'committed'`.
+
+This function is idempotent and side-effect-free: calling it twice with the same inputs gives the
+same output, and it never writes anything back into `committed_date` or `variance` records — it only
+ever *reads* those and produces a forecast value for display. `PlanningEngine.getLoqForecasts()`
+computes the whole graph once per engine instance and caches it (`planning.ts`); a fresh
+`PlanningEngine` is constructed on every store mutation, so the cache can never go stale.
 
 ## 6. Dependency propagation and root-cause attribution
 
-> **Shipped, DAG enforcement only** (`loq_events` commit 5): dependency CRUD
+> **Shipped** (`loq_events` commit 5 for DAG enforcement + CRUD; `loq_forecast` commits 1 and 3 for
+> propagation and root-cause attribution). Dependency CRUD
 > (`createLoqDependency`/`updateLoqDependency`/`deleteLoqDependency` in `useStore.ts`) and the cycle
-> check below are implemented and wired to a `LoqDependencyEditor` section on the Cinematic detail
-> view. **Still deferred**: propagation (this section's forecast-delta walk) and root-cause/impact
-> attribution — nothing yet reads these edges to shift a forecast, because `computeForecast()` (§5)
-> itself isn't built. The shipped scope is also narrower than this section's full design: edges are
-> **within a single Cinematic only** (cross-Cinematic edges deferred), `type` is always
-> `'finish_to_start'` (not yet exposed as a choice even though the field allows it), `source` is
-> always `'override'` (templates — §6.1 — unbuilt), and `overridden` is not on the type/schema at all
-> (deferred with propagation, since it has no other consumer yet).
+> check below are wired to a `LoqDependencyEditor` section on the Cinematic detail view.
+> `computeForecasts` (§5) now walks these edges to propagate a predecessor's delta to its successor,
+> and tracks `rootCauseLoqId` inline during that same walk (a LOQ's own variance/`actualFinish` makes
+> it its own root cause; a purely-propagated LOQ inherits the root cause of whichever predecessor drove
+> its max-magnitude delta). `impactedLoqIds(rootCauseLoqId, forecasts)` is the reverse lookup the
+> `loq_root_cause` check (§8) uses to name every downstream-impacted LOQ.
+>
+> **Surfacing stays flat, by design, for this slice**: `loq_root_cause`'s `impact` string lists the
+> impacted LOQs as text; there is no nested "one root cause / N impacts" Dashboard view yet — that's
+> deferred to a later phase per `IMPLEMENTATION_PLAN.md`.
+>
+> The shipped scope is also narrower than this section's full design: edges are **within a single
+> Cinematic only** (cross-Cinematic edges deferred), `type` is always `'finish_to_start'` (not yet
+> exposed as a choice even though the field allows it), `source` is always `'override'` (templates —
+> §6.1 — unbuilt), and `overridden` is not on the type/schema at all (still no consumer for it).
 
 Brief §7 explicitly warns against reporting a propagated delay as N independent incidents. Rule:
 
@@ -266,15 +296,20 @@ exact table shapes and `COLLABORATION_MODEL.md` for how this interacts with conc
 New `SanityCheck`-style categories, added the same way the README already documents extending
 `validation.ts` ("add a checker function... append to `getSanityChecks`"):
 
-- `loq_at_risk` (warning/critical by how large the forecast-vs-committed delta is) — a LOQ whose
-  forecast has slipped past its committed date and is not yet DONE.
-- `loq_root_cause` (critical) — a LOQ carrying its own variance that is the root cause of at least
-  one downstream impact (per §6), surfaced once, with its downstream chain attached as `impact`
-  rather than as separate checks.
-- `loq_early_opportunity` (info) — a LOQ whose forecast/actual beat its committed date and has a
-  downstream dependent that could, if a human chooses, be pulled earlier (§4.2).
+- `loq_at_risk` (warning/critical by how large the forecast-vs-committed delta is) — **implemented**
+  (`src/engine/validation.ts::checkLoqAtRisk`). A LOQ whose forecast has slipped past its committed
+  date and is not yet DONE; critical past a 5 calendar-day slip (an explicit, simple threshold — not
+  a heuristic, per §9), warning otherwise.
+- `loq_root_cause` (critical) — **implemented** (`checkLoqRootCause`). A LOQ carrying its own variance
+  (or an `actualFinish` past committed) that is the root cause of at least one downstream impact (per
+  §6), surfaced once per root cause, with its downstream chain named in `impact` rather than as
+  separate checks.
+- `loq_early_opportunity` (info) — **implemented** (`checkLoqEarlyOpportunity`). A LOQ whose
+  forecast/actual beat its committed date and has a downstream dependent that could, if a human
+  chooses, be pulled earlier (§4.2) — a flag only, nothing is ever applied automatically.
 - `jira_inconsistency` (warning/critical depending on direction — see `INTEGRATIONS.md` §3 for the
-  specific inconsistency cases) — planning state disagrees with Jira's reported state.
+  specific inconsistency cases) — planning state disagrees with Jira's reported state. **Still
+  deferred** — gated on a Jira sync existing at all.
 - `capacity_conflict_cinematic` (critical) — **implemented** (`src/engine/validation.ts::checkCinematicCapacityConflict`,
   reading `src/engine/planning.ts::PlanningEngine.getProjectLoqDemand`, which sums
   `loqRollup.ts::getCinematicDisciplineRollup` across every Cinematic of a project). `Requirement` is
@@ -284,9 +319,10 @@ New `SanityCheck`-style categories, added the same way the README already docume
   demand months (`loqDemandPeriods`), so a demand month with zero Requirement coverage is still
   caught. Flat critical severity, no priority tiering — matches `over_capacity`.
 
-The remaining four follow the existing pattern exactly: pure functions reading a snapshot, returning
-`SanityCheck[]`, sortable by severity, addable to the Dashboard's existing "Needs attention" panel
-with zero new UI mechanism required.
+All five follow the same pattern: pure functions reading a snapshot, returning `SanityCheck[]`,
+sortable by severity, surfaced in the Dashboard's existing "Needs attention" panel with zero new UI
+mechanism required. `ValidationRulesDialog.tsx`'s `RULES` array documents each one for end users, kept
+in sync with `CheckCategory` by `tests/validationRulesDialog.test.ts`.
 
 ## 9. Explicit non-rules (do not build these)
 
