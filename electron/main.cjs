@@ -1,8 +1,10 @@
 // Electron main process. CommonJS on purpose — package.json is "type": "module" for the Vite
 // side, but Electron's main process is simplest as plain CJS, loaded via package.json's "main".
-const { app, BrowserWindow, protocol, net, dialog, Menu } = require('electron');
+const { app, BrowserWindow, protocol, net, dialog, Menu, ipcMain } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+const { spawn } = require('node:child_process');
+const fs = require('node:fs');
 
 const DIST_DIR = path.join(__dirname, '..', 'dist');
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
@@ -154,6 +156,57 @@ function buildMenu(win, updater) {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+// resources/mpp/{lib,shim,jre} — lib is vendored (committed), shim/jre are build outputs (see
+// scripts/prepare-mpp-runtime.mjs). Packaged builds get them via electron-builder's extraResources
+// (electron-builder.yml); running against the Vite dev server reads them straight from the repo.
+function mppRuntimeDir() {
+  return DEV_SERVER_URL ? path.join(__dirname, '..', 'resources', 'mpp') : path.join(process.resourcesPath, 'mpp');
+}
+
+function registerMppHandler() {
+  ipcMain.handle('mpp:pick-and-parse', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      title: 'Import MS Project file',
+      filters: [{ name: 'MS Project', extensions: ['mpp'] }],
+      properties: ['openFile'],
+    });
+    if (canceled || filePaths.length === 0) return { canceled: true };
+    const mppPath = filePaths[0];
+
+    const runtimeDir = mppRuntimeDir();
+    const javaBin = path.join(runtimeDir, 'jre', 'bin', 'java.exe');
+    const shimDir = path.join(runtimeDir, 'shim');
+    const libGlob = path.join(runtimeDir, 'lib', '*');
+    if (!fs.existsSync(javaBin)) {
+      return { canceled: false, error: 'The bundled MS Project import runtime is missing from this build.' };
+    }
+
+    return new Promise((resolve) => {
+      const child = spawn(javaBin, ['-Dlog4j2.StatusLogger.level=OFF', '-cp', `${shimDir}${path.delimiter}${libGlob}`, 'MppToJson', mppPath]);
+      let stdout = '';
+      let stderr = '';
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+      child.stdout.on('data', (chunk) => { stdout += chunk; });
+      child.stderr.on('data', (chunk) => { stderr += chunk; });
+      child.on('error', (err) => resolve({ canceled: false, error: `Could not start the import process: ${err.message}` }));
+      child.on('close', (code) => {
+        if (code !== 0) {
+          resolve({ canceled: false, error: stderr.trim() || `Import process exited with code ${code}` });
+          return;
+        }
+        try {
+          const json = JSON.parse(stdout);
+          resolve({ canceled: false, fileName: path.basename(mppPath), json });
+        } catch {
+          resolve({ canceled: false, error: 'The import process returned an unexpected response.' });
+        }
+      });
+    });
+  });
+}
+
 async function createWindow() {
   const win = new BrowserWindow({
     width: 1440,
@@ -163,6 +216,7 @@ async function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: path.join(__dirname, 'preload.cjs'),
     },
   });
 
@@ -180,6 +234,7 @@ async function createWindow() {
 
 app.whenReady().then(() => {
   registerAppProtocol();
+  registerMppHandler();
   void createWindow();
 
   app.on('activate', () => {
