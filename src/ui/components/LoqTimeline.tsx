@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { isoAddDays, isoDiffDays } from '../timeline/timelineMath';
 import { loqEffectiveFinish } from '../../engine/loqRollup';
+import type { LoqForecast } from '../../engine/loqForecast';
 import { Icon } from './Icon';
 import type { Loq, LoqResource } from '../../domain/types';
 
@@ -148,6 +149,27 @@ function WindowBar({
   );
 }
 
+/** Read-only overlay for a LOQ's forecast window, drawn alongside the committed WindowBar whenever
+ * the forecast has actually diverged from committed (delta !== 0). Never draggable — the forecast is
+ * derived, not an editable commitment. */
+function ForecastBar({ forecast, startIso }: { forecast: LoqForecast; startIso: string }) {
+  if (!forecast.forecastStart || !forecast.forecastFinish || forecast.deltaDays === 0) return null;
+  const left = xForDay(forecast.forecastStart, startIso);
+  const width = Math.max(DAY_W, (isoDiffDays(forecast.forecastStart, forecast.forecastFinish) + 1) * DAY_W);
+  const tone = forecast.deltaDays > 0 ? (forecast.deltaDays >= 5 ? 'critical' : 'warning') : 'info';
+  const badge = `${forecast.deltaDays > 0 ? '+' : ''}${forecast.deltaDays}d`;
+
+  return (
+    <div
+      className={`loq-forecast-bar loq-forecast-bar-${tone}`}
+      style={{ left, width }}
+      title={`Forecast (${forecast.source}): ${forecast.forecastStart} → ${forecast.forecastFinish} (${badge})`}
+    >
+      <span className={`loq-forecast-badge loq-forecast-badge-${tone}`}>{badge}</span>
+    </div>
+  );
+}
+
 function ResourceRow({ resource, startIso, trackWidth }: { resource: LoqResource; startIso: string; trackWidth: number }) {
   const people = useStore((s) => s.data.people);
   const updateLoqResource = useStore((s) => s.updateLoqResource);
@@ -223,10 +245,11 @@ function ResourceRow({ resource, startIso, trackWidth }: { resource: LoqResource
   );
 }
 
-function LoqRow({ loq, startIso, trackWidth, onEditLoq, onRecommit }: {
+function LoqRow({ loq, startIso, trackWidth, forecast, onEditLoq, onRecommit }: {
   loq: Loq;
   startIso: string;
   trackWidth: number;
+  forecast: LoqForecast | undefined;
   onEditLoq: (loq: Loq) => void;
   onRecommit: (loq: Loq, initialStart: string | null, initialFinish: string | null) => void;
 }) {
@@ -268,6 +291,7 @@ function LoqRow({ loq, startIso, trackWidth, onEditLoq, onRecommit }: {
               Unscheduled — set a start date to place it on the timeline
             </button>
           )}
+          {loq.committedStart && finish && forecast && <ForecastBar forecast={forecast} startIso={startIso} />}
         </div>
       </div>
       {expanded && (
@@ -314,6 +338,8 @@ export function LoqTimeline({ cinematicId, onEditLoq, onRecommit }: {
   const allLoqs = useStore((s) => s.data.loqs);
   const loqs = allLoqs.filter((l) => l.cinematicId === cinematicId).sort((a, b) => a.sortOrder - b.sortOrder);
   const loqResources = useStore((s) => s.data.loqResources);
+  const engine = useStore((s) => s.engine);
+  const forecasts = engine.cinematicLoqForecasts(cinematicId);
   const loqIds = new Set(loqs.map((l) => l.id));
   const relevantResources = loqResources.filter((r) => loqIds.has(r.loqId));
   const { days, startIso } = computeWindow(loqs, relevantResources);
@@ -353,7 +379,15 @@ export function LoqTimeline({ cinematicId, onEditLoq, onRecommit }: {
         </div>
         <div className="loq-timeline-rows">
           {loqs.map((loq) => (
-            <LoqRow key={loq.id} loq={loq} startIso={startIso} trackWidth={trackWidth} onEditLoq={onEditLoq} onRecommit={onRecommit} />
+            <LoqRow
+              key={loq.id}
+              loq={loq}
+              startIso={startIso}
+              trackWidth={trackWidth}
+              forecast={forecasts.get(loq.id)}
+              onEditLoq={onEditLoq}
+              onRecommit={onRecommit}
+            />
           ))}
         </div>
       </div>
