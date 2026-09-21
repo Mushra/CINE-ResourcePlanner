@@ -121,6 +121,15 @@
   font-style: italic;
   color: var(--text-tertiary);
   white-space: nowrap;
+  border: none;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+.loq-row-unscheduled:hover {
+  color: var(--text-secondary);
+  text-decoration: underline;
 }
 
 .loq-bar {

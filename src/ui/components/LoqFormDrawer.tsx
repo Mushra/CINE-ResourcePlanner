@@ -15,8 +15,6 @@ export interface LoqFormValue {
   type: string;
   status: LoqStatus;
   estimateDays: number | null;
-  committedStart: string | null;
-  committedFinish: string | null;
   dodRef: string;
 }
 
@@ -28,8 +26,6 @@ function fromLoq(disciplines: Discipline[], loq?: Loq): LoqFormValue {
       type: '',
       status: 'TODO',
       estimateDays: null,
-      committedStart: null,
-      committedFinish: null,
       dodRef: '',
     };
   }
@@ -39,25 +35,25 @@ function fromLoq(disciplines: Discipline[], loq?: Loq): LoqFormValue {
     type: loq.type,
     status: loq.status,
     estimateDays: loq.estimateDays,
-    committedStart: loq.committedStart,
-    committedFinish: loq.committedFinish,
     dodRef: loq.dodRef,
   };
 }
 
 export function LoqFormDrawer({
-  loq, disciplines, onClose, onSave,
+  loq, disciplines, onClose, onSave, onRecommit,
 }: {
   loq?: Loq;
   disciplines: Discipline[];
   onClose: () => void;
   onSave: (value: LoqFormValue) => void;
+  /** Only relevant when editing an existing LOQ — committed dates are changed via a separate,
+   * justified re-commit action (PLANNING_ENGINE.md §3), never through this generic form. */
+  onRecommit?: () => void;
 }) {
   const [value, setValue] = useState<LoqFormValue>(() => fromLoq(disciplines, loq));
   const [initialSnapshot] = useState(() => JSON.stringify(value));
   const canSave = value.disciplineId.trim().length > 0 && value.type.trim().length > 0;
   const dirty = JSON.stringify(value) !== initialSnapshot;
-  const datesInvalid = Boolean(value.committedStart && value.committedFinish && value.committedStart > value.committedFinish);
 
   function set<K extends keyof LoqFormValue>(key: K, v: LoqFormValue[K]): void {
     setValue((prev) => ({ ...prev, [key]: v }));
@@ -99,17 +95,20 @@ export function LoqFormDrawer({
         </div>
       </div>
 
-      <div className="field-row">
-        <div className="field">
-          <label htmlFor="loq-start">Committed start</label>
-          <input id="loq-start" type="date" value={value.committedStart ?? ''} onChange={(e) => set('committedStart', e.target.value || null)} />
+      {loq && (
+        <div className="field loq-committed-readout">
+          <label>Committed window</label>
+          <div className="loq-committed-readout-row">
+            <span>
+              {loq.committedStart
+                ? `${loq.committedStart} → ${loq.committedFinish ?? '…'}`
+                : 'Unscheduled'}
+            </span>
+            <Button variant="secondary" size="sm" onClick={onRecommit}>Re-commit dates…</Button>
+          </div>
+          <p className="field-hint">Committed dates change only via an attributed, justified re-commit — never edited directly here.</p>
         </div>
-        <div className="field">
-          <label htmlFor="loq-finish">Committed finish</label>
-          <input id="loq-finish" type="date" value={value.committedFinish ?? ''} onChange={(e) => set('committedFinish', e.target.value || null)} />
-        </div>
-      </div>
-      <p className="field-hint">Leave finish blank to derive it from the estimate (working days from start).</p>
+      )}
 
       <div className="field">
         <label htmlFor="loq-jira">Jira key</label>
@@ -121,11 +120,9 @@ export function LoqFormDrawer({
         <textarea id="loq-dod" rows={3} value={value.dodRef} onChange={(e) => set('dodRef', e.target.value)} placeholder="Reference or checklist…" />
       </div>
 
-      {datesInvalid && <div className="form-warning">Committed finish is before the committed start — fix this before saving.</div>}
-
       <div className="drawer-footer" style={{ margin: '4px -20px -18px', width: 'calc(100% + 40px)' }}>
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button variant="primary" disabled={!canSave || datesInvalid} onClick={() => onSave(value)}>
+        <Button variant="primary" disabled={!canSave} onClick={() => onSave(value)}>
           {loq ? 'Save changes' : 'Create LOQ'}
         </Button>
       </div>

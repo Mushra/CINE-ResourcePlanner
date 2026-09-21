@@ -7,6 +7,7 @@ import { ConfirmButton } from '../components/ConfirmButton';
 import { CinematicFormDrawer, type CinematicFormValue } from '../components/CinematicFormDrawer';
 import { LoqFormDrawer, type LoqFormValue } from '../components/LoqFormDrawer';
 import { LoqTimeline } from '../components/LoqTimeline';
+import { RecommitDialog } from '../components/RecommitDialog';
 import type { Loq } from '../../domain/types';
 
 const LOQ_STATUS_LABEL: Record<Loq['status'], string> = { TODO: 'To do', IN_PROGRESS: 'In progress', DONE: 'Done' };
@@ -25,6 +26,7 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const [editing, setEditing] = useState(false);
   const [newLoq, setNewLoq] = useState(false);
   const [editingLoq, setEditingLoq] = useState<Loq | null>(null);
+  const [recommitTarget, setRecommitTarget] = useState<{ loq: Loq; initialStart: string | null; initialFinish: string | null } | null>(null);
 
   if (!cinematic) {
     return (
@@ -117,7 +119,11 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
             <h2>Schedule</h2>
             <span className="panel-sub">Drag to move or resize committed windows and person assignments</span>
           </div>
-          <LoqTimeline cinematicId={cinematic.id} onEditLoq={setEditingLoq} />
+          <LoqTimeline
+            cinematicId={cinematic.id}
+            onEditLoq={setEditingLoq}
+            onRecommit={(loq, initialStart, initialFinish) => setRecommitTarget({ loq, initialStart, initialFinish })}
+          />
         </div>
       )}
 
@@ -137,7 +143,7 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
           disciplines={disciplines}
           onClose={() => setNewLoq(false)}
           onSave={(value: LoqFormValue) => {
-            createLoq({ cinematicId: cinematic.id, ...value, actualFinish: null });
+            createLoq({ cinematicId: cinematic.id, ...value, actualFinish: null, committedStart: null, committedFinish: null });
             setNewLoq(false);
           }}
         />
@@ -152,6 +158,19 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
             updateLoq({ ...editingLoq, ...value });
             setEditingLoq(null);
           }}
+          onRecommit={() => {
+            setRecommitTarget({ loq: editingLoq, initialStart: editingLoq.committedStart, initialFinish: editingLoq.committedFinish });
+            setEditingLoq(null);
+          }}
+        />
+      )}
+
+      {recommitTarget && (
+        <RecommitDialog
+          loq={recommitTarget.loq}
+          initialStart={recommitTarget.initialStart}
+          initialFinish={recommitTarget.initialFinish}
+          onClose={() => setRecommitTarget(null)}
         />
       )}
     </div>

@@ -51,7 +51,7 @@ describe('LoqTimeline', () => {
       actualFinish: null,
       dodRef: '',
     });
-    renderView(<LoqTimeline cinematicId={cinematic.id} onEditLoq={vi.fn()} />);
+    renderView(<LoqTimeline cinematicId={cinematic.id} onEditLoq={vi.fn()} onRecommit={vi.fn()} />);
 
     expect(screen.getByTitle('L1: 2026-09-07 → 2026-09-11')).toBeInTheDocument();
     expect(screen.getByText(/Unscheduled — set a start date/)).toBeInTheDocument();
@@ -61,22 +61,44 @@ describe('LoqTimeline', () => {
     await seedStore();
     const { cinematic, loq } = seedScheduledLoq();
     const onEditLoq = vi.fn();
-    const { user } = renderView(<LoqTimeline cinematicId={cinematic.id} onEditLoq={onEditLoq} />);
+    const { user } = renderView(<LoqTimeline cinematicId={cinematic.id} onEditLoq={onEditLoq} onRecommit={vi.fn()} />);
 
     const bar = screen.getByTitle('L1: 2026-09-07 → 2026-09-11');
     await user.click(within(bar).getByRole('button'));
     expect(onEditLoq).toHaveBeenCalledWith(expect.objectContaining({ id: loq.id }));
   });
 
-  it('re-renders the bar after a committed-date change made via the store action', async () => {
+  it('opens the re-commit dialog when the unscheduled button is clicked', async () => {
+    await seedStore();
+    const { cinematic, discipline } = seedScheduledLoq();
+    const unscheduled = useStore.getState().createLoq({
+      cinematicId: cinematic.id,
+      disciplineId: discipline.id,
+      jiraKey: null,
+      type: 'L2',
+      status: 'TODO',
+      estimateDays: null,
+      committedStart: null,
+      committedFinish: null,
+      actualFinish: null,
+      dodRef: '',
+    });
+    const onRecommit = vi.fn();
+    const { user } = renderView(<LoqTimeline cinematicId={cinematic.id} onEditLoq={vi.fn()} onRecommit={onRecommit} />);
+
+    await user.click(screen.getByText(/Unscheduled — set a start date/));
+    expect(onRecommit).toHaveBeenCalledWith(expect.objectContaining({ id: unscheduled.id }), null, null);
+  });
+
+  it('re-renders the bar after a re-commit made via the store action', async () => {
     await seedStore();
     const { cinematic, loq } = seedScheduledLoq();
-    renderView(<LoqTimeline cinematicId={cinematic.id} onEditLoq={vi.fn()} />);
+    renderView(<LoqTimeline cinematicId={cinematic.id} onEditLoq={vi.fn()} onRecommit={vi.fn()} />);
 
     expect(screen.getByTitle('L1: 2026-09-07 → 2026-09-11')).toBeInTheDocument();
 
     act(() => {
-      useStore.getState().updateLoq({ ...loq, committedStart: '2026-09-14', committedFinish: '2026-09-18' });
+      useStore.getState().recommitLoq(loq.id, { committedStart: '2026-09-14', committedFinish: '2026-09-18', reason: 'Slipped', comment: '' });
     });
 
     expect(screen.queryByTitle('L1: 2026-09-07 → 2026-09-11')).not.toBeInTheDocument();
@@ -86,7 +108,7 @@ describe('LoqTimeline', () => {
   it('expands a LOQ row to assign a person and edit their window', async () => {
     await seedStore();
     const { cinematic, loq, person } = seedScheduledLoq();
-    const { user } = renderView(<LoqTimeline cinematicId={cinematic.id} onEditLoq={vi.fn()} />);
+    const { user } = renderView(<LoqTimeline cinematicId={cinematic.id} onEditLoq={vi.fn()} onRecommit={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Expand' }));
     await user.selectOptions(screen.getByRole('combobox'), person.id);

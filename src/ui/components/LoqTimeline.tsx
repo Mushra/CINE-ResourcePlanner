@@ -223,16 +223,16 @@ function ResourceRow({ resource, startIso, trackWidth }: { resource: LoqResource
   );
 }
 
-function LoqRow({ loq, startIso, trackWidth, onEditLoq }: {
+function LoqRow({ loq, startIso, trackWidth, onEditLoq, onRecommit }: {
   loq: Loq;
   startIso: string;
   trackWidth: number;
   onEditLoq: (loq: Loq) => void;
+  onRecommit: (loq: Loq, initialStart: string | null, initialFinish: string | null) => void;
 }) {
   const disciplines = useStore((s) => s.data.disciplines);
   const people = useStore((s) => s.data.people);
   const loqResources = useStore((s) => s.data.loqResources);
-  const updateLoq = useStore((s) => s.updateLoq);
   const createLoqResource = useStore((s) => s.createLoqResource);
   const [expanded, setExpanded] = useState(false);
 
@@ -260,11 +260,13 @@ function LoqRow({ loq, startIso, trackWidth, onEditLoq }: {
               startIso={startIso}
               color={discipline?.color ?? 'var(--accent)'}
               label={loq.type}
-              onCommit={(start, newFinish) => updateLoq({ ...loq, committedStart: start, committedFinish: newFinish })}
+              onCommit={(start, newFinish) => onRecommit(loq, start, newFinish)}
               onClick={() => onEditLoq(loq)}
             />
           ) : (
-            <span className="loq-row-unscheduled">Unscheduled — set a start date to place it on the timeline</span>
+            <button type="button" className="loq-row-unscheduled" onClick={() => onRecommit(loq, null, null)}>
+              Unscheduled — set a start date to place it on the timeline
+            </button>
           )}
         </div>
       </div>
@@ -300,10 +302,15 @@ function LoqRow({ loq, startIso, trackWidth, onEditLoq }: {
 /**
  * Day-level drag editor for a cinematic's LOQs: one bar per LOQ spanning its committed window
  * (falling back to the implicit estimateDays-derived finish), expandable to its LoqResource windows.
- * Dragging a bar body moves both dates; dragging an edge resizes that side — both write straight
- * through updateLoq/updateLoqResource (the V1 direct-write decision, no commitment-event history).
+ * Dragging a LOQ bar or its edges opens RecommitDialog (via onRecommit) instead of writing straight
+ * through — committed dates are an attributed, justified event (PLANNING_ENGINE.md §3). Resource
+ * bars are unaffected by that rule and still write straight through updateLoqResource.
  */
-export function LoqTimeline({ cinematicId, onEditLoq }: { cinematicId: string; onEditLoq: (loq: Loq) => void }) {
+export function LoqTimeline({ cinematicId, onEditLoq, onRecommit }: {
+  cinematicId: string;
+  onEditLoq: (loq: Loq) => void;
+  onRecommit: (loq: Loq, initialStart: string | null, initialFinish: string | null) => void;
+}) {
   const allLoqs = useStore((s) => s.data.loqs);
   const loqs = allLoqs.filter((l) => l.cinematicId === cinematicId).sort((a, b) => a.sortOrder - b.sortOrder);
   const loqResources = useStore((s) => s.data.loqResources);
@@ -345,7 +352,9 @@ export function LoqTimeline({ cinematicId, onEditLoq }: { cinematicId: string; o
           </div>
         </div>
         <div className="loq-timeline-rows">
-          {loqs.map((loq) => <LoqRow key={loq.id} loq={loq} startIso={startIso} trackWidth={trackWidth} onEditLoq={onEditLoq} />)}
+          {loqs.map((loq) => (
+            <LoqRow key={loq.id} loq={loq} startIso={startIso} trackWidth={trackWidth} onEditLoq={onEditLoq} onRecommit={onRecommit} />
+          ))}
         </div>
       </div>
     </div>
