@@ -76,7 +76,36 @@ const RULES: RuleDoc[] = [
     severities: ['warning'],
     description: "An active person is staffed, across all of their projects combined, above their own capacity in a month.",
   },
+  {
+    category: 'capacity_conflict_cinematic',
+    title: 'Cinematic capacity conflict',
+    severities: ['critical'],
+    description: "A project's bottom-up LOQ demand for a discipline in a month (summed across all of its Cinematics) exceeds the project's own top-down requirement for that discipline.",
+  },
+  {
+    category: 'loq_at_risk',
+    title: 'LOQ at risk',
+    severities: ['critical', 'warning'],
+    description: "A LOQ's forecast has slipped past its committed date and isn't yet Done. Critical past a 5-day slip, warning otherwise.",
+  },
+  {
+    category: 'loq_root_cause',
+    title: 'LOQ root cause',
+    severities: ['critical'],
+    description: 'A LOQ carrying its own declared variance (or a late actual finish) is the root cause of at least one downstream delay — surfaced once, with the impacted LOQs listed rather than as separate checks.',
+  },
+  {
+    category: 'loq_early_opportunity',
+    title: 'Early completion opportunity',
+    severities: ['info'],
+    description: 'A LOQ is forecast (or actually finished) ahead of its committed date and has a downstream dependent that could be pulled earlier — a flag only, never applied automatically.',
+  },
 ];
+
+// Exported so tests/validationRulesDialog.test.ts can assert RULES stays in sync with CheckCategory
+// (see ARCHITECTURE_AUDIT.md §8's drift-risk finding — this hand-maintained mirror has fallen behind
+// validation.ts before).
+export { RULES };
 
 function SeverityPills({ severities }: { severities: RuleDoc['severities'] }) {
   return (

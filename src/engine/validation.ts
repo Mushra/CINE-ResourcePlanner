@@ -1,6 +1,7 @@
 import type { Period, Severity } from '../domain/types';
 import { PlanningEngine, UNASSIGNED_DISCIPLINE_ID, round2 } from './planning';
 import { getForecastWindowPeriods } from './forecast';
+import { impactedLoqIds } from './loqForecast';
 import { comparePeriod, formatPeriodLabel, periodFromISODate, periodRange } from '../domain/periods';
 import { deriveProjectStatus } from '../domain/projectStatus';
 
@@ -16,7 +17,10 @@ export type CheckCategory =
   | 'duration_mismatch'
   | 'unstaffed_person'
   | 'over_allocated_person'
-  | 'capacity_conflict_cinematic';
+  | 'capacity_conflict_cinematic'
+  | 'loq_at_risk'
+  | 'loq_root_cause'
+  | 'loq_early_opportunity';
 
 export interface SanityCheck {
   id: string;
@@ -51,6 +55,9 @@ export function getSanityChecks(engine: PlanningEngine): SanityCheck[] {
   checks.push(...checkUnstaffedPeople(engine));
   checks.push(...checkOverAllocatedPeople(engine));
   checks.push(...checkCinematicCapacityConflict(engine));
+  checks.push(...checkLoqAtRisk(engine));
+  checks.push(...checkLoqRootCause(engine));
+  checks.push(...checkLoqEarlyOpportunity(engine));
 
   for (const check of checks) {
     if (check.disciplineId) continue;
@@ -249,6 +256,92 @@ function checkCinematicCapacityConflict(engine: PlanningEngine): SanityCheck[] {
         });
       }
     }
+  }
+  return checks;
+}
+
+/** "Animation · L1 (Seq01)" — the same label convention LoqDependencyEditor already uses for a LOQ. */
+function loqLabel(engine: PlanningEngine, loqId: string): string {
+  const loq = engine.loq(loqId);
+  if (!loq) return loqId;
+  const disciplineName = engine.discipline(loq.disciplineId)?.name ?? 'Unassigned';
+  const cinematicName = engine.cinematic(loq.cinematicId)?.name;
+  return cinematicName ? `${disciplineName} · ${loq.type} (${cinematicName})` : `${disciplineName} · ${loq.type}`;
+}
+
+/** loq_at_risk (PLANNING_ENGINE.md §8): a LOQ whose forecast has slipped past its committed date and
+ * is not yet DONE. Severity escalates to critical past a 5-calendar-day slip — a simple deterministic
+ * threshold, not a heuristic. */
+function checkLoqAtRisk(engine: PlanningEngine): SanityCheck[] {
+  const checks: SanityCheck[] = [];
+  for (const [loqId, forecast] of engine.getLoqForecasts()) {
+    const loq = engine.loq(loqId);
+    if (!loq || loq.status === 'DONE' || forecast.deltaDays <= 0) continue;
+    const project = engine.loqProject(loqId);
+    const severity: Severity = forecast.deltaDays >= 5 ? 'critical' : 'warning';
+    checks.push({
+      id: `loq-at-risk:${loqId}`,
+      severity,
+      category: 'loq_at_risk',
+      projectId: project?.id,
+      projectName: project?.name,
+      disciplineId: loq.disciplineId,
+      disciplineName: engine.discipline(loq.disciplineId)?.name,
+      message: `${loqLabel(engine, loqId)} is forecast to finish ${forecast.deltaDays}d late`,
+      impact: `Forecast finish ${forecast.forecastFinish ?? '—'} vs. committed ${forecast.committedFinish ?? '—'} (source: ${forecast.source})`,
+    });
+  }
+  return checks;
+}
+
+/** loq_root_cause (PLANNING_ENGINE.md §6/§8): a LOQ whose own slip (from its own variance or
+ * actualFinish, never inherited) is the root cause of at least one downstream impact — surfaced once,
+ * with the downstream chain named in `impact`, never as separate per-LOQ incidents. */
+function checkLoqRootCause(engine: PlanningEngine): SanityCheck[] {
+  const checks: SanityCheck[] = [];
+  const forecasts = engine.getLoqForecasts();
+  for (const [loqId, forecast] of forecasts) {
+    if (forecast.deltaDays <= 0 || forecast.rootCauseLoqId !== loqId) continue;
+    const impacted = impactedLoqIds(loqId, forecasts);
+    if (impacted.length === 0) continue;
+    const loq = engine.loq(loqId);
+    if (!loq) continue;
+    const project = engine.loqProject(loqId);
+    checks.push({
+      id: `loq-root-cause:${loqId}`,
+      severity: 'critical',
+      category: 'loq_root_cause',
+      projectId: project?.id,
+      projectName: project?.name,
+      disciplineId: loq.disciplineId,
+      disciplineName: engine.discipline(loq.disciplineId)?.name,
+      message: `${loqLabel(engine, loqId)} is the root cause of ${impacted.length} downstream ${impacted.length > 1 ? 'delays' : 'delay'}`,
+      impact: `Impacts: ${impacted.map((id) => loqLabel(engine, id)).join(', ')}`,
+    });
+  }
+  return checks;
+}
+
+/** loq_early_opportunity (PLANNING_ENGINE.md §4.2/§8): a LOQ whose forecast/actual beats its
+ * committed date and has a downstream dependent — a flag only, never auto-applied to the downstream. */
+function checkLoqEarlyOpportunity(engine: PlanningEngine): SanityCheck[] {
+  const checks: SanityCheck[] = [];
+  for (const [loqId, forecast] of engine.getLoqForecasts()) {
+    if (forecast.deltaDays >= 0 || !engine.loqHasDownstreamDependency(loqId)) continue;
+    const loq = engine.loq(loqId);
+    if (!loq) continue;
+    const project = engine.loqProject(loqId);
+    checks.push({
+      id: `loq-early-opportunity:${loqId}`,
+      severity: 'info',
+      category: 'loq_early_opportunity',
+      projectId: project?.id,
+      projectName: project?.name,
+      disciplineId: loq.disciplineId,
+      disciplineName: engine.discipline(loq.disciplineId)?.name,
+      message: `${loqLabel(engine, loqId)} could finish ${-forecast.deltaDays}d early`,
+      impact: `Forecast finish ${forecast.forecastFinish ?? '—'} vs. committed ${forecast.committedFinish ?? '—'} — a downstream LOQ could be pulled earlier if re-committed`,
+    });
   }
   return checks;
 }

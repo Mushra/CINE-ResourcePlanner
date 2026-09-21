@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { PlanningEngine } from '../src/engine/planning';
 import { getSanityChecks } from '../src/engine/validation';
-import { cinematic, discipline, loq, person, personAssignment, planningData, pool, project, requirement } from './fixtures';
+import {
+  cinematic,
+  discipline,
+  loq,
+  loqDependency,
+  person,
+  personAssignment,
+  planningData,
+  pool,
+  project,
+  requirement,
+  varianceEvent,
+} from './fixtures';
 
 describe('getSanityChecks — over capacity', () => {
   it('emits a critical check when demand exceeds discipline capacity', () => {
@@ -301,5 +313,90 @@ describe('getSanityChecks — cinematic capacity conflict', () => {
     const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1] }));
 
     expect(getSanityChecks(engine).filter((c) => c.category === 'capacity_conflict_cinematic')).toHaveLength(0);
+  });
+});
+
+describe('getSanityChecks — LOQ forecast (at risk, root cause, early opportunity)', () => {
+  it('emits loq_at_risk for a LOQ whose forecast has slipped and is not DONE', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id, name: 'Seq01' });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, committedStart: '2026-09-01', committedFinish: '2026-09-10' });
+    const variance = varianceEvent({ loqId: l1.id, forecastDateAtDeclaration: '2026-09-16', deltaDays: 6 });
+
+    const engine = new PlanningEngine(
+      planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1], varianceEvents: [variance] }),
+    );
+
+    const checks = getSanityChecks(engine).filter((c) => c.category === 'loq_at_risk');
+    expect(checks).toHaveLength(1);
+    expect(checks[0]).toMatchObject({ severity: 'critical', projectId: p1.id, disciplineId: animation.id });
+  });
+
+  it('does not flag loq_at_risk once the LOQ is DONE', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'DONE', committedStart: '2026-09-01', committedFinish: '2026-09-10' });
+    const variance = varianceEvent({ loqId: l1.id, forecastDateAtDeclaration: '2026-09-16', deltaDays: 6 });
+
+    const engine = new PlanningEngine(
+      planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1], varianceEvents: [variance] }),
+    );
+
+    expect(getSanityChecks(engine).filter((c) => c.category === 'loq_at_risk')).toHaveLength(0);
+  });
+
+  it('emits a single loq_root_cause naming the downstream impact, not a separate check per LOQ', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id, name: 'Seq01' });
+    const pred = loq({ cinematicId: cine.id, disciplineId: animation.id, type: 'L1', committedStart: '2026-09-01', committedFinish: '2026-09-10' });
+    const succ = loq({ cinematicId: cine.id, disciplineId: animation.id, type: 'L2', committedStart: '2026-09-11', committedFinish: '2026-09-20' });
+    const dep = loqDependency({ predecessorLoqId: pred.id, successorLoqId: succ.id });
+    const variance = varianceEvent({ loqId: pred.id, forecastDateAtDeclaration: '2026-09-15', deltaDays: 5 });
+
+    const engine = new PlanningEngine(
+      planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [pred, succ], loqDependencies: [dep], varianceEvents: [variance] }),
+    );
+
+    const rootCauseChecks = getSanityChecks(engine).filter((c) => c.category === 'loq_root_cause');
+    expect(rootCauseChecks).toHaveLength(1);
+    expect(rootCauseChecks[0].severity).toBe('critical');
+    expect(rootCauseChecks[0].impact).toContain('L2');
+
+    // The successor is impact-only — it must not get its own loq_root_cause row.
+    const atRiskChecks = getSanityChecks(engine).filter((c) => c.category === 'loq_at_risk');
+    expect(atRiskChecks).toHaveLength(2);
+  });
+
+  it('emits loq_early_opportunity for an early forecast with a downstream dependent', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const pred = loq({ cinematicId: cine.id, disciplineId: animation.id, committedStart: '2026-09-01', committedFinish: '2026-09-10' });
+    const succ = loq({ cinematicId: cine.id, disciplineId: animation.id, committedStart: '2026-09-11', committedFinish: '2026-09-20' });
+    const dep = loqDependency({ predecessorLoqId: pred.id, successorLoqId: succ.id });
+    const variance = varianceEvent({ loqId: pred.id, forecastDateAtDeclaration: '2026-09-07', deltaDays: -3 });
+
+    const engine = new PlanningEngine(
+      planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [pred, succ], loqDependencies: [dep], varianceEvents: [variance] }),
+    );
+
+    const checks = getSanityChecks(engine).filter((c) => c.category === 'loq_early_opportunity');
+    expect(checks).toHaveLength(1);
+    expect(checks[0].projectId).toBe(p1.id);
+  });
+
+  it('does not flag an early forecast when the LOQ has no downstream dependent', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, committedStart: '2026-09-01', committedFinish: '2026-09-10' });
+    const variance = varianceEvent({ loqId: l1.id, forecastDateAtDeclaration: '2026-09-07', deltaDays: -3 });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1], varianceEvents: [variance] }));
+
+    expect(getSanityChecks(engine).filter((c) => c.category === 'loq_early_opportunity')).toHaveLength(0);
   });
 });

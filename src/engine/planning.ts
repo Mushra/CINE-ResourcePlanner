@@ -2,6 +2,7 @@ import type {
   Cinematic,
   Discipline,
   Loq,
+  LoqDependency,
   Person,
   PersonAssignment,
   PersonAssignmentAllocation,
@@ -93,6 +94,7 @@ export class PlanningEngine {
   private readonly cinematicsByProject: Map<string, Cinematic[]>;
   private readonly cinematicsById: Map<string, Cinematic>;
   private readonly loqsById: Map<string, Loq>;
+  private readonly dependenciesByPredecessor: Map<string, LoqDependency[]>;
   private loqForecastsCache: Map<string, LoqForecast> | null = null;
   private loqForecastsByCinematicCache: Map<string, Map<string, LoqForecast>> | null = null;
 
@@ -159,6 +161,13 @@ export class PlanningEngine {
     }
 
     this.loqsById = new Map(data.loqs.map((l) => [l.id, l]));
+
+    this.dependenciesByPredecessor = new Map();
+    for (const dep of data.loqDependencies) {
+      const list = this.dependenciesByPredecessor.get(dep.predecessorLoqId) ?? [];
+      list.push(dep);
+      this.dependenciesByPredecessor.set(dep.predecessorLoqId, list);
+    }
   }
 
   pools(): ResourcePool[] {
@@ -456,6 +465,12 @@ export class PlanningEngine {
       }
     }
     return this.loqForecastsByCinematicCache.get(cinematicId) ?? EMPTY_LOQ_FORECAST_MAP;
+  }
+
+  /** Whether at least one dependency edge has this LOQ as its predecessor — used by
+   * loq_early_opportunity to gate on "has a downstream dependent that could be pulled earlier". */
+  loqHasDownstreamDependency(loqId: string): boolean {
+    return (this.dependenciesByPredecessor.get(loqId)?.length ?? 0) > 0;
   }
 
   /** Per-person assigned FTE for one project at one period — drives the ProjectDetail UI. */
