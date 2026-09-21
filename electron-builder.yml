@@ -6,6 +6,9 @@ files:
   - dist/**
   - electron/**
   - package.json
+extraResources:
+  - from: resources/mpp
+    to: mpp
 win:
   target: nsis
 nsis:

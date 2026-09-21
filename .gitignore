@@ -13,6 +13,12 @@ dist-ssr
 release
 *.local
 
+# Java shim build outputs (see scripts/prepare-mpp-runtime.mjs) — resources/mpp/lib/*.jar (the
+# vendored MPXJ + dependency jars) IS committed; only the compiled shim class and the jlinked JRE
+# are regenerated per-build.
+resources/mpp/shim
+resources/mpp/jre
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

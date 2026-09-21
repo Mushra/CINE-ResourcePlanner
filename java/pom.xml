@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Not a build tool for the app itself — this pom exists only to resolve MPXJ's transitive runtime
+  jars reproducibly (see docs/INTEGRATIONS.md). `mvn dependency:copy-dependencies` copies the
+  resolved jars into ../resources/mpp/lib, which IS committed (vendored, changes rarely). The
+  compiled shim class and the bundled JRE are separate build outputs — see
+  scripts/prepare-mpp-runtime.mjs — and are gitignored.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.mushra.cine-resource-planner</groupId>
+  <artifactId>mpp-shim</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+
+  <properties>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>net.sf.mpxj</groupId>
+      <artifactId>mpxj</artifactId>
+      <version>16.7.0</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>mpp-shim</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <version>3.8.1</version>
+        <executions>
+          <execution>
+            <id>copy-runtime-jars</id>
+            <phase>package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.basedir}/../resources/mpp/lib</outputDirectory>
+              <includeScope>runtime</includeScope>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
