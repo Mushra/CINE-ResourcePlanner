@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { useStore } from '../../src/store/useStore';
+import { useUiStore } from '../../src/store/useUiStore';
 import { seedStore } from './harness';
 
 function seedProjectAndDiscipline() {
@@ -124,6 +125,70 @@ describe('useStore — LOQ CRUD', () => {
 
     expect(useStore.getState().data.loqs.some((l) => l.id === loq.id)).toBe(false);
     expect(useStore.getState().data.loqResources.some((r) => r.id === resource.id)).toBe(false);
+  });
+});
+
+describe('useStore — recommitLoq', () => {
+  it('appends a commitment event, keeps the cached window in sync, and stamps the producer name', async () => {
+    await seedStore();
+    const { project, discipline } = seedProjectAndDiscipline();
+    const { createCinematic, createLoq, recommitLoq } = useStore.getState();
+    useUiStore.getState().setProducerName('Alex Martin');
+    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const loq = createLoq({
+      cinematicId: cinematic.id,
+      disciplineId: discipline.id,
+      jiraKey: null,
+      type: 'L1',
+      status: 'TODO',
+      estimateDays: 4,
+      committedStart: null,
+      committedFinish: null,
+      actualFinish: null,
+      dodRef: '',
+    });
+
+    recommitLoq(loq.id, { committedStart: '2026-09-01', committedFinish: '2026-09-10', reason: 'Initial commitment', comment: '' });
+
+    const updated = useStore.getState().data.loqs.find((l) => l.id === loq.id);
+    expect(updated?.committedStart).toBe('2026-09-01');
+    expect(updated?.committedFinish).toBe('2026-09-10');
+
+    const events = useStore.getState().data.loqCommitmentEvents.filter((e) => e.loqId === loq.id);
+    expect(events).toHaveLength(1);
+    expect(events[0].changedBy).toBe('Alex Martin');
+    expect(events[0].reason).toBe('Initial commitment');
+    expect(events[0].committedFinish).toBe('2026-09-10');
+
+    recommitLoq(loq.id, { committedStart: '2026-09-03', committedFinish: '2026-09-12', reason: 'Slipped 2 days', comment: 'Blocked by review' });
+
+    const afterSecond = useStore.getState().data.loqCommitmentEvents.filter((e) => e.loqId === loq.id);
+    expect(afterSecond).toHaveLength(2);
+    expect(useStore.getState().data.loqs.find((l) => l.id === loq.id)?.committedFinish).toBe('2026-09-12');
+  });
+
+  it('falls back to "Unknown" when no producer name has been set', async () => {
+    await seedStore();
+    const { project, discipline } = seedProjectAndDiscipline();
+    const { createCinematic, createLoq, recommitLoq } = useStore.getState();
+    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const loq = createLoq({
+      cinematicId: cinematic.id,
+      disciplineId: discipline.id,
+      jiraKey: null,
+      type: 'L1',
+      status: 'TODO',
+      estimateDays: 4,
+      committedStart: null,
+      committedFinish: null,
+      actualFinish: null,
+      dodRef: '',
+    });
+
+    recommitLoq(loq.id, { committedStart: '2026-09-01', committedFinish: '2026-09-10', reason: 'Initial commitment', comment: '' });
+
+    const event = useStore.getState().data.loqCommitmentEvents.find((e) => e.loqId === loq.id);
+    expect(event?.changedBy).toBe('Unknown');
   });
 });
 
