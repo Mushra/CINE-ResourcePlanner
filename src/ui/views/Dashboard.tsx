@@ -62,10 +62,23 @@ export function Dashboard() {
     (p) => p.active && p.capacityFte > 0.001 && engine.getPersonAssignedExcludingDispo(p.id, period) <= 0.001,
   );
 
+  // A loq_root_cause check already names its impacted LOQs (nested in the "Needs attention" row
+  // below); their own loq_at_risk rows are suppressed here so the same incident isn't also shown as
+  // N separate flat rows (PLANNING_ENGINE.md §6).
+  const suppressedLoqIds = new Set<string>();
+  for (const check of checks) {
+    if (check.category !== 'loq_root_cause') continue;
+    if (check.loqId) suppressedLoqIds.add(check.loqId);
+    for (const impacted of check.impacted ?? []) suppressedLoqIds.add(impacted.loqId);
+  }
+  const visibleChecks = checks.filter(
+    (check) => !(check.category === 'loq_at_risk' && check.loqId && suppressedLoqIds.has(check.loqId)),
+  );
+
   const groupedChecks: { id: string; name: string; checks: SanityCheck[] }[] = [];
   {
     const groups = new Map<string, { id: string; name: string; checks: SanityCheck[] }>();
-    for (const check of checks) {
+    for (const check of visibleChecks) {
       const id = check.disciplineId ?? '__other__';
       const name = check.disciplineName ?? 'Other';
       if (!groups.has(id)) groups.set(id, { id, name, checks: [] });
@@ -153,7 +166,27 @@ export function Dashboard() {
                             >
                               {check.message}
                             </button>
-                            <div className="issue-impact">{check.impact}</div>
+                            {check.category === 'loq_root_cause' && check.impacted && check.impacted.length > 0 ? (
+                              <ul className="issue-impact-chain">
+                                {check.impacted.map((impacted) => (
+                                  <li key={impacted.loqId} className="issue-impact-chain-row">
+                                    <button
+                                      type="button"
+                                      className="issue-impact-chain-label"
+                                      disabled={!check.projectId}
+                                      onClick={() => check.projectId && openProject(check.projectId)}
+                                    >
+                                      {impacted.label}
+                                    </button>
+                                    <span className={`issue-impact-chip ${impacted.deltaDays >= 5 ? 'issue-impact-chip-critical' : 'issue-impact-chip-warning'}`}>
+                                      {impacted.deltaDays > 0 ? '+' : ''}{impacted.deltaDays}d
+                                    </span>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <div className="issue-impact">{check.impact}</div>
+                            )}
                           </div>
                         </li>
                       ))}
