@@ -168,6 +168,18 @@ rewriting working functionality.
 - **Tests**: `tests/validation.test.ts` already covers the engine-level chain case; this phase adds
   UI tests for the nested grouping component itself.
 - **Migration considerations**: none.
+- **Status (shipped on `feature/cinematic-production-planner`, `loq_impact_ux` commits 1-3)**: as
+  scoped in the "Narrowed scope" note above — the engine side stayed untouched; `SanityCheck` gained
+  `loqId` (on all three LOQ checks) and `impacted: { loqId, label, deltaDays }[]` (on `loq_root_cause`
+  only), reusing the existing `loqLabel()` helper. `Dashboard.tsx` computes a suppression set from
+  every `loq_root_cause`'s root + impacted LOQ ids, drops any `loq_at_risk` row whose LOQ is in that
+  set before grouping, and renders the root cause's impacted LOQs as a nested `.issue-impact-chain`
+  list (label + `+Nd` chip, clickable to the project) in place of the flat impact line — reusing the
+  existing `.issue-row`/`.issue-body` markup, no new component. A three-LOQ chain (`A → B → C`, one
+  variance on `A`) now shows exactly one root-cause row with two nested impacts instead of four flat
+  rows; covered by `tests/validation.test.ts` (structured fields) and `tests/ui/dashboard.test.tsx`
+  (rendered nesting + absence of standalone rows). See `PLANNING_ENGINE.md` §6/§8 for the exact shape.
+  `jira_inconsistency` remains the only deferred check category (Phase 5).
 
 ## Phase 5 — Jira read adapter (discovery-gated)
 

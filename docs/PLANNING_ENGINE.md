@@ -236,9 +236,15 @@ computes the whole graph once per engine instance and caches it (`planning.ts`);
 > its max-magnitude delta). `impactedLoqIds(rootCauseLoqId, forecasts)` is the reverse lookup the
 > `loq_root_cause` check (§8) uses to name every downstream-impacted LOQ.
 >
-> **Surfacing stays flat, by design, for this slice**: `loq_root_cause`'s `impact` string lists the
-> impacted LOQs as text; there is no nested "one root cause / N impacts" Dashboard view yet — that's
-> deferred to a later phase per `IMPLEMENTATION_PLAN.md`.
+> **Nested "one root cause / N impacts" view shipped** (`loq_impact_ux` commits 1-2). `SanityCheck`
+> carries structured correlation data now — `loqId` on `loq_at_risk`/`loq_root_cause`/
+> `loq_early_opportunity`, and `impacted: { loqId, label, deltaDays }[]` on `loq_root_cause` — so the
+> Dashboard (`src/ui/views/Dashboard.tsx`) can suppress the flat `loq_at_risk` row for the root LOQ
+> itself and every LOQ in its `impacted` list, and render them instead as a nested list under the
+> `loq_root_cause` row. A predecessor slip on a chain now surfaces as **one** incident with its
+> downstream impact nested beneath it, not N separate flat rows. `loq_root_cause`'s `impact` string is
+> unchanged (still text, for the Excel export); the nesting is presentation-only, built from the new
+> structured fields. `loq_early_opportunity` stays flat — it's an info-level flag, not a delay incident.
 >
 > The shipped scope is also narrower than this section's full design: edges are **within a single
 > Cinematic only** (cross-Cinematic edges deferred), `type` is always `'finish_to_start'` (not yet
@@ -302,8 +308,10 @@ New `SanityCheck`-style categories, added the same way the README already docume
   a heuristic, per §9), warning otherwise.
 - `loq_root_cause` (critical) — **implemented** (`checkLoqRootCause`). A LOQ carrying its own variance
   (or an `actualFinish` past committed) that is the root cause of at least one downstream impact (per
-  §6), surfaced once per root cause, with its downstream chain named in `impact` rather than as
-  separate checks.
+  §6), surfaced once per root cause, with its downstream chain named in `impact` and, since
+  `loq_impact_ux`, also carried structurally in `impacted` for the Dashboard's nested rendering — the
+  impacted LOQs' own `loq_at_risk` rows (and the root's) are suppressed from the flat list rather than
+  shown as separate checks.
 - `loq_early_opportunity` (info) — **implemented** (`checkLoqEarlyOpportunity`). A LOQ whose
   forecast/actual beat its committed date and has a downstream dependent that could, if a human
   chooses, be pulled earlier (§4.2) — a flag only, nothing is ever applied automatically.
