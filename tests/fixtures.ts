@@ -2,6 +2,7 @@ import type {
   Cinematic,
   Discipline,
   Loq,
+  LoqDependency,
   LoqResource,
   Person,
   PersonAssignment,
@@ -13,6 +14,7 @@ import type {
   ResourcePool,
   Scenario,
   StructureOverride,
+  VarianceEvent,
 } from '../src/domain/types';
 
 export const BASE_SCENARIO: Scenario = { id: 'base', name: 'Current Plan', isBase: true };
@@ -161,6 +163,34 @@ export function loqResource(overrides: Partial<LoqResource> = {}): LoqResource {
     startDate: null,
     finishDate: null,
     fte: 1,
+    ...overrides,
+  };
+}
+
+export function loqDependency(overrides: Partial<LoqDependency> = {}): LoqDependency {
+  return {
+    id: nextId('ldep'),
+    predecessorLoqId: '',
+    successorLoqId: '',
+    type: 'finish_to_start',
+    lagDays: 0,
+    source: 'override',
+    templateId: null,
+    ...overrides,
+  };
+}
+
+export function varianceEvent(overrides: Partial<VarianceEvent> = {}): VarianceEvent {
+  return {
+    id: nextId('vevt'),
+    loqId: '',
+    category: 'TECHNICAL_ISSUE',
+    comment: '',
+    declaredBy: 'Producer',
+    declaredAt: '2026-09-01T00:00:00.000Z',
+    committedDateAtDeclaration: null,
+    forecastDateAtDeclaration: null,
+    deltaDays: 0,
     ...overrides,
   };
 }
