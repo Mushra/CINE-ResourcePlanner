@@ -144,6 +144,41 @@
 }
 .theme-toggle:hover { background: var(--surface-2); }
 
+.producer-name-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 160px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.producer-name-btn:hover { color: var(--text-primary); border-color: var(--border-strong); }
+
+.producer-name-menu {
+  min-width: 220px;
+  padding: 10px;
+  gap: 6px;
+}
+.producer-name-menu label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.producer-name-menu input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .menu-wrap {
   position: relative;
 }

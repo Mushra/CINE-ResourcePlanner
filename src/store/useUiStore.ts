@@ -15,6 +15,7 @@ const COLLAPSE_STORAGE_KEY = 'cine-planner-collapse';
 const TIMELINE_FILTERS_KEY = 'cine-planner-timeline-filters';
 const GLOBAL_FILTER_KEY = 'cine-planner-global-filter';
 const PEOPLE_MODE_KEY = 'cine-planner-people-mode';
+const PRODUCER_NAME_KEY = 'cine-planner-producer-name';
 
 function loadCollapsed(): Record<string, boolean> {
   try {
@@ -97,6 +98,14 @@ function loadPeopleMode(): PeopleMode {
   }
 }
 
+function loadProducerName(): string {
+  try {
+    return localStorage.getItem(PRODUCER_NAME_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
 interface UiState {
   view: ViewName;
   selectedProjectId: string | null;
@@ -138,6 +147,11 @@ interface UiState {
   /** Which of the two People sub-views (Availability / Assignments) is showing. */
   peopleMode: PeopleMode;
   setPeopleMode: (mode: PeopleMode) => void;
+
+  /** Stamped onto loq_commitment_events.changed_by / variance_events.declared_by. A single global
+   * name, not a per-action prompt — good enough until a real Settings/user-account screen exists. */
+  producerName: string;
+  setProducerName: (name: string) => void;
 
   /** Ephemeral — not persisted. Global "jump to…" search opened with Ctrl/Cmd+K. */
   commandPaletteOpen: boolean;
@@ -216,6 +230,12 @@ export const useUiStore = create<UiState>((set, get) => ({
   setPeopleMode: (mode) => {
     localStorage.setItem(PEOPLE_MODE_KEY, mode);
     set({ peopleMode: mode });
+  },
+
+  producerName: loadProducerName(),
+  setProducerName: (name) => {
+    localStorage.setItem(PRODUCER_NAME_KEY, name);
+    set({ producerName: name });
   },
 
   commandPaletteOpen: false,

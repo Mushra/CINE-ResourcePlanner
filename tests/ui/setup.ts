@@ -50,5 +50,6 @@ afterEach(() => {
     collapsed: {},
     globalFilter: { sites: null, teams: null, disciplineIds: null },
     peopleMode: 'availability',
+    producerName: '',
   });
 });

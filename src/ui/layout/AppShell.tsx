@@ -105,6 +105,7 @@ function TopBar() {
         <Button icon="download" size="sm" variant="secondary" onClick={() => void exportXlsx()}>
           Export
         </Button>
+        <ProducerNameControl />
         <button type="button" className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme">
           <Icon name={theme === 'light' ? 'moon' : 'sun'} size={15} />
         </button>
@@ -122,6 +123,58 @@ function TopBar() {
       {importKind && <ImportDrawer kind={importKind} onClose={() => setImportKind(null)} />}
       {validationRulesOpen && <ValidationRulesDialog onClose={() => setValidationRulesOpen(false)} />}
     </header>
+  );
+}
+
+/** Stamps every re-commit/variance declaration. A single global name kept in localStorage — good
+ * enough until a real Settings/user-account screen exists (see useUiStore.ts producerName). */
+function ProducerNameControl() {
+  const producerName = useUiStore((s) => s.producerName);
+  const setProducerName = useUiStore((s) => s.setProducerName);
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(producerName);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [open]);
+
+  function save(): void {
+    setProducerName(draft.trim());
+    setOpen(false);
+  }
+
+  return (
+    <div className="menu-wrap" ref={ref}>
+      <button
+        type="button"
+        className="producer-name-btn"
+        onClick={() => { setDraft(producerName); setOpen((v) => !v); }}
+        title="Your name — used to attribute re-commits and declared variances"
+      >
+        <Icon name="user" size={14} />
+        {producerName || 'Set your name'}
+      </button>
+      {open && (
+        <div className="dropdown-menu producer-name-menu">
+          <label htmlFor="producer-name-input">Your name</label>
+          <input
+            id="producer-name-input"
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') save(); }}
+            placeholder="e.g. Alex Martin"
+          />
+          <Button variant="primary" size="sm" onClick={save}>Save</Button>
+        </div>
+      )}
+    </div>
   );
 }
 
