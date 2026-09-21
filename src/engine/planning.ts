@@ -1,6 +1,7 @@
 import type {
   Cinematic,
   Discipline,
+  Loq,
   Person,
   PersonAssignment,
   PersonAssignmentAllocation,
@@ -14,6 +15,9 @@ import type {
 import { periodRange, periodFromISODate, comparePeriod } from '../domain/periods';
 import { deriveProjectStatus } from '../domain/projectStatus';
 import { getCinematicDisciplineRollup, loqDemandPeriods, type LoqDisciplineRollupLine } from './loqRollup';
+import { computeForecasts, type LoqForecast } from './loqForecast';
+
+const EMPTY_LOQ_FORECAST_MAP: ReadonlyMap<string, LoqForecast> = new Map();
 
 export const UNASSIGNED_DISCIPLINE_ID = '__unassigned__';
 
@@ -87,6 +91,10 @@ export class PlanningEngine {
   private readonly requirementsByProject: Map<string, Requirement[]>;
   private readonly requirementAllocationsByRequirementId: Map<string, RequirementAllocation[]>;
   private readonly cinematicsByProject: Map<string, Cinematic[]>;
+  private readonly cinematicsById: Map<string, Cinematic>;
+  private readonly loqsById: Map<string, Loq>;
+  private loqForecastsCache: Map<string, LoqForecast> | null = null;
+  private loqForecastsByCinematicCache: Map<string, Map<string, LoqForecast>> | null = null;
 
   constructor(data: PlanningData, scenarioId?: string) {
     this.data = data;
@@ -143,11 +151,14 @@ export class PlanningEngine {
     }
 
     this.cinematicsByProject = new Map();
+    this.cinematicsById = new Map(data.cinematics.map((c) => [c.id, c]));
     for (const cinematic of data.cinematics) {
       const list = this.cinematicsByProject.get(cinematic.projectId) ?? [];
       list.push(cinematic);
       this.cinematicsByProject.set(cinematic.projectId, list);
     }
+
+    this.loqsById = new Map(data.loqs.map((l) => [l.id, l]));
   }
 
   pools(): ResourcePool[] {
@@ -398,6 +409,53 @@ export class PlanningEngine {
     const cinematicIds = new Set((this.cinematicsByProject.get(projectId) ?? []).map((c) => c.id));
     const loqs = this.data.loqs.filter((l) => cinematicIds.has(l.cinematicId));
     return loqDemandPeriods(loqs);
+  }
+
+  loq(loqId: string): Loq | undefined {
+    return this.loqsById.get(loqId);
+  }
+
+  cinematic(cinematicId: string): Cinematic | undefined {
+    return this.cinematicsById.get(cinematicId);
+  }
+
+  /** The Project a LOQ belongs to, via its Cinematic — LOQ has no direct projectId. */
+  loqProject(loqId: string): Project | undefined {
+    const loq = this.loqsById.get(loqId);
+    const cinematic = loq ? this.cinematicsById.get(loq.cinematicId) : undefined;
+    return cinematic ? this.projectsById.get(cinematic.projectId) : undefined;
+  }
+
+  /**
+   * Every LOQ's forecast (docs/PLANNING_ENGINE.md §5/§6), computed once and cached on this instance
+   * — safe because a fresh PlanningEngine is always constructed on every mutation (see useStore.persist).
+   */
+  getLoqForecasts(): Map<string, LoqForecast> {
+    if (!this.loqForecastsCache) {
+      this.loqForecastsCache = computeForecasts(this.data.loqs, this.data.loqDependencies, this.data.varianceEvents);
+    }
+    return this.loqForecastsCache;
+  }
+
+  loqForecast(loqId: string): LoqForecast | undefined {
+    return this.getLoqForecasts().get(loqId);
+  }
+
+  /** Forecasts scoped to one Cinematic's LOQs — a stable-reference Map per cinematicId, cached, so a
+   * Zustand selector reading it doesn't allocate a fresh object every render (see loq_events lesson:
+   * a selector-allocated Map/array breaks useSyncExternalStore's reference-equality check). */
+  cinematicLoqForecasts(cinematicId: string): ReadonlyMap<string, LoqForecast> {
+    if (!this.loqForecastsByCinematicCache) {
+      this.loqForecastsByCinematicCache = new Map();
+      const all = this.getLoqForecasts();
+      for (const loq of this.data.loqs) {
+        const map = this.loqForecastsByCinematicCache.get(loq.cinematicId) ?? new Map<string, LoqForecast>();
+        const forecast = all.get(loq.id);
+        if (forecast) map.set(loq.id, forecast);
+        this.loqForecastsByCinematicCache.set(loq.cinematicId, map);
+      }
+    }
+    return this.loqForecastsByCinematicCache.get(cinematicId) ?? EMPTY_LOQ_FORECAST_MAP;
   }
 
   /** Per-person assigned FTE for one project at one period — drives the ProjectDetail UI. */

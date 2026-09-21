@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { PlanningEngine, UNASSIGNED_DISCIPLINE_ID } from '../src/engine/planning';
-import { discipline, person, personAssignment, planningData, pool, project, requirement } from './fixtures';
+import { computeForecasts } from '../src/engine/loqForecast';
+import {
+  cinematic,
+  discipline,
+  loq,
+  loqDependency,
+  person,
+  personAssignment,
+  planningData,
+  pool,
+  project,
+  requirement,
+  varianceEvent,
+} from './fixtures';
 
 describe('PlanningEngine — capacity (headcount-derived)', () => {
   it('sums active people capacityFte for a pool', () => {
@@ -364,5 +377,44 @@ describe('PlanningEngine — plan-wide aggregates (Dashboard widgets)', () => {
     const p1 = project({ name: 'Alpha' });
     const engine = new PlanningEngine(planningData({ projects: [p1] }));
     expect(engine.getProjectRequired(p1.id, '2026-09')).toBe(0);
+  });
+});
+
+describe('PlanningEngine — LOQ forecasts', () => {
+  it('matches the pure computeForecasts result for a seeded dependency chain', () => {
+    const disc = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const pred = loq({ cinematicId: cine.id, disciplineId: disc.id, committedStart: '2026-09-01', committedFinish: '2026-09-10' });
+    const succ = loq({ cinematicId: cine.id, disciplineId: disc.id, committedStart: '2026-09-11', committedFinish: '2026-09-20' });
+    const dep = loqDependency({ predecessorLoqId: pred.id, successorLoqId: succ.id });
+    const variance = varianceEvent({ loqId: pred.id, forecastDateAtDeclaration: '2026-09-15', deltaDays: 5 });
+
+    const data = planningData({
+      projects: [p1],
+      disciplines: [disc],
+      cinematics: [cine],
+      loqs: [pred, succ],
+      loqDependencies: [dep],
+      varianceEvents: [variance],
+    });
+    const engine = new PlanningEngine(data);
+
+    const expected = computeForecasts(data.loqs, data.loqDependencies, data.varianceEvents);
+    expect(engine.loqForecast(pred.id)).toEqual(expected.get(pred.id));
+    expect(engine.loqForecast(succ.id)).toEqual(expected.get(succ.id));
+    expect(engine.loqProject(pred.id)?.id).toBe(p1.id);
+  });
+
+  it('caches getLoqForecasts() and cinematicLoqForecasts() as stable references', () => {
+    const disc = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const l = loq({ cinematicId: cine.id, disciplineId: disc.id, committedStart: '2026-09-01', committedFinish: '2026-09-10' });
+    const engine = new PlanningEngine(planningData({ projects: [p1], disciplines: [disc], cinematics: [cine], loqs: [l] }));
+
+    expect(engine.getLoqForecasts()).toBe(engine.getLoqForecasts());
+    expect(engine.cinematicLoqForecasts(cine.id)).toBe(engine.cinematicLoqForecasts(cine.id));
+    expect(engine.cinematicLoqForecasts('no-such-cinematic')).toBe(engine.cinematicLoqForecasts('no-such-cinematic'));
   });
 });
