@@ -18,6 +18,7 @@ import {
   createLoqDependency as repoCreateLoqDependency, updateLoqDependency as repoUpdateLoqDependency, deleteLoqDependency as repoDeleteLoqDependency,
 } from '../db/repository';
 import { applyRpmImport, type ImportMode } from '../db/applyImport';
+import { applyMppImport, type MppApplyReport, type MppDisciplineResolution } from '../db/applyMppImport';
 import { seedDemoData } from '../db/seed';
 import { getStoredFileName, loadAutosave, saveAutosave, setStoredFileName } from '../persistence/indexeddb';
 import * as files from '../persistence/files';
@@ -25,6 +26,7 @@ import { exportWorkbookToBytes } from '../export/xlsx';
 import type { ImportReport, NormalizedImport } from '../import/rpmImport';
 import { parseRpmWorkbook } from '../import/rpmImport';
 import { parseStaffingWorkbook } from '../import/staffingImport';
+import { parseMppJson, type NormalizedMppImport } from '../import/mppImport';
 import { PlanningEngine, round2 } from '../engine/planning';
 import type { Cinematic, Discipline, Loq, LoqDependency, LoqResource, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
 import { wouldCreateCycle } from '../domain/loqGraph';
@@ -78,6 +80,13 @@ interface StoreState {
   exportXlsx: () => Promise<void>;
   importRpmExport: (mode: ImportMode) => Promise<ImportReport | null>;
   importStaffingReport: (mode: ImportMode) => Promise<ImportReport | null>;
+  /** Opens the native file picker (window.mpp, only present in the desktop app) and parses the
+   * chosen .mpp via the bundled MPXJ shim. Returns null on cancel or on a failure it already
+   * toasted — never throws. */
+  parseMppFile: () => Promise<{ fileName: string; normalized: NormalizedMppImport } | null>;
+  /** Writes a parsed .mpp import into exactly one project — see applyMppImport for the "never
+   * touch another project" guarantee. disciplineMap resolves every Text1 code the file used. */
+  applyMppImportToProject: (projectId: string, normalized: NormalizedMppImport, disciplineMap: Record<string, MppDisciplineResolution>) => MppApplyReport;
 
   createProject: (input: Omit<Project, 'id' | 'sortOrder'>) => Project;
   updateProject: (project: Project) => void;
@@ -462,6 +471,30 @@ export const useStore = create<StoreState>((set, get) => {
 
     importRpmExport: (mode) => runImport(parseRpmWorkbook, mode),
     importStaffingReport: (mode) => runImport(parseStaffingWorkbook, mode),
+
+    parseMppFile: async () => {
+      if (!window.mpp) {
+        get().toast('error', 'MS Project import is only available in the desktop app.');
+        return null;
+      }
+      const result = await window.mpp.pickAndParse();
+      if (result.canceled) return null;
+      if ('error' in result) {
+        get().toast('error', `Import failed: ${result.error}`);
+        return null;
+      }
+      return { fileName: result.fileName, normalized: parseMppJson(result.json, result.fileName) };
+    },
+    applyMppImportToProject: (projectId, normalized, disciplineMap) => {
+      const db = get().db!;
+      const report = applyMppImport(db, normalized, projectId, disciplineMap);
+      persist();
+      get().toast(
+        'success',
+        `MS Project import: ${report.loqsCreated} LOQ${report.loqsCreated === 1 ? '' : 's'} created, ${report.loqsUpdated} updated`,
+      );
+      return report;
+    },
 
     createProject: (input) => {
       const db = get().db!;
