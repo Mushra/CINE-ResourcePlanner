@@ -35,6 +35,8 @@ export interface SanityCheck {
   personId?: string;
   personName?: string;
   period?: Period;
+  loqId?: string;
+  impacted?: { loqId: string; label: string; deltaDays: number }[];
   message: string;
   impact: string;
 }
@@ -287,6 +289,7 @@ function checkLoqAtRisk(engine: PlanningEngine): SanityCheck[] {
       projectName: project?.name,
       disciplineId: loq.disciplineId,
       disciplineName: engine.discipline(loq.disciplineId)?.name,
+      loqId,
       message: `${loqLabel(engine, loqId)} is forecast to finish ${forecast.deltaDays}d late`,
       impact: `Forecast finish ${forecast.forecastFinish ?? '—'} vs. committed ${forecast.committedFinish ?? '—'} (source: ${forecast.source})`,
     });
@@ -315,6 +318,8 @@ function checkLoqRootCause(engine: PlanningEngine): SanityCheck[] {
       projectName: project?.name,
       disciplineId: loq.disciplineId,
       disciplineName: engine.discipline(loq.disciplineId)?.name,
+      loqId,
+      impacted: impacted.map((id) => ({ loqId: id, label: loqLabel(engine, id), deltaDays: forecasts.get(id)?.deltaDays ?? 0 })),
       message: `${loqLabel(engine, loqId)} is the root cause of ${impacted.length} downstream ${impacted.length > 1 ? 'delays' : 'delay'}`,
       impact: `Impacts: ${impacted.map((id) => loqLabel(engine, id)).join(', ')}`,
     });
@@ -339,6 +344,7 @@ function checkLoqEarlyOpportunity(engine: PlanningEngine): SanityCheck[] {
       projectName: project?.name,
       disciplineId: loq.disciplineId,
       disciplineName: engine.discipline(loq.disciplineId)?.name,
+      loqId,
       message: `${loqLabel(engine, loqId)} could finish ${-forecast.deltaDays}d early`,
       impact: `Forecast finish ${forecast.forecastFinish ?? '—'} vs. committed ${forecast.committedFinish ?? '—'} — a downstream LOQ could be pulled earlier if re-committed`,
     });

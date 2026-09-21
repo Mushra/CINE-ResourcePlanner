@@ -330,7 +330,7 @@ describe('getSanityChecks — LOQ forecast (at risk, root cause, early opportuni
 
     const checks = getSanityChecks(engine).filter((c) => c.category === 'loq_at_risk');
     expect(checks).toHaveLength(1);
-    expect(checks[0]).toMatchObject({ severity: 'critical', projectId: p1.id, disciplineId: animation.id });
+    expect(checks[0]).toMatchObject({ severity: 'critical', projectId: p1.id, disciplineId: animation.id, loqId: l1.id });
   });
 
   it('does not flag loq_at_risk once the LOQ is DONE', () => {
@@ -364,10 +364,49 @@ describe('getSanityChecks — LOQ forecast (at risk, root cause, early opportuni
     expect(rootCauseChecks).toHaveLength(1);
     expect(rootCauseChecks[0].severity).toBe('critical');
     expect(rootCauseChecks[0].impact).toContain('L2');
+    expect(rootCauseChecks[0].loqId).toBe(pred.id);
+    expect(rootCauseChecks[0].impacted).toHaveLength(1);
+    expect(rootCauseChecks[0].impacted![0]).toMatchObject({ loqId: succ.id });
+    expect(rootCauseChecks[0].impacted![0].label).toContain('L2');
+    expect(rootCauseChecks[0].impacted![0].deltaDays).toBeGreaterThan(0);
 
     // The successor is impact-only — it must not get its own loq_root_cause row.
     const atRiskChecks = getSanityChecks(engine).filter((c) => c.category === 'loq_at_risk');
     expect(atRiskChecks).toHaveLength(2);
+    expect(atRiskChecks.every((c) => typeof c.loqId === 'string')).toBe(true);
+  });
+
+  it('collapses a three-LOQ chain (A -> B -> C) into a single root-cause with two impacted LOQs', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id, name: 'Seq01' });
+    const a = loq({ cinematicId: cine.id, disciplineId: animation.id, type: 'L1', committedStart: '2026-09-01', committedFinish: '2026-09-10' });
+    const b = loq({ cinematicId: cine.id, disciplineId: animation.id, type: 'L2', committedStart: '2026-09-11', committedFinish: '2026-09-20' });
+    const c = loq({ cinematicId: cine.id, disciplineId: animation.id, type: 'L3', committedStart: '2026-09-21', committedFinish: '2026-09-30' });
+    const depAB = loqDependency({ predecessorLoqId: a.id, successorLoqId: b.id });
+    const depBC = loqDependency({ predecessorLoqId: b.id, successorLoqId: c.id });
+    const variance = varianceEvent({ loqId: a.id, forecastDateAtDeclaration: '2026-09-15', deltaDays: 5 });
+
+    const engine = new PlanningEngine(
+      planningData({
+        disciplines: [animation],
+        projects: [p1],
+        cinematics: [cine],
+        loqs: [a, b, c],
+        loqDependencies: [depAB, depBC],
+        varianceEvents: [variance],
+      }),
+    );
+
+    const checks = getSanityChecks(engine);
+    const rootCauseChecks = checks.filter((chk) => chk.category === 'loq_root_cause');
+    expect(rootCauseChecks).toHaveLength(1);
+    expect(rootCauseChecks[0].loqId).toBe(a.id);
+    expect(rootCauseChecks[0].impacted).toHaveLength(2);
+    expect(rootCauseChecks[0].impacted!.map((i) => i.loqId).sort()).toEqual([b.id, c.id].sort());
+
+    const atRiskChecks = checks.filter((chk) => chk.category === 'loq_at_risk');
+    expect(atRiskChecks).toHaveLength(3);
   });
 
   it('emits loq_early_opportunity for an early forecast with a downstream dependent', () => {
