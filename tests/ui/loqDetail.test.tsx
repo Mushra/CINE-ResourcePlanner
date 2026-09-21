@@ -118,4 +118,45 @@ describe('CinematicDetail — LOQ list', () => {
     expect(events).toHaveLength(1);
     expect(events[0].reason).toBe('Initial commitment');
   });
+
+  it('declares a variance on a LOQ through the dedicated dialog', async () => {
+    await seedStore();
+    const { discipline, cinematic } = seedProjectAndCinematic();
+    const loq = useStore.getState().createLoq({
+      cinematicId: cinematic.id,
+      disciplineId: discipline.id,
+      jiraKey: null,
+      type: 'L1',
+      status: 'TODO',
+      estimateDays: 4,
+      committedStart: '2026-09-01',
+      committedFinish: '2026-09-10',
+      actualFinish: null,
+      dodRef: '',
+    });
+    useUiStore.getState().openCinematic(cinematic.id);
+    const { user } = renderView(<CinematicDetail cinematicId={cinematic.id} />);
+
+    const table = screen.getByRole('table');
+    const row = within(table).getByText('L1').closest('tr')!;
+    await user.click(within(row).getByRole('button', { name: 'Variance' }));
+
+    expect(screen.getByRole('heading', { name: 'Declare variance' })).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('Category'), 'TECHNICAL_ISSUE');
+    const expectedFinish = screen.getByLabelText('Expected finish');
+    await user.clear(expectedFinish);
+    await user.type(expectedFinish, '2026-09-15');
+    await user.click(screen.getByRole('button', { name: 'Declare' }));
+
+    await screen.findByRole('button', { name: 'Variance' });
+    const stored = useStore.getState().data.varianceEvents.filter((e) => e.loqId === loq.id);
+    expect(stored).toHaveLength(1);
+    expect(stored[0].category).toBe('TECHNICAL_ISSUE');
+    expect(stored[0].deltaDays).toBe(5);
+
+    const reopenedRow = within(screen.getByRole('table')).getByText('L1').closest('tr')!;
+    await user.click(within(reopenedRow).getByRole('button', { name: 'Variance' }));
+    expect(await screen.findByRole('heading', { name: 'Declared variances' })).toBeInTheDocument();
+    expect(screen.getByText(/Technical issue.*\+5d/)).toBeInTheDocument();
+  });
 });

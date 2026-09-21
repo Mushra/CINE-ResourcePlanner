@@ -192,6 +192,64 @@ describe('useStore — recommitLoq', () => {
   });
 });
 
+describe('useStore — declareVariance', () => {
+  it('computes the signed delta against the committed finish and stamps the producer name', async () => {
+    await seedStore();
+    const { project, discipline } = seedProjectAndDiscipline();
+    const { createCinematic, createLoq, declareVariance } = useStore.getState();
+    useUiStore.getState().setProducerName('Alex Martin');
+    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const loq = createLoq({
+      cinematicId: cinematic.id,
+      disciplineId: discipline.id,
+      jiraKey: null,
+      type: 'L1',
+      status: 'TODO',
+      estimateDays: 4,
+      committedStart: '2026-09-01',
+      committedFinish: '2026-09-10',
+      actualFinish: null,
+      dodRef: '',
+    });
+
+    declareVariance(loq.id, { category: 'TECHNICAL_ISSUE', expectedFinish: '2026-09-15', comment: 'Render farm outage' });
+
+    const events = useStore.getState().data.varianceEvents.filter((e) => e.loqId === loq.id);
+    expect(events).toHaveLength(1);
+    expect(events[0].declaredBy).toBe('Alex Martin');
+    expect(events[0].committedDateAtDeclaration).toBe('2026-09-10');
+    expect(events[0].forecastDateAtDeclaration).toBe('2026-09-15');
+    expect(events[0].deltaDays).toBe(5);
+    expect(events[0].comment).toBe('Render farm outage');
+  });
+
+  it('falls back to the committed start when there is no committed finish, and "Unknown" with no producer name', async () => {
+    await seedStore();
+    const { project, discipline } = seedProjectAndDiscipline();
+    const { createCinematic, createLoq, declareVariance } = useStore.getState();
+    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const loq = createLoq({
+      cinematicId: cinematic.id,
+      disciplineId: discipline.id,
+      jiraKey: null,
+      type: 'L1',
+      status: 'TODO',
+      estimateDays: 4,
+      committedStart: '2026-09-01',
+      committedFinish: null,
+      actualFinish: null,
+      dodRef: '',
+    });
+
+    declareVariance(loq.id, { category: 'OTHER', expectedFinish: '2026-09-04', comment: '' });
+
+    const event = useStore.getState().data.varianceEvents.find((e) => e.loqId === loq.id);
+    expect(event?.declaredBy).toBe('Unknown');
+    expect(event?.committedDateAtDeclaration).toBe('2026-09-01');
+    expect(event?.deltaDays).toBe(3);
+  });
+});
+
 describe('useStore — LoqResource CRUD', () => {
   it('creates, updates, and deletes a resource window', async () => {
     await seedStore();

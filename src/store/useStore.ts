@@ -14,6 +14,7 @@ import {
   createLoq as repoCreateLoq, updateLoq as repoUpdateLoq, deleteLoq as repoDeleteLoq,
   createLoqResource as repoCreateLoqResource, updateLoqResource as repoUpdateLoqResource, deleteLoqResource as repoDeleteLoqResource,
   createLoqCommitmentEvent as repoCreateLoqCommitmentEvent,
+  createVarianceEvent as repoCreateVarianceEvent,
 } from '../db/repository';
 import { applyRpmImport, type ImportMode } from '../db/applyImport';
 import { seedDemoData } from '../db/seed';
@@ -30,6 +31,7 @@ import { applyStructureOverrides } from '../domain/overrides';
 import { normalizeKey, genericPoolName, isGenericPoolName } from '../domain/identity';
 import { addMonths, comparePeriod, formatPeriodLabel, isoFirstDayOfPeriod, isoLastDayOfPeriod, periodFromISODate, periodRange } from '../domain/periods';
 import { spreadHue } from '../ui/lib/colors';
+import { isoDiffDays } from '../ui/timeline/timelineMath';
 import { useUiStore } from './useUiStore';
 
 export type ToastKind = 'success' | 'error' | 'info';
@@ -125,6 +127,10 @@ interface StoreState {
    * loq_commitment_events row (attributed to the global producer-name preference) and keeps the
    * loqs.committed_start/finish cache in sync in the same call — see PLANNING_ENGINE.md §3. */
   recommitLoq: (loqId: string, input: { committedStart: string | null; committedFinish: string | null; reason: string; comment: string }) => void;
+  /** Declares why forecast differs from committed without touching the committed baseline itself
+   * (PLANNING_ENGINE.md §4). deltaDays is computed once at declaration from the LOQ's committed date
+   * vs. the given expectedFinish, and never recomputed. */
+  declareVariance: (loqId: string, input: { category: string; expectedFinish: string; comment: string }) => void;
 
   createLoqResource: (input: Omit<LoqResource, 'id'>) => LoqResource;
   updateLoqResource: (resource: LoqResource) => void;
@@ -606,6 +612,25 @@ export const useStore = create<StoreState>((set, get) => {
       repoUpdateLoq(db, { ...loq, committedStart: input.committedStart, committedFinish: input.committedFinish });
       persist();
       get().toast('success', `${loq.type} re-committed`);
+    },
+    declareVariance: (loqId, input) => {
+      const db = get().db!;
+      const loq = get().data.loqs.find((l) => l.id === loqId);
+      if (!loq) return;
+      const declaredBy = useUiStore.getState().producerName.trim() || 'Unknown';
+      const committedDateAtDeclaration = loq.committedFinish ?? loq.committedStart;
+      repoCreateVarianceEvent(db, {
+        loqId,
+        category: input.category,
+        comment: input.comment,
+        declaredBy,
+        declaredAt: new Date().toISOString(),
+        committedDateAtDeclaration,
+        forecastDateAtDeclaration: input.expectedFinish,
+        deltaDays: committedDateAtDeclaration ? isoDiffDays(committedDateAtDeclaration, input.expectedFinish) : 0,
+      });
+      persist();
+      get().toast('success', `Variance declared on ${loq.type}`);
     },
 
     createLoqResource: (input) => {

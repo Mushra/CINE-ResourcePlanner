@@ -8,6 +8,7 @@ import { CinematicFormDrawer, type CinematicFormValue } from '../components/Cine
 import { LoqFormDrawer, type LoqFormValue } from '../components/LoqFormDrawer';
 import { LoqTimeline } from '../components/LoqTimeline';
 import { RecommitDialog } from '../components/RecommitDialog';
+import { VarianceDialog } from '../components/VarianceDialog';
 import type { Loq } from '../../domain/types';
 
 const LOQ_STATUS_LABEL: Record<Loq['status'], string> = { TODO: 'To do', IN_PROGRESS: 'In progress', DONE: 'Done' };
@@ -27,6 +28,7 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const [newLoq, setNewLoq] = useState(false);
   const [editingLoq, setEditingLoq] = useState<Loq | null>(null);
   const [recommitTarget, setRecommitTarget] = useState<{ loq: Loq; initialStart: string | null; initialFinish: string | null } | null>(null);
+  const [varianceTarget, setVarianceTarget] = useState<Loq | null>(null);
 
   if (!cinematic) {
     return (
@@ -102,6 +104,7 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
                       <td>{loq.jiraKey ?? <span className="tbd-text">—</span>}</td>
                       <td className="cell-actions">
                         <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditingLoq(loq)}>Edit</Button>
+                        <Button variant="ghost" size="sm" icon="warning" onClick={() => setVarianceTarget(loq)}>Variance</Button>
                         <ConfirmButton label="Delete" onConfirm={() => deleteLoq(loq.id)} />
                       </td>
                     </tr>
@@ -172,6 +175,10 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
           initialFinish={recommitTarget.initialFinish}
           onClose={() => setRecommitTarget(null)}
         />
+      )}
+
+      {varianceTarget && (
+        <VarianceDialog loq={varianceTarget} onClose={() => setVarianceTarget(null)} />
       )}
     </div>
   );
