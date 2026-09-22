@@ -71,6 +71,36 @@ export function isoLastDayOfPeriod(period: Period): string {
   return `${period}-${String(lastDay).padStart(2, '0')}`;
 }
 
+export function daysInMonth(period: Period): number {
+  const { year, month0 } = parsePeriod(period);
+  return new Date(year, month0 + 1, 0).getDate();
+}
+
+/** Days since the epoch for an ISO date (yyyy-mm-dd), UTC-based so calendar arithmetic never hits a
+ * DST edge case — a private helper for monthOverlapFraction below. */
+function isoToUtcDays(iso: string): number {
+  const [y, m, d] = iso.split('-').map(Number);
+  return Date.UTC(y, m - 1, d) / 86400000;
+}
+
+/**
+ * Fraction of `period`'s days covered by the inclusive day-precise interval [startIso, finishIso]
+ * — the day-overlap prorating factor PlanningEngine uses to resolve an allocation interval into a
+ * month's FTE contribution (see requirementAllocationAt/personAllocationAt in engine/planning.ts).
+ * 0 when the interval doesn't touch the month at all; 1 for an interval that fully covers it —
+ * which is exactly what every pre-migration monthly bucket becomes (isoFirstDayOfPeriod to
+ * isoLastDayOfPeriod), which is why the v10->v11 migration is numerically lossless. Example: an
+ * interval starting April 12 contributes ~0.63 to April (19 of 30 days) and 1 to May onward.
+ */
+export function monthOverlapFraction(startIso: string, finishIso: string, period: Period): number {
+  const monthStart = isoToUtcDays(isoFirstDayOfPeriod(period));
+  const monthEnd = isoToUtcDays(isoLastDayOfPeriod(period));
+  const overlapStart = Math.max(monthStart, isoToUtcDays(startIso));
+  const overlapEnd = Math.min(monthEnd, isoToUtcDays(finishIso));
+  if (overlapEnd < overlapStart) return 0;
+  return (overlapEnd - overlapStart + 1) / daysInMonth(period);
+}
+
 export function formatPeriodLabel(period: Period, opts: { withYear?: boolean } = {}): string {
   const { month0, year } = parsePeriod(period);
   const withYear = opts.withYear ?? true;

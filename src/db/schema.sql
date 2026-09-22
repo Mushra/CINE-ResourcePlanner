@@ -63,11 +63,16 @@ CREATE TABLE IF NOT EXISTS requirements (
   UNIQUE (project_id, pool_id, scenario_id)
 );
 
+-- Day-precise allocation window (v11, see docs/DATA_MODEL.md): one row = fte FTE from start_date to
+-- finish_date inclusive. A requirement may have several, even overlapping, intervals — the engine
+-- sums their day-overlap contribution per month (see monthOverlapFraction in periods.ts and
+-- requirementAllocationAt in planning.ts). Mirrors loq_resources' start/finish-window shape.
 CREATE TABLE IF NOT EXISTS requirement_allocations (
+  id             TEXT PRIMARY KEY,
   requirement_id TEXT NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
-  period         TEXT NOT NULL,
-  fte            REAL NOT NULL DEFAULT 0,
-  PRIMARY KEY (requirement_id, period)
+  start_date     TEXT NOT NULL,
+  finish_date    TEXT NOT NULL,
+  fte            REAL NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS person_assignments (
@@ -78,11 +83,13 @@ CREATE TABLE IF NOT EXISTS person_assignments (
   UNIQUE (person_id, project_id, scenario_id)
 );
 
+-- Same shape as requirement_allocations, for a person_assignment (supply) instead of a requirement.
 CREATE TABLE IF NOT EXISTS person_assignment_allocations (
-  person_assignment_id TEXT NOT NULL REFERENCES person_assignments(id) ON DELETE CASCADE,
-  period                TEXT NOT NULL,
-  fte                   REAL NOT NULL DEFAULT 0,
-  PRIMARY KEY (person_assignment_id, period)
+  id                    TEXT PRIMARY KEY,
+  person_assignment_id  TEXT NOT NULL REFERENCES person_assignments(id) ON DELETE CASCADE,
+  start_date            TEXT NOT NULL,
+  finish_date           TEXT NOT NULL,
+  fte                   REAL NOT NULL DEFAULT 0
 );
 
 -- Persistent, name-keyed overrides layer for Team's Structure & remapping section. Never overwritten by import —

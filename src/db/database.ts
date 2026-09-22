@@ -1,6 +1,7 @@
 import initSqlJs, { type Database as SqlJsDatabase, type SqlJsStatic } from 'sql.js';
 import schemaSql from './schema.sql?raw';
 import { genericPoolName, isGenericPoolName } from '../domain/identity';
+import { isoFirstDayOfPeriod, isoLastDayOfPeriod } from '../domain/periods';
 
 let sqlJsModule: SqlJsStatic | null = null;
 
@@ -27,7 +28,10 @@ async function getSqlJs(): Promise<SqlJsStatic> {
 // actual migrate step, see migrateV7toV8() below.
 // v9 adds cinematics.jira_key (Epic-level Jira binding, see docs/INTEGRATIONS.md §3) — a plain
 // column addition, see migrateV8toV9() below.
-export const SCHEMA_VERSION = '10';
+// v11 replaces both allocation tables' monthly-bucket shape (parent_id, period) with day-precise
+// interval rows (id, parent_id, start_date, finish_date, fte) — see RequirementAllocation in
+// types.ts and migrateV10toV11() below.
+export const SCHEMA_VERSION = '11';
 
 /** Thin wrapper around a sql.js Database: schema bootstrap, typed helpers, byte export. */
 export class PlannerDatabase {
@@ -74,8 +78,11 @@ export class PlannerDatabase {
    * "Overwrite needs from assignments" silently created a second one and wrote into it — leaving
    * the discipline's total need split across two pools, with the stale one un-reachable from the UI
    * and never zeroed out no matter how many times Overwrite ran. Keeps the oldest (lowest
-   * sort_order) pool, sums every other one's requirement allocations onto it period-by-period, then
+   * sort_order) pool, re-parents every other one's requirement allocation intervals onto it, then
    * deletes the extras; healDanglingReferences (run right after) sweeps their now-orphaned rows.
+   * Re-parenting (rather than a period-by-period merge) is enough since PlanningEngine's resolver
+   * sums every interval under a parent — overlapping intervals from the merged requirements
+   * reconcile automatically (see monthOverlapFraction in periods.ts).
    */
   private healDuplicateGenericPools(): void {
     type PoolRow = { id: string; name: string; discipline_id: string | null; sort_order: number };
@@ -99,33 +106,16 @@ export class PlannerDatabase {
           [extra.id],
         );
         for (const req of reqs) {
-          const allocs = this.query<{ period: string; fte: number }>(
-            'SELECT period, fte FROM requirement_allocations WHERE requirement_id = ?',
-            [req.id],
-          );
-          if (allocs.length > 0) {
-            const existingReq = this.query<{ id: string }>(
-              'SELECT id FROM requirements WHERE project_id = ? AND pool_id = ? AND scenario_id = ?',
-              [req.project_id, canonical.id, req.scenario_id],
-            )[0];
-            let canonicalReqId = existingReq?.id;
-            if (!canonicalReqId) {
-              canonicalReqId = `req_mig_dup_${extra.id}_${req.id}`;
-              this.exec('INSERT INTO requirements (id, project_id, pool_id, scenario_id) VALUES (?, ?, ?, ?)', [canonicalReqId, req.project_id, canonical.id, req.scenario_id]);
-            }
-            const existingByPeriod = new Map(
-              this.query<{ period: string; fte: number }>('SELECT period, fte FROM requirement_allocations WHERE requirement_id = ?', [canonicalReqId])
-                .map((a) => [a.period, a.fte]),
-            );
-            for (const a of allocs) {
-              const total = (existingByPeriod.get(a.period) ?? 0) + a.fte;
-              this.exec(
-                `INSERT INTO requirement_allocations (requirement_id, period, fte) VALUES (?, ?, ?)
-                 ON CONFLICT(requirement_id, period) DO UPDATE SET fte = excluded.fte`,
-                [canonicalReqId, a.period, total],
-              );
-            }
+          const existingReq = this.query<{ id: string }>(
+            'SELECT id FROM requirements WHERE project_id = ? AND pool_id = ? AND scenario_id = ?',
+            [req.project_id, canonical.id, req.scenario_id],
+          )[0];
+          let canonicalReqId = existingReq?.id;
+          if (!canonicalReqId) {
+            canonicalReqId = `req_mig_dup_${extra.id}_${req.id}`;
+            this.exec('INSERT INTO requirements (id, project_id, pool_id, scenario_id) VALUES (?, ?, ?, ?)', [canonicalReqId, req.project_id, canonical.id, req.scenario_id]);
           }
+          this.exec('UPDATE requirement_allocations SET requirement_id = ? WHERE requirement_id = ?', [canonicalReqId, req.id]);
           this.exec('DELETE FROM requirements WHERE id = ?', [req.id]);
         }
         this.exec('DELETE FROM resource_pools WHERE id = ?', [extra.id]);
@@ -195,6 +185,7 @@ export class PlannerDatabase {
     if (Number(from) < 8) this.migrateV7toV8();
     if (Number(from) < 9) this.migrateV8toV9();
     if (Number(from) < 10) this.migrateV9toV10();
+    if (Number(from) < 11) this.migrateV10toV11();
   }
 
   /**
@@ -223,10 +214,26 @@ export class PlannerDatabase {
       INSERT INTO person_assignments (id, person_id, project_id, scenario_id)
       SELECT a.id, 'person_mig_' || a.pool_id, a.project_id, a.scenario_id
       FROM assignments a;
+    `);
 
-      INSERT INTO person_assignment_allocations (person_assignment_id, period, fte)
-      SELECT assignment_id, period, fte FROM assignment_allocations;
+    // person_assignment_allocations didn't exist before v2 — schemaSql above just created it fresh,
+    // in the current (v11+) interval shape, so this can't be a plain period-preserving raw-SQL
+    // INSERT like the two above. Each legacy monthly bucket becomes one full-month interval.
+    const legacyAllocs = this.query<{ assignment_id: string; period: string; fte: number }>(
+      'SELECT assignment_id, period, fte FROM assignment_allocations',
+    );
+    this.execMany(
+      'INSERT INTO person_assignment_allocations (id, person_assignment_id, start_date, finish_date, fte) VALUES (?, ?, ?, ?, ?)',
+      legacyAllocs.map((a, i) => [
+        `pasnalloc_mig1_${a.assignment_id}_${a.period}_${i}`,
+        a.assignment_id,
+        isoFirstDayOfPeriod(a.period),
+        isoLastDayOfPeriod(a.period),
+        a.fte,
+      ]),
+    );
 
+    this.db.exec(`
       DROP TABLE IF EXISTS assignment_allocations;
       DROP TABLE IF EXISTS assignments;
     `);
@@ -403,6 +410,84 @@ export class PlannerDatabase {
     const loqsColumns = this.query<{ name: string }>('PRAGMA table_info(loqs)');
     if (!loqsColumns.some((c) => c.name === 'paused')) {
       this.db.exec('ALTER TABLE loqs ADD COLUMN paused INTEGER NOT NULL DEFAULT 0;');
+    }
+  }
+
+  /**
+   * v11 replaces both allocation tables' monthly-bucket primary key (parent_id, period) with
+   * day-precise interval rows (id, parent_id, start_date, finish_date, fte) — see
+   * RequirementAllocation/PersonAssignmentAllocation in types.ts and monthOverlapFraction in
+   * periods.ts. Every pre-existing monthly bucket becomes one full-month interval
+   * ([isoFirstDayOfPeriod(period), isoLastDayOfPeriod(period)]), which resolves back to the exact
+   * same fte for that month under day-overlap prorating — so this migration is numerically lossless
+   * (see tests/migration.test.ts's "v10 -> v11 migration" block). Rebuild pattern, same shape as
+   * migrateV7toV8. Each table is guarded **independently** on its own `period` column's presence:
+   * for a v1 DB, requirement_allocations still has the old shape while person_assignment_allocations
+   * was already created fresh in the new shape by schemaSql (and may already hold real interval rows
+   * inserted by migrateV1toV2) — sharing one guard between the two tables would unconditionally
+   * rebuild (and empty) whichever table happened to lack a `period` column, destroying real data.
+   */
+  private migrateV10toV11(): void {
+    const reqColumns = this.query<{ name: string }>('PRAGMA table_info(requirement_allocations)');
+    if (reqColumns.some((c) => c.name === 'period')) {
+      const reqAllocs = this.query<{ requirement_id: string; period: string; fte: number }>(
+        'SELECT requirement_id, period, fte FROM requirement_allocations',
+      );
+      this.db.exec(`
+        CREATE TABLE requirement_allocations_new (
+          id             TEXT PRIMARY KEY,
+          requirement_id TEXT NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
+          start_date     TEXT NOT NULL,
+          finish_date    TEXT NOT NULL,
+          fte            REAL NOT NULL DEFAULT 0
+        );
+      `);
+      this.execMany(
+        'INSERT INTO requirement_allocations_new (id, requirement_id, start_date, finish_date, fte) VALUES (?, ?, ?, ?, ?)',
+        reqAllocs.map((a, i) => [
+          `reqalloc_mig11_${a.requirement_id}_${a.period}_${i}`,
+          a.requirement_id,
+          isoFirstDayOfPeriod(a.period),
+          isoLastDayOfPeriod(a.period),
+          a.fte,
+        ]),
+      );
+      this.db.exec(`
+        DROP TABLE requirement_allocations;
+        ALTER TABLE requirement_allocations_new RENAME TO requirement_allocations;
+        CREATE INDEX IF NOT EXISTS idx_req_alloc_req ON requirement_allocations(requirement_id);
+      `);
+    }
+
+    const pasnColumns = this.query<{ name: string }>('PRAGMA table_info(person_assignment_allocations)');
+    if (pasnColumns.some((c) => c.name === 'period')) {
+      const pasnAllocs = this.query<{ person_assignment_id: string; period: string; fte: number }>(
+        'SELECT person_assignment_id, period, fte FROM person_assignment_allocations',
+      );
+      this.db.exec(`
+        CREATE TABLE person_assignment_allocations_new (
+          id                    TEXT PRIMARY KEY,
+          person_assignment_id  TEXT NOT NULL REFERENCES person_assignments(id) ON DELETE CASCADE,
+          start_date            TEXT NOT NULL,
+          finish_date           TEXT NOT NULL,
+          fte                   REAL NOT NULL DEFAULT 0
+        );
+      `);
+      this.execMany(
+        'INSERT INTO person_assignment_allocations_new (id, person_assignment_id, start_date, finish_date, fte) VALUES (?, ?, ?, ?, ?)',
+        pasnAllocs.map((a, i) => [
+          `pasnalloc_mig11_${a.person_assignment_id}_${a.period}_${i}`,
+          a.person_assignment_id,
+          isoFirstDayOfPeriod(a.period),
+          isoLastDayOfPeriod(a.period),
+          a.fte,
+        ]),
+      );
+      this.db.exec(`
+        DROP TABLE person_assignment_allocations;
+        ALTER TABLE person_assignment_allocations_new RENAME TO person_assignment_allocations;
+        CREATE INDEX IF NOT EXISTS idx_pasn_alloc ON person_assignment_allocations(person_assignment_id);
+      `);
     }
   }
 

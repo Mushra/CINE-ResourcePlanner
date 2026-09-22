@@ -218,7 +218,7 @@ describe('v6 -> v7 migration', () => {
   it('a fresh database has all 8 new tables and the current schema_version', async () => {
     const db = await PlannerDatabase.createNew();
     expect(db.getSetting('schema_version')).toBe(SCHEMA_VERSION);
-    expect(SCHEMA_VERSION).toBe('10');
+    expect(SCHEMA_VERSION).toBe('11');
 
     const tables = new Set(db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table'").map((r) => r.name));
     for (const t of V7_TABLES) expect(tables.has(t)).toBe(true);
@@ -489,5 +489,103 @@ describe('v9 -> v10 migration', () => {
     expect(reopened.getSetting('schema_version')).toBe(SCHEMA_VERSION);
     expect(reopened.query('SELECT paused FROM cinematics WHERE id = ?', [cinematicId])).toEqual([{ paused: 0 }]);
     expect(reopened.query('SELECT paused FROM loqs WHERE id = ?', [loqId])).toEqual([{ paused: 0 }]);
+  });
+});
+
+/** Hand-builds a v10-shaped byte blob: old period-keyed allocation buckets (one requirement
+ * allocation, one person-assignment allocation, each spanning two consecutive full months at
+ * different fte rates) — proves migrateV10toV11 losslessly converts every monthly bucket into one
+ * full-month interval whose day-overlap fraction is exactly 1.0, so the engine's monthly numbers
+ * come out numerically identical before and after (see monthOverlapFraction in periods.ts). */
+async function buildV10Bytes(): Promise<{
+  bytes: Uint8Array;
+  poolId: string;
+  projectId: string;
+  requirementId: string;
+  personAssignmentId: string;
+}> {
+  const SQL = await initSqlJs();
+  const db = new SQL.Database();
+  for (const stmt of V6_SCHEMA.split(';').map((s) => s.trim()).filter(Boolean)) {
+    db.run(stmt);
+  }
+
+  const poolId = 'pool_v10_animation';
+  const projectId = 'proj_v10_alpha';
+  const requirementId = 'req_v10_1';
+  const personId = 'person_v10_1';
+  const personAssignmentId = 'pasn_v10_1';
+
+  db.run("INSERT INTO settings (key, value) VALUES ('schema_version', '10')");
+  db.run("INSERT INTO scenarios (id, name, is_base) VALUES ('base', 'Current Plan', 1)");
+  db.run(
+    'INSERT INTO resource_pools (id, name, capacity_fte, color, sort_order) VALUES (?, ?, ?, ?, ?)',
+    [poolId, 'Animation', 8, '#4f7cff', 0],
+  );
+  db.run(
+    'INSERT INTO projects (id, name, status, start_date, start_certainty, end_date, end_certainty, priority, notes, sort_order, is_dispo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [projectId, 'Cinematic Alpha', 'active', '2026-04-01', 'confirmed', '2026-06-30', 'confirmed', 'medium', '', 0, 0],
+  );
+  db.run('INSERT INTO requirements (id, project_id, pool_id, scenario_id) VALUES (?, ?, ?, ?)', [requirementId, projectId, poolId, 'base']);
+  db.run('INSERT INTO requirement_allocations (requirement_id, period, fte) VALUES (?, ?, ?)', [requirementId, '2026-04', 2.5]);
+  db.run('INSERT INTO requirement_allocations (requirement_id, period, fte) VALUES (?, ?, ?)', [requirementId, '2026-05', 4]);
+
+  db.run(
+    'INSERT INTO people (id, name, pool_id, capacity_fte, active, notes, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [personId, 'Alice', poolId, 1, 1, '', 0],
+  );
+  db.run('INSERT INTO person_assignments (id, person_id, project_id, scenario_id) VALUES (?, ?, ?, ?)', [personAssignmentId, personId, projectId, 'base']);
+  db.run('INSERT INTO person_assignment_allocations (person_assignment_id, period, fte) VALUES (?, ?, ?)', [personAssignmentId, '2026-04', 1]);
+  db.run('INSERT INTO person_assignment_allocations (person_assignment_id, period, fte) VALUES (?, ?, ?)', [personAssignmentId, '2026-05', 0.5]);
+
+  const bytes = db.export();
+  db.close();
+  return { bytes, poolId, projectId, requirementId, personAssignmentId };
+}
+
+describe('v10 -> v11 migration', () => {
+  it('converts monthly buckets to full-month intervals with no numeric change', async () => {
+    const { bytes, poolId, projectId } = await buildV10Bytes();
+
+    const db = await PlannerDatabase.openFromBytes(bytes);
+    expect(db.getSetting('schema_version')).toBe(SCHEMA_VERSION);
+
+    const reqAllocColumns = db.query<{ name: string }>('PRAGMA table_info(requirement_allocations)').map((c) => c.name);
+    expect(reqAllocColumns).toEqual(expect.arrayContaining(['id', 'start_date', 'finish_date', 'fte']));
+    expect(reqAllocColumns).not.toContain('period');
+
+    const pasnAllocColumns = db.query<{ name: string }>('PRAGMA table_info(person_assignment_allocations)').map((c) => c.name);
+    expect(pasnAllocColumns).toEqual(expect.arrayContaining(['id', 'start_date', 'finish_date', 'fte']));
+    expect(pasnAllocColumns).not.toContain('period');
+
+    // Each pre-existing monthly bucket became one full-month interval — same fte, same month.
+    expect(db.query('SELECT start_date, finish_date, fte FROM requirement_allocations ORDER BY start_date')).toEqual([
+      { start_date: '2026-04-01', finish_date: '2026-04-30', fte: 2.5 },
+      { start_date: '2026-05-01', finish_date: '2026-05-31', fte: 4 },
+    ]);
+    expect(db.query('SELECT start_date, finish_date, fte FROM person_assignment_allocations ORDER BY start_date')).toEqual([
+      { start_date: '2026-04-01', finish_date: '2026-04-30', fte: 1 },
+      { start_date: '2026-05-01', finish_date: '2026-05-31', fte: 0.5 },
+    ]);
+
+    // And the engine's monthly numbers are numerically identical to before the migration.
+    const data = loadPlanningData(db);
+    const engine = new PlanningEngine(data, BASE_SCENARIO_ID);
+    expect(engine.getRequiredCapacity(poolId, '2026-04')).toBe(2.5);
+    expect(engine.getRequiredCapacity(poolId, '2026-05')).toBe(4);
+    expect(engine.getProjectStaffing(projectId, '2026-04').lines.find((l) => l.poolId === poolId)?.assigned).toBe(1);
+    expect(engine.getProjectStaffing(projectId, '2026-05').lines.find((l) => l.poolId === poolId)?.assigned).toBe(0.5);
+  });
+
+  it('is idempotent when re-opening an already-migrated v11 database', async () => {
+    const { bytes, poolId } = await buildV10Bytes();
+    const migrated = await PlannerDatabase.openFromBytes(bytes);
+    const reopened = await PlannerDatabase.openFromBytes(migrated.export());
+
+    expect(reopened.getSetting('schema_version')).toBe(SCHEMA_VERSION);
+    const data = loadPlanningData(reopened);
+    const engine = new PlanningEngine(data, BASE_SCENARIO_ID);
+    expect(engine.getRequiredCapacity(poolId, '2026-04')).toBe(2.5);
+    expect(engine.getRequiredCapacity(poolId, '2026-05')).toBe(4);
   });
 });

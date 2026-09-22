@@ -1,7 +1,10 @@
 // Core domain model. Hierarchy: Discipline -> ResourcePool (role) -> Person.
 // Requirements (demand) stay pool-level; assignments (supply) are person-level.
-// Time resolution is monthly today; every allocation is keyed by a Period string
-// ("YYYY-MM") so weekly resolution can be introduced later without changing shapes.
+// `Period` ("YYYY-MM") remains the aggregation/display unit everywhere (Dashboard, Timeline,
+// validation all iterate months) — but the underlying allocation storage is day-precise: see
+// RequirementAllocation/PersonAssignmentAllocation below, which are date intervals, not monthly
+// buckets. PlanningEngine resolves an interval's contribution to a given month by day-overlap
+// prorating (see monthOverlapFraction in periods.ts).
 
 export type Period = string; // "YYYY-MM"
 
@@ -90,9 +93,18 @@ export interface Requirement {
   scenarioId: string;
 }
 
+/**
+ * One day-precise allocation window for a Requirement (demand): `fte` FTE from `startDate` to
+ * `finishDate` inclusive (ISO yyyy-mm-dd). A requirement may have several, even overlapping,
+ * intervals — PlanningEngine sums their day-overlap contribution per month (see
+ * monthOverlapFraction in periods.ts). Mirrors LoqResource's start/finish-window shape, but `fte`
+ * here is never null/unscheduled — an interval always has a rate.
+ */
 export interface RequirementAllocation {
+  id: string;
   requirementId: string;
-  period: Period;
+  startDate: string;
+  finishDate: string;
   fte: number;
 }
 
@@ -103,9 +115,12 @@ export interface PersonAssignment {
   scenarioId: string;
 }
 
+/** Same shape as RequirementAllocation, for a PersonAssignment (supply) instead of a Requirement. */
 export interface PersonAssignmentAllocation {
+  id: string;
   personAssignmentId: string;
-  period: Period;
+  startDate: string;
+  finishDate: string;
   fte: number;
 }
 

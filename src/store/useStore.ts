@@ -5,9 +5,11 @@ import {
   createProject as repoCreateProject, updateProject as repoUpdateProject, deleteProject as repoDeleteProject,
   createPool as repoCreatePool, updatePool as repoUpdatePool, deletePool as repoDeletePool, deletePoolCascade as repoDeletePoolCascade,
   getOrCreateRequirement, setRequirementAllocation as repoSetRequirementAllocation, setRequirementAllocations as repoSetRequirementAllocations, deleteRequirement as repoDeleteRequirement,
+  createRequirementInterval as repoCreateRequirementInterval, updateRequirementInterval as repoUpdateRequirementInterval, deleteRequirementInterval as repoDeleteRequirementInterval,
   createDiscipline as repoCreateDiscipline, updateDiscipline as repoUpdateDiscipline, deleteDiscipline as repoDeleteDiscipline, deleteDisciplineCascade as repoDeleteDisciplineCascade,
   createPerson as repoCreatePerson, updatePerson as repoUpdatePerson, deletePerson as repoDeletePerson,
   getOrCreatePersonAssignment, setPersonAssignmentAllocation as repoSetPersonAssignmentAllocation, setPersonAssignmentAllocations as repoSetPersonAssignmentAllocations, deletePersonAssignment as repoDeletePersonAssignment,
+  createPersonAssignmentInterval as repoCreatePersonAssignmentInterval, updatePersonAssignmentInterval as repoUpdatePersonAssignmentInterval, deletePersonAssignmentInterval as repoDeletePersonAssignmentInterval,
   upsertStructureOverride as repoUpsertStructureOverride, deleteStructureOverride as repoDeleteStructureOverride,
   deleteStructureOverrideByKey as repoDeleteStructureOverrideByKey,
   createCinematic as repoCreateCinematic, updateCinematic as repoUpdateCinematic, deleteCinematic as repoDeleteCinematic,
@@ -128,6 +130,12 @@ interface StoreState {
   setPersonAssignmentRange: (personId: string, projectId: string, periods: Period[], fte: number) => void;
   clearRequirementPool: (projectId: string, poolId: string) => void;
   clearPersonAssignment: (personId: string, projectId: string) => void;
+  /** Day-precise editing (Phase 2): create (intervalId null) or move/resize/re-rate (intervalId set)
+   * one interval row directly, at real start/finish dates — not snapped to month boundaries. */
+  upsertDisciplineRequirementInterval: (projectId: string, disciplineId: string, intervalId: string | null, startDate: string, finishDate: string, fte: number) => void;
+  removeDisciplineRequirementInterval: (intervalId: string) => void;
+  upsertPersonAssignmentInterval: (personId: string, projectId: string, intervalId: string | null, startDate: string, finishDate: string, fte: number) => void;
+  removePersonAssignmentInterval: (intervalId: string) => void;
   feedRequirementsFromAssignments: (projectId: string, mode: FeedRequirementsMode) => void;
   feedAllRequirementsFromAssignments: (mode: FeedRequirementsMode) => void;
 
@@ -323,6 +331,25 @@ export const useStore = create<StoreState>((set, get) => {
     const startPeriod = periodFromISODate(project.startDate);
     if (!startPeriod || comparePeriod(minPeriod, startPeriod) < 0) {
       patch.startDate = isoFirstDayOfPeriod(minPeriod);
+      patch.startCertainty = 'estimated';
+    }
+    if (Object.keys(patch).length > 0) repoUpdateProject(db, { ...project, ...patch });
+  }
+
+  /** Same as extendProjectDatesToCover above, but for a day-precise interval's own start/finish
+   * dates directly (ISO yyyy-mm-dd strings compare lexicographically, so no Period conversion is
+   * needed) — used by the interval-list editor's upsert actions instead of a Period[] range. */
+  function extendProjectDatesToCoverRange(db: PlannerDatabase, projectId: string, startDate: string, finishDate: string, fte: number): void {
+    if (fte <= 0.001) return;
+    const project = get().data.projects.find((p) => p.id === projectId);
+    if (!project) return;
+    const patch: Partial<Project> = {};
+    if (!project.endDate || finishDate > project.endDate) {
+      patch.endDate = finishDate;
+      patch.endCertainty = 'estimated';
+    }
+    if (!project.startDate || startDate < project.startDate) {
+      patch.startDate = startDate;
       patch.startCertainty = 'estimated';
     }
     if (Object.keys(patch).length > 0) repoUpdateProject(db, { ...project, ...patch });
@@ -818,6 +845,45 @@ export const useStore = create<StoreState>((set, get) => {
       if (asn) repoDeletePersonAssignment(db, asn.id);
       persist();
     },
+    upsertDisciplineRequirementInterval: (projectId, disciplineId, intervalId, startDate, finishDate, fte) => {
+      const db = get().db!;
+      const poolId = resolveGenericPoolId(db, disciplineId);
+      if (!poolId) return;
+      const clamped = Math.max(0, fte);
+      const req = getOrCreateRequirement(db, projectId, poolId, BASE_SCENARIO_ID);
+      if (intervalId) {
+        repoUpdateRequirementInterval(db, { id: intervalId, requirementId: req.id, startDate, finishDate, fte: clamped });
+      } else {
+        repoCreateRequirementInterval(db, { requirementId: req.id, startDate, finishDate, fte: clamped });
+      }
+      extendProjectDatesToCoverRange(db, projectId, startDate, finishDate, clamped);
+      persist();
+    },
+    removeDisciplineRequirementInterval: (intervalId) => {
+      const db = get().db!;
+      repoDeleteRequirementInterval(db, intervalId);
+      persist();
+    },
+    upsertPersonAssignmentInterval: (personId, projectId, intervalId, startDate, finishDate, fte) => {
+      const db = get().db!;
+      const clamped = Math.max(0, fte);
+      const asn = getOrCreatePersonAssignment(db, personId, projectId, BASE_SCENARIO_ID);
+      if (intervalId) {
+        repoUpdatePersonAssignmentInterval(db, { id: intervalId, personAssignmentId: asn.id, startDate, finishDate, fte: clamped });
+      } else {
+        repoCreatePersonAssignmentInterval(db, { personAssignmentId: asn.id, startDate, finishDate, fte: clamped });
+      }
+      extendProjectDatesToCoverRange(db, projectId, startDate, finishDate, clamped);
+      persist();
+      const start = periodFromISODate(startDate);
+      const finish = periodFromISODate(finishDate);
+      if (start && finish) warnIfOverAllocated(personId, periodRange(start, finish));
+    },
+    removePersonAssignmentInterval: (intervalId) => {
+      const db = get().db!;
+      repoDeletePersonAssignmentInterval(db, intervalId);
+      persist();
+    },
     feedRequirementsFromAssignments: (projectId, mode) => {
       const db = get().db!;
       const project = get().data.projects.find((p) => p.id === projectId);
@@ -845,19 +911,21 @@ export const useStore = create<StoreState>((set, get) => {
       const data = get().data;
       let changed = 0;
 
+      // Every allocation here is still full-month-aligned (Phase 2 day-precise editing isn't wired
+      // up yet), so "the period of a row" can be safely derived from its startDate.
       for (const req of data.requirements.filter((r) => r.projectId === projectId && r.scenarioId === BASE_SCENARIO_ID)) {
         const allocs = data.requirementAllocations.filter((a) => a.requirementId === req.id && Math.abs(a.fte) > 0.001);
         if (allocs.length === 0) continue;
-        const shifted = allocs.map((a) => ({ period: addMonths(a.period, monthDelta), fte: a.fte }));
-        for (const a of allocs) repoSetRequirementAllocation(db, req.id, a.period, 0);
+        const shifted = allocs.map((a) => ({ period: addMonths(periodFromISODate(a.startDate)!, monthDelta), fte: a.fte }));
+        for (const a of allocs) repoSetRequirementAllocation(db, req.id, periodFromISODate(a.startDate)!, 0);
         for (const s of shifted) repoSetRequirementAllocation(db, req.id, s.period, s.fte);
         changed += allocs.length;
       }
       for (const asn of data.personAssignments.filter((a) => a.projectId === projectId && a.scenarioId === BASE_SCENARIO_ID)) {
         const allocs = data.personAssignmentAllocations.filter((a) => a.personAssignmentId === asn.id && Math.abs(a.fte) > 0.001);
         if (allocs.length === 0) continue;
-        const shifted = allocs.map((a) => ({ period: addMonths(a.period, monthDelta), fte: a.fte }));
-        for (const a of allocs) repoSetPersonAssignmentAllocation(db, asn.id, a.period, 0);
+        const shifted = allocs.map((a) => ({ period: addMonths(periodFromISODate(a.startDate)!, monthDelta), fte: a.fte }));
+        for (const a of allocs) repoSetPersonAssignmentAllocation(db, asn.id, periodFromISODate(a.startDate)!, 0);
         for (const s of shifted) repoSetPersonAssignmentAllocation(db, asn.id, s.period, s.fte);
         changed += allocs.length;
       }
@@ -876,7 +944,7 @@ export const useStore = create<StoreState>((set, get) => {
 
       if (opts.needs) {
         for (const req of data.requirements.filter((r) => r.projectId === projectId && r.scenarioId === BASE_SCENARIO_ID)) {
-          const last = data.requirementAllocations.find((a) => a.requirementId === req.id && a.period === lastPeriod);
+          const last = data.requirementAllocations.find((a) => a.requirementId === req.id && periodFromISODate(a.startDate) === lastPeriod);
           if (!last || last.fte <= 0.001) continue;
           repoSetRequirementAllocations(db, req.id, addedPeriods, last.fte);
           changed += addedPeriods.length;
@@ -884,7 +952,7 @@ export const useStore = create<StoreState>((set, get) => {
       }
       if (opts.assignments) {
         for (const asn of data.personAssignments.filter((a) => a.projectId === projectId && a.scenarioId === BASE_SCENARIO_ID)) {
-          const last = data.personAssignmentAllocations.find((a) => a.personAssignmentId === asn.id && a.period === lastPeriod);
+          const last = data.personAssignmentAllocations.find((a) => a.personAssignmentId === asn.id && periodFromISODate(a.startDate) === lastPeriod);
           if (!last || last.fte <= 0.001) continue;
           repoSetPersonAssignmentAllocations(db, asn.id, addedPeriods, last.fte);
           changed += addedPeriods.length;

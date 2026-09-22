@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PlanningEngine, UNASSIGNED_DISCIPLINE_ID } from '../src/engine/planning';
 import { computeForecasts } from '../src/engine/loqForecast';
+import type { PersonAssignment, PersonAssignmentAllocation, Requirement, RequirementAllocation } from '../src/domain/types';
 import {
   cinematic,
   discipline,
@@ -79,6 +80,69 @@ describe('PlanningEngine — required / assigned / available', () => {
     expect(engine.getRequiredCapacity(animation.id, '2026-09')).toBe(0);
     expect(engine.getAssignedCapacity(animation.id, '2026-09')).toBe(0);
     expect(engine.getAvailableCapacity(animation.id, '2026-09')).toBe(8);
+  });
+});
+
+describe('PlanningEngine — day-precise interval prorating', () => {
+  it('prorates a requirement interval by day-overlap across its partial start/end months', () => {
+    const animation = pool({ capacityFte: 8 });
+    const p1 = project();
+    const req: Requirement = { id: 'req_day_1', projectId: p1.id, poolId: animation.id, scenarioId: 'base' };
+    // 1.0 FTE starting April 12th, through end of June — see the plan's own example: avril ≈ 0.63.
+    const alloc: RequirementAllocation = {
+      id: 'reqalloc_day_1',
+      requirementId: req.id,
+      startDate: '2026-04-12',
+      finishDate: '2026-06-30',
+      fte: 1,
+    };
+
+    const engine = new PlanningEngine(
+      planningData({
+        pools: [animation],
+        projects: [p1],
+        requirements: [req],
+        requirementAllocations: [alloc],
+      }),
+    );
+
+    // April: days 12-30 inclusive covered = 19 of 30 days -> 19/30 ~= 0.63.
+    expect(engine.getRequiredCapacity(animation.id, '2026-04')).toBe(0.63);
+    // May and June are fully inside the interval -> the full fte.
+    expect(engine.getRequiredCapacity(animation.id, '2026-05')).toBe(1);
+    expect(engine.getRequiredCapacity(animation.id, '2026-06')).toBe(1);
+    // March is entirely before the interval starts, July entirely after it ends -> no demand.
+    expect(engine.getRequiredCapacity(animation.id, '2026-03')).toBe(0);
+    expect(engine.getRequiredCapacity(animation.id, '2026-07')).toBe(0);
+  });
+
+  it('prorates a person-assignment interval the same way, feeding getAssignedCapacity/getProjectStaffing', () => {
+    const animation = pool({ capacityFte: 8 });
+    const alice = person({ poolId: animation.id, capacityFte: 1 });
+    const p1 = project();
+    const pa: PersonAssignment = { id: 'pasn_day_1', personId: alice.id, projectId: p1.id, scenarioId: 'base' };
+    const alloc: PersonAssignmentAllocation = {
+      id: 'pasnalloc_day_1',
+      personAssignmentId: pa.id,
+      startDate: '2026-04-12',
+      finishDate: '2026-04-30',
+      fte: 1,
+    };
+
+    const engine = new PlanningEngine(
+      planningData({
+        pools: [animation],
+        people: [alice],
+        projects: [p1],
+        personAssignments: [pa],
+        personAssignmentAllocations: [alloc],
+      }),
+    );
+
+    expect(engine.getAssignedCapacity(animation.id, '2026-04')).toBe(0.63);
+    expect(engine.getProjectStaffing(p1.id, '2026-04').lines.find((l) => l.poolId === animation.id)?.assigned).toBe(0.63);
+    // The interval ends April 30th, so May has no overlap at all.
+    expect(engine.getAssignedCapacity(animation.id, '2026-05')).toBe(0);
   });
 });
 

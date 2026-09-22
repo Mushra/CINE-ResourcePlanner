@@ -28,6 +28,7 @@ import type {
   VarianceEvent,
 } from '../domain/types';
 import type { PlannerDatabase } from './database';
+import { isoFirstDayOfPeriod, isoLastDayOfPeriod } from '../domain/periods';
 
 export const BASE_SCENARIO_ID = 'base';
 
@@ -98,16 +99,16 @@ export function loadPlanningData(db: PlannerDatabase): PlanningData {
     .map((r): Requirement => ({ id: r.id, projectId: r.project_id, poolId: r.pool_id, scenarioId: r.scenario_id }));
 
   const requirementAllocations = db
-    .query<{ requirement_id: string; period: string; fte: number }>('SELECT * FROM requirement_allocations')
-    .map((r): RequirementAllocation => ({ requirementId: r.requirement_id, period: r.period, fte: r.fte }));
+    .query<{ id: string; requirement_id: string; start_date: string; finish_date: string; fte: number }>('SELECT * FROM requirement_allocations')
+    .map((r): RequirementAllocation => ({ id: r.id, requirementId: r.requirement_id, startDate: r.start_date, finishDate: r.finish_date, fte: r.fte }));
 
   const personAssignments = db
     .query<{ id: string; person_id: string; project_id: string; scenario_id: string }>('SELECT * FROM person_assignments')
     .map((r): PersonAssignment => ({ id: r.id, personId: r.person_id, projectId: r.project_id, scenarioId: r.scenario_id }));
 
   const personAssignmentAllocations = db
-    .query<{ person_assignment_id: string; period: string; fte: number }>('SELECT * FROM person_assignment_allocations')
-    .map((r): PersonAssignmentAllocation => ({ personAssignmentId: r.person_assignment_id, period: r.period, fte: r.fte }));
+    .query<{ id: string; person_assignment_id: string; start_date: string; finish_date: string; fte: number }>('SELECT * FROM person_assignment_allocations')
+    .map((r): PersonAssignmentAllocation => ({ id: r.id, personAssignmentId: r.person_assignment_id, startDate: r.start_date, finishDate: r.finish_date, fte: r.fte }));
 
   const structureOverrides = db
     .query<{ id: string; kind: string; source_key: string; target_key: string }>('SELECT * FROM structure_overrides')
@@ -302,34 +303,97 @@ export function getOrCreateRequirement(db: PlannerDatabase, projectId: string, p
   return { id, projectId, poolId, scenarioId };
 }
 
+/**
+ * Period-keyed wrapper over interval storage, kept for the ~15+ existing call sites (useStore.ts,
+ * seed.ts, applyImport.ts) that only ever write full-month allocations. Internally matches/inserts
+ * the interval row whose bounds are exactly the given month (isoFirstDayOfPeriod/isoLastDayOfPeriod)
+ * — as long as every write stays full-month-aligned this is exactly equivalent to the old
+ * period-keyed upsert. Day-precise editing (Phase 2) should use createRequirementInterval /
+ * updateRequirementInterval / deleteRequirementInterval below instead.
+ */
 export function setRequirementAllocation(db: PlannerDatabase, requirementId: string, period: Period, fte: number): void {
+  const startDate = isoFirstDayOfPeriod(period);
+  const finishDate = isoLastDayOfPeriod(period);
+  const existing = db.query<{ id: string }>(
+    'SELECT id FROM requirement_allocations WHERE requirement_id = ? AND start_date = ? AND finish_date = ?',
+    [requirementId, startDate, finishDate],
+  )[0];
   if (fte <= 0) {
-    db.exec('DELETE FROM requirement_allocations WHERE requirement_id = ? AND period = ?', [requirementId, period]);
+    if (existing) db.exec('DELETE FROM requirement_allocations WHERE id = ?', [existing.id]);
     return;
   }
-  db.exec(
-    `INSERT INTO requirement_allocations (requirement_id, period, fte) VALUES (?, ?, ?)
-     ON CONFLICT(requirement_id, period) DO UPDATE SET fte = excluded.fte`,
-    [requirementId, period, fte],
-  );
+  if (existing) {
+    db.exec('UPDATE requirement_allocations SET fte = ? WHERE id = ?', [fte, existing.id]);
+  } else {
+    db.exec(
+      'INSERT INTO requirement_allocations (id, requirement_id, start_date, finish_date, fte) VALUES (?, ?, ?, ?, ?)',
+      [newId('reqalloc'), requirementId, startDate, finishDate, fte],
+    );
+  }
 }
 
 export function deleteRequirement(db: PlannerDatabase, requirementId: string): void {
   db.exec('DELETE FROM requirements WHERE id = ?', [requirementId]);
 }
 
-/** Sets the same FTE across many periods for one requirement in a single batched write. */
+/** Sets the same FTE across many full-month periods for one requirement in a single batched write —
+ * see setRequirementAllocation for the matching-by-bounds strategy this generalizes. */
 export function setRequirementAllocations(db: PlannerDatabase, requirementId: string, periods: Period[], fte: number): void {
   if (periods.length === 0) return;
-  if (fte <= 0) {
-    db.execMany('DELETE FROM requirement_allocations WHERE requirement_id = ? AND period = ?', periods.map((period) => [requirementId, period]));
-    return;
-  }
-  db.execMany(
-    `INSERT INTO requirement_allocations (requirement_id, period, fte) VALUES (?, ?, ?)
-     ON CONFLICT(requirement_id, period) DO UPDATE SET fte = excluded.fte`,
-    periods.map((period) => [requirementId, period, fte]),
+  const existing = db.query<{ id: string; start_date: string; finish_date: string }>(
+    'SELECT id, start_date, finish_date FROM requirement_allocations WHERE requirement_id = ?',
+    [requirementId],
   );
+  const existingIdByBounds = new Map(existing.map((r) => [`${r.start_date}|${r.finish_date}`, r.id]));
+
+  const toDelete: unknown[][] = [];
+  const toUpdate: unknown[][] = [];
+  const toInsert: unknown[][] = [];
+  for (const period of periods) {
+    const startDate = isoFirstDayOfPeriod(period);
+    const finishDate = isoLastDayOfPeriod(period);
+    const existingId = existingIdByBounds.get(`${startDate}|${finishDate}`);
+    if (fte <= 0) {
+      if (existingId) toDelete.push([existingId]);
+    } else if (existingId) {
+      toUpdate.push([fte, existingId]);
+    } else {
+      toInsert.push([newId('reqalloc'), requirementId, startDate, finishDate, fte]);
+    }
+  }
+
+  if (toDelete.length > 0) db.execMany('DELETE FROM requirement_allocations WHERE id = ?', toDelete);
+  if (toUpdate.length > 0) db.execMany('UPDATE requirement_allocations SET fte = ? WHERE id = ?', toUpdate);
+  if (toInsert.length > 0) {
+    db.execMany('INSERT INTO requirement_allocations (id, requirement_id, start_date, finish_date, fte) VALUES (?, ?, ?, ?, ?)', toInsert);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Requirement allocation intervals — id-based create/update/delete for day-precise editing (Phase
+// 2), mirroring createLoqResource/updateLoqResource/deleteLoqResource. A requirement may have
+// several, even overlapping, intervals; the engine sums their day-overlap contribution per month
+// (see monthOverlapFraction in periods.ts).
+// ---------------------------------------------------------------------------
+
+export function createRequirementInterval(db: PlannerDatabase, input: Omit<RequirementAllocation, 'id'>): RequirementAllocation {
+  const id = newId('reqalloc');
+  db.exec(
+    'INSERT INTO requirement_allocations (id, requirement_id, start_date, finish_date, fte) VALUES (?, ?, ?, ?, ?)',
+    [id, input.requirementId, input.startDate, input.finishDate, input.fte],
+  );
+  return { ...input, id };
+}
+
+export function updateRequirementInterval(db: PlannerDatabase, interval: RequirementAllocation): void {
+  db.exec(
+    'UPDATE requirement_allocations SET requirement_id=?, start_date=?, finish_date=?, fte=? WHERE id=?',
+    [interval.requirementId, interval.startDate, interval.finishDate, interval.fte, interval.id],
+  );
+}
+
+export function deleteRequirementInterval(db: PlannerDatabase, intervalId: string): void {
+  db.exec('DELETE FROM requirement_allocations WHERE id = ?', [intervalId]);
 }
 
 // ---------------------------------------------------------------------------
@@ -409,16 +473,27 @@ export function getOrCreatePersonAssignment(db: PlannerDatabase, personId: strin
   return { id, personId, projectId, scenarioId };
 }
 
+/** Same period-keyed wrapper strategy as setRequirementAllocation, for a person assignment instead
+ * of a requirement — see that function's doc comment. */
 export function setPersonAssignmentAllocation(db: PlannerDatabase, personAssignmentId: string, period: Period, fte: number): void {
+  const startDate = isoFirstDayOfPeriod(period);
+  const finishDate = isoLastDayOfPeriod(period);
+  const existing = db.query<{ id: string }>(
+    'SELECT id FROM person_assignment_allocations WHERE person_assignment_id = ? AND start_date = ? AND finish_date = ?',
+    [personAssignmentId, startDate, finishDate],
+  )[0];
   if (fte <= 0) {
-    db.exec('DELETE FROM person_assignment_allocations WHERE person_assignment_id = ? AND period = ?', [personAssignmentId, period]);
+    if (existing) db.exec('DELETE FROM person_assignment_allocations WHERE id = ?', [existing.id]);
     return;
   }
-  db.exec(
-    `INSERT INTO person_assignment_allocations (person_assignment_id, period, fte) VALUES (?, ?, ?)
-     ON CONFLICT(person_assignment_id, period) DO UPDATE SET fte = excluded.fte`,
-    [personAssignmentId, period, fte],
-  );
+  if (existing) {
+    db.exec('UPDATE person_assignment_allocations SET fte = ? WHERE id = ?', [fte, existing.id]);
+  } else {
+    db.exec(
+      'INSERT INTO person_assignment_allocations (id, person_assignment_id, start_date, finish_date, fte) VALUES (?, ?, ?, ?, ?)',
+      [newId('pasnalloc'), personAssignmentId, startDate, finishDate, fte],
+    );
+  }
 }
 
 export function deletePersonAssignment(db: PlannerDatabase, personAssignmentId: string): void {
@@ -447,18 +522,62 @@ export function deleteStructureOverrideByKey(db: PlannerDatabase, kind: Structur
   db.exec('DELETE FROM structure_overrides WHERE kind = ? AND source_key = ?', [kind, sourceKey]);
 }
 
-/** Sets the same FTE across many periods for one person assignment in a single batched write. */
+/** Sets the same FTE across many full-month periods for one person assignment in a single batched
+ * write — see setRequirementAllocations for the matching-by-bounds strategy this mirrors. */
 export function setPersonAssignmentAllocations(db: PlannerDatabase, personAssignmentId: string, periods: Period[], fte: number): void {
   if (periods.length === 0) return;
-  if (fte <= 0) {
-    db.execMany('DELETE FROM person_assignment_allocations WHERE person_assignment_id = ? AND period = ?', periods.map((period) => [personAssignmentId, period]));
-    return;
-  }
-  db.execMany(
-    `INSERT INTO person_assignment_allocations (person_assignment_id, period, fte) VALUES (?, ?, ?)
-     ON CONFLICT(person_assignment_id, period) DO UPDATE SET fte = excluded.fte`,
-    periods.map((period) => [personAssignmentId, period, fte]),
+  const existing = db.query<{ id: string; start_date: string; finish_date: string }>(
+    'SELECT id, start_date, finish_date FROM person_assignment_allocations WHERE person_assignment_id = ?',
+    [personAssignmentId],
   );
+  const existingIdByBounds = new Map(existing.map((r) => [`${r.start_date}|${r.finish_date}`, r.id]));
+
+  const toDelete: unknown[][] = [];
+  const toUpdate: unknown[][] = [];
+  const toInsert: unknown[][] = [];
+  for (const period of periods) {
+    const startDate = isoFirstDayOfPeriod(period);
+    const finishDate = isoLastDayOfPeriod(period);
+    const existingId = existingIdByBounds.get(`${startDate}|${finishDate}`);
+    if (fte <= 0) {
+      if (existingId) toDelete.push([existingId]);
+    } else if (existingId) {
+      toUpdate.push([fte, existingId]);
+    } else {
+      toInsert.push([newId('pasnalloc'), personAssignmentId, startDate, finishDate, fte]);
+    }
+  }
+
+  if (toDelete.length > 0) db.execMany('DELETE FROM person_assignment_allocations WHERE id = ?', toDelete);
+  if (toUpdate.length > 0) db.execMany('UPDATE person_assignment_allocations SET fte = ? WHERE id = ?', toUpdate);
+  if (toInsert.length > 0) {
+    db.execMany('INSERT INTO person_assignment_allocations (id, person_assignment_id, start_date, finish_date, fte) VALUES (?, ?, ?, ?, ?)', toInsert);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Person assignment allocation intervals — id-based create/update/delete for day-precise editing
+// (Phase 2), same shape as the requirement interval CRUD above.
+// ---------------------------------------------------------------------------
+
+export function createPersonAssignmentInterval(db: PlannerDatabase, input: Omit<PersonAssignmentAllocation, 'id'>): PersonAssignmentAllocation {
+  const id = newId('pasnalloc');
+  db.exec(
+    'INSERT INTO person_assignment_allocations (id, person_assignment_id, start_date, finish_date, fte) VALUES (?, ?, ?, ?, ?)',
+    [id, input.personAssignmentId, input.startDate, input.finishDate, input.fte],
+  );
+  return { ...input, id };
+}
+
+export function updatePersonAssignmentInterval(db: PlannerDatabase, interval: PersonAssignmentAllocation): void {
+  db.exec(
+    'UPDATE person_assignment_allocations SET person_assignment_id=?, start_date=?, finish_date=?, fte=? WHERE id=?',
+    [interval.personAssignmentId, interval.startDate, interval.finishDate, interval.fte, interval.id],
+  );
+}
+
+export function deletePersonAssignmentInterval(db: PlannerDatabase, intervalId: string): void {
+  db.exec('DELETE FROM person_assignment_allocations WHERE id = ?', [intervalId]);
 }
 
 // ---------------------------------------------------------------------------

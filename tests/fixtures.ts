@@ -17,6 +17,7 @@ import type {
   StructureOverride,
   VarianceEvent,
 } from '../src/domain/types';
+import { isoFirstDayOfPeriod, isoLastDayOfPeriod } from '../src/domain/periods';
 
 export const BASE_SCENARIO: Scenario = { id: 'base', name: 'Current Plan', isBase: true };
 
@@ -77,6 +78,10 @@ export function person(overrides: Partial<Person> = {}): Person {
   };
 }
 
+/** Builds a full-month interval for each entry — the external Record<Period, fte> signature is
+ * unchanged so every existing call site keeps working; internally each period becomes one interval
+ * spanning that whole month (see RequirementAllocation in types.ts). For day-precise prorating test
+ * cases, construct interval objects directly instead of going through this helper. */
 export function requirement(
   projectId: string,
   poolId: string,
@@ -86,10 +91,17 @@ export function requirement(
   const id = nextId('req');
   return {
     requirement: { id, projectId, poolId, scenarioId },
-    allocations: Object.entries(allocationsByPeriod).map(([period, fte]) => ({ requirementId: id, period, fte })),
+    allocations: Object.entries(allocationsByPeriod).map(([period, fte]) => ({
+      id: nextId('reqalloc'),
+      requirementId: id,
+      startDate: isoFirstDayOfPeriod(period),
+      finishDate: isoLastDayOfPeriod(period),
+      fte,
+    })),
   };
 }
 
+/** Same full-month-interval strategy as requirement() above, for a person assignment. */
 export function personAssignment(
   personId: string,
   projectId: string,
@@ -99,7 +111,13 @@ export function personAssignment(
   const id = nextId('pasn');
   return {
     personAssignment: { id, personId, projectId, scenarioId },
-    allocations: Object.entries(allocationsByPeriod).map(([period, fte]) => ({ personAssignmentId: id, period, fte })),
+    allocations: Object.entries(allocationsByPeriod).map(([period, fte]) => ({
+      id: nextId('pasnalloc'),
+      personAssignmentId: id,
+      startDate: isoFirstDayOfPeriod(period),
+      finishDate: isoLastDayOfPeriod(period),
+      fte,
+    })),
   };
 }
 

@@ -14,7 +14,7 @@ import type {
   RequirementAllocation,
   ResourcePool,
 } from '../domain/types';
-import { periodRange, periodFromISODate, comparePeriod } from '../domain/periods';
+import { periodRange, periodFromISODate, comparePeriod, monthOverlapFraction } from '../domain/periods';
 import { deriveProjectStatus } from '../domain/projectStatus';
 import { getCinematicDisciplineRollup, loqDemandPeriods, type LoqDisciplineRollupLine } from './loqRollup';
 import { computeForecasts, type LoqForecast } from './loqForecast';
@@ -531,7 +531,8 @@ export class PlanningEngine {
     for (const pa of this.personAssignmentsByPerson.get(personId) ?? []) {
       if (pa.scenarioId !== this.scenarioId) continue;
       for (const alloc of this.personAllocationsByAssignmentId.get(pa.id) ?? []) {
-        if (Math.abs(alloc.fte) > 0.001) periods.add(alloc.period);
+        if (Math.abs(alloc.fte) <= 0.001) continue;
+        for (const p of periodRange(periodFromISODate(alloc.startDate), periodFromISODate(alloc.finishDate))) periods.add(p);
       }
     }
     return [...periods].sort(comparePeriod);
@@ -569,13 +570,13 @@ export class PlanningEngine {
     for (const req of this.requirementsByProject.get(projectId) ?? []) {
       if (req.scenarioId !== this.scenarioId) continue;
       for (const a of this.requirementAllocationsByRequirementId.get(req.id) ?? []) {
-        periods.add(a.period);
+        for (const p of periodRange(periodFromISODate(a.startDate), periodFromISODate(a.finishDate))) periods.add(p);
       }
     }
     for (const pa of this.personAssignmentsByProject.get(projectId) ?? []) {
       if (pa.scenarioId !== this.scenarioId) continue;
       for (const a of this.personAllocationsByAssignmentId.get(pa.id) ?? []) {
-        periods.add(a.period);
+        for (const p of periodRange(periodFromISODate(a.startDate), periodFromISODate(a.finishDate))) periods.add(p);
       }
     }
     return [...periods].sort(comparePeriod);
@@ -602,8 +603,12 @@ export class PlanningEngine {
       const range = periodRange(periodFromISODate(project.startDate), periodFromISODate(project.endDate));
       range.forEach((p) => periods.add(p));
     }
-    for (const a of this.data.requirementAllocations) periods.add(a.period);
-    for (const a of this.data.personAssignmentAllocations) periods.add(a.period);
+    for (const a of this.data.requirementAllocations) {
+      for (const p of periodRange(periodFromISODate(a.startDate), periodFromISODate(a.finishDate))) periods.add(p);
+    }
+    for (const a of this.data.personAssignmentAllocations) {
+      for (const p of periodRange(periodFromISODate(a.startDate), periodFromISODate(a.finishDate))) periods.add(p);
+    }
     return [...periods].sort(comparePeriod);
   }
 
@@ -616,14 +621,25 @@ export class PlanningEngine {
     return line;
   }
 
+  /** Sums every one of the requirement's day-precise intervals' day-overlap contribution to
+   * `period` (see monthOverlapFraction in periods.ts). A full-month interval (every pre-migration
+   * row, and every write still made through the period-keyed repository wrappers) resolves to
+   * exactly its own fte for that month — day-precise intervals prorate. */
   private requirementAllocationAt(requirementId: string, period: Period): number {
     const rows = this.requirementAllocationsByRequirementId.get(requirementId);
-    return rows?.find((a) => a.period === period)?.fte ?? 0;
+    if (!rows) return 0;
+    let total = 0;
+    for (const a of rows) total += a.fte * monthOverlapFraction(a.startDate, a.finishDate, period);
+    return total;
   }
 
+  /** Same day-overlap summation as requirementAllocationAt, for a person assignment. */
   private personAllocationAt(personAssignmentId: string, period: Period): number {
     const rows = this.personAllocationsByAssignmentId.get(personAssignmentId);
-    return rows?.find((a) => a.period === period)?.fte ?? 0;
+    if (!rows) return 0;
+    let total = 0;
+    for (const a of rows) total += a.fte * monthOverlapFraction(a.startDate, a.finishDate, period);
+    return total;
   }
 }
 
