@@ -104,9 +104,11 @@ CREATE TABLE IF NOT EXISTS cinematics (
   id           TEXT PRIMARY KEY,
   project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name         TEXT NOT NULL,
+  jira_key     TEXT,              -- e.g. an Epic key; nullable until synced/linked (see docs/INTEGRATIONS.md §3)
   target_date  TEXT,              -- ISO yyyy-mm-dd, nullable (TBD)
   sort_order   INTEGER NOT NULL DEFAULT 0,
-  notes        TEXT NOT NULL DEFAULT ''
+  notes        TEXT NOT NULL DEFAULT '',
+  paused       INTEGER NOT NULL DEFAULT 0  -- manual, user-driven; never overwritten by Jira sync
 );
 
 CREATE TABLE IF NOT EXISTS loqs (
@@ -123,7 +125,8 @@ CREATE TABLE IF NOT EXISTS loqs (
   committed_finish  TEXT,               -- loq_commitment_events row, cached here for read speed
   actual_finish     TEXT,               -- ISO date, set only by Jira sync or explicit manual close
   dod_ref           TEXT NOT NULL DEFAULT '',  -- Definition of Done, free text or external ref
-  sort_order        INTEGER NOT NULL DEFAULT 0
+  sort_order        INTEGER NOT NULL DEFAULT 0,
+  paused            INTEGER NOT NULL DEFAULT 0  -- manual, user-driven; never overwritten by Jira sync
 );
 
 CREATE TABLE IF NOT EXISTS dependency_templates (
@@ -201,6 +204,10 @@ CREATE INDEX IF NOT EXISTS idx_pasn_person ON person_assignments(person_id);
 CREATE INDEX IF NOT EXISTS idx_pasn_alloc ON person_assignment_allocations(person_assignment_id);
 
 CREATE INDEX IF NOT EXISTS idx_cinematics_project ON cinematics(project_id);
+-- idx_cinematics_jira_key is created in PlannerDatabase.applySchema(), not here: unlike loqs (a
+-- v7-new table, so idx_loqs_jira_key below is always safe), cinematics existed pre-v9 without this
+-- column, so a legacy DB's pre-existing table wouldn't have it yet at the point this whole file
+-- runs as one batch — the index has to wait until after migrate() has added the column.
 CREATE INDEX IF NOT EXISTS idx_loqs_cinematic ON loqs(cinematic_id);
 CREATE INDEX IF NOT EXISTS idx_loqs_discipline ON loqs(discipline_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_loqs_jira_key ON loqs(jira_key) WHERE jira_key IS NOT NULL;

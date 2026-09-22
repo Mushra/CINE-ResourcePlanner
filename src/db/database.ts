@@ -25,7 +25,9 @@ async function getSqlJs(): Promise<SqlJsStatic> {
 // v8 reshapes loq_resources into one row per assignment window (adds start_date/finish_date,
 // drops UNIQUE(loq_id, person_id) so a person can have several disjoint windows) — this needs an
 // actual migrate step, see migrateV7toV8() below.
-export const SCHEMA_VERSION = '8';
+// v9 adds cinematics.jira_key (Epic-level Jira binding, see docs/INTEGRATIONS.md §3) — a plain
+// column addition, see migrateV8toV9() below.
+export const SCHEMA_VERSION = '10';
 
 /** Thin wrapper around a sql.js Database: schema bootstrap, typed helpers, byte export. */
 export class PlannerDatabase {
@@ -55,6 +57,10 @@ export class PlannerDatabase {
     this.db.exec(schemaSql);
     const from = this.getSetting('schema_version');
     this.migrate(from);
+    // See the comment above idx_cinematics_project in schema.sql: this index has to wait until
+    // migrate() has guaranteed the column exists (fresh DBs already have it from schemaSql above;
+    // migrateV8toV9() adds it to older ones), so it can't live in the static schema batch.
+    this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_cinematics_jira_key ON cinematics(jira_key) WHERE jira_key IS NOT NULL;');
     this.setSetting('schema_version', SCHEMA_VERSION);
     this.healDuplicateGenericPools();
     this.healDanglingReferences();
@@ -187,6 +193,8 @@ export class PlannerDatabase {
     if (Number(from) < 5) this.migrateV4toV5();
     if (Number(from) < 6) this.migrateV5toV6();
     if (Number(from) < 8) this.migrateV7toV8();
+    if (Number(from) < 9) this.migrateV8toV9();
+    if (Number(from) < 10) this.migrateV9toV10();
   }
 
   /**
@@ -367,6 +375,35 @@ export class PlannerDatabase {
       ALTER TABLE loq_resources_new RENAME TO loq_resources;
       CREATE INDEX IF NOT EXISTS idx_loq_resources_person ON loq_resources(person_id);
     `);
+  }
+
+  /**
+   * v9 adds cinematics.jira_key — a plain column addition (unlike v8, no rebuild needed). Guarded
+   * on the column already existing so a fresh v9 DB (schemaSql already created it) or an
+   * already-migrated one is a no-op. The index on this column is created separately in
+   * applySchema(), after migrate() returns — see the comment there.
+   */
+  private migrateV8toV9(): void {
+    const columns = this.query<{ name: string }>('PRAGMA table_info(cinematics)');
+    if (columns.some((c) => c.name === 'jira_key')) return;
+    this.db.exec('ALTER TABLE cinematics ADD COLUMN jira_key TEXT;');
+  }
+
+  /**
+   * v10 adds a manual, user-driven paused flag to cinematics and loqs (independent booleans —
+   * pausing a Cinematic never cascades to its LOQs). Never written by Jira sync; see
+   * checkJiraInconsistency's paused-signal comparison in validation.ts for how a Jira "paused-like"
+   * status is surfaced instead of silently applied.
+   */
+  private migrateV9toV10(): void {
+    const cinematicsColumns = this.query<{ name: string }>('PRAGMA table_info(cinematics)');
+    if (!cinematicsColumns.some((c) => c.name === 'paused')) {
+      this.db.exec('ALTER TABLE cinematics ADD COLUMN paused INTEGER NOT NULL DEFAULT 0;');
+    }
+    const loqsColumns = this.query<{ name: string }>('PRAGMA table_info(loqs)');
+    if (!loqsColumns.some((c) => c.name === 'paused')) {
+      this.db.exec('ALTER TABLE loqs ADD COLUMN paused INTEGER NOT NULL DEFAULT 0;');
+    }
   }
 
   exec(sql: string, params: unknown[] = []): void {

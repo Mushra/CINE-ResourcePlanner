@@ -215,16 +215,19 @@ const V7_TABLES = [
 ];
 
 describe('v6 -> v7 migration', () => {
-  it('a fresh database has all 8 new tables and schema_version 8', async () => {
+  it('a fresh database has all 8 new tables and the current schema_version', async () => {
     const db = await PlannerDatabase.createNew();
     expect(db.getSetting('schema_version')).toBe(SCHEMA_VERSION);
-    expect(SCHEMA_VERSION).toBe('8');
+    expect(SCHEMA_VERSION).toBe('10');
 
     const tables = new Set(db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table'").map((r) => r.name));
     for (const t of V7_TABLES) expect(tables.has(t)).toBe(true);
 
     const loqColumns = db.query<{ name: string }>('PRAGMA table_info(loqs)').map((c) => c.name);
     expect(loqColumns).toEqual(expect.arrayContaining(['committed_start', 'committed_finish', 'jira_key', 'dod_ref', 'discipline_id']));
+
+    const cinematicColumns = db.query<{ name: string }>('PRAGMA table_info(cinematics)').map((c) => c.name);
+    expect(cinematicColumns).toEqual(expect.arrayContaining(['jira_key']));
 
     const loqResourceColumns = db.query<{ name: string }>('PRAGMA table_info(loq_resources)').map((c) => c.name);
     expect(loqResourceColumns).toEqual(expect.arrayContaining(['start_date', 'finish_date', 'fte']));
@@ -234,13 +237,14 @@ describe('v6 -> v7 migration', () => {
 
     const indexes = new Set(db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='index'").map((r) => r.name));
     expect(indexes.has('idx_loqs_jira_key')).toBe(true);
+    expect(indexes.has('idx_cinematics_jira_key')).toBe(true);
   });
 
   it('a legacy v6 database gains the 8 new tables (empty) and keeps its existing data', async () => {
     const { bytes, poolId, projectId } = await buildV6Bytes();
 
     const db = await PlannerDatabase.openFromBytes(bytes);
-    expect(db.getSetting('schema_version')).toBe('8');
+    expect(db.getSetting('schema_version')).toBe(SCHEMA_VERSION);
 
     for (const t of V7_TABLES) {
       expect(db.query(`SELECT COUNT(*) as c FROM ${t}`)[0]).toMatchObject({ c: 0 });
@@ -263,7 +267,7 @@ describe('v6 -> v7 migration', () => {
     const migrated = await PlannerDatabase.openFromBytes(bytes);
     const reopened = await PlannerDatabase.openFromBytes(migrated.export());
 
-    expect(reopened.getSetting('schema_version')).toBe('8');
+    expect(reopened.getSetting('schema_version')).toBe(SCHEMA_VERSION);
     for (const t of V7_TABLES) {
       expect(reopened.query(`SELECT COUNT(*) as c FROM ${t}`)[0]).toMatchObject({ c: 0 });
     }
@@ -358,7 +362,7 @@ CREATE TABLE jira_sync_state (
 
 /** Hand-builds a v7-shaped byte blob: v6 base + the 8 v7 tables in their original shape, with one
  * loq_resources row in the OLD dateless/unique-pair shape — to prove the v7->v8 rebuild migration. */
-async function buildV7Bytes(): Promise<{ bytes: Uint8Array; loqId: string; personId: string }> {
+async function buildV7Bytes(): Promise<{ bytes: Uint8Array; cinematicId: string; loqId: string; personId: string }> {
   const SQL = await initSqlJs();
   const db = new SQL.Database();
   for (const stmt of V7_SCHEMA.split(';').map((s) => s.trim()).filter(Boolean)) {
@@ -385,7 +389,7 @@ async function buildV7Bytes(): Promise<{ bytes: Uint8Array; loqId: string; perso
 
   const bytes = db.export();
   db.close();
-  return { bytes, loqId, personId };
+  return { bytes, cinematicId, loqId, personId };
 }
 
 describe('v7 -> v8 migration', () => {
@@ -393,7 +397,7 @@ describe('v7 -> v8 migration', () => {
     const { bytes, loqId, personId } = await buildV7Bytes();
 
     const db = await PlannerDatabase.openFromBytes(bytes);
-    expect(db.getSetting('schema_version')).toBe('8');
+    expect(db.getSetting('schema_version')).toBe(SCHEMA_VERSION);
 
     const columns = db.query<{ name: string }>('PRAGMA table_info(loq_resources)').map((c) => c.name);
     expect(columns).toEqual(expect.arrayContaining(['id', 'loq_id', 'person_id', 'start_date', 'finish_date', 'fte']));
@@ -417,7 +421,73 @@ describe('v7 -> v8 migration', () => {
     const migrated = await PlannerDatabase.openFromBytes(bytes);
     const reopened = await PlannerDatabase.openFromBytes(migrated.export());
 
-    expect(reopened.getSetting('schema_version')).toBe('8');
+    expect(reopened.getSetting('schema_version')).toBe(SCHEMA_VERSION);
     expect(reopened.query('SELECT * FROM loq_resources WHERE loq_id = ?', [loqId])).toHaveLength(1);
+  });
+});
+
+describe('v8 -> v9 migration', () => {
+  it('adds cinematics.jira_key (nullable) and its partial unique index to a legacy database', async () => {
+    const { bytes } = await buildV7Bytes();
+
+    const db = await PlannerDatabase.openFromBytes(bytes);
+    expect(db.getSetting('schema_version')).toBe(SCHEMA_VERSION);
+
+    const columns = db.query<{ name: string }>('PRAGMA table_info(cinematics)').map((c) => c.name);
+    expect(columns).toContain('jira_key');
+
+    const indexes = new Set(db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='index'").map((r) => r.name));
+    expect(indexes.has('idx_cinematics_jira_key')).toBe(true);
+
+    // The column is usable and the partial unique index only constrains non-null values.
+    db.exec("UPDATE cinematics SET jira_key = 'PROD-1' WHERE id = 'cine_v7_1'");
+    db.exec("INSERT INTO cinematics (id, project_id, name, jira_key) VALUES ('cine_v7_2', 'proj_v7_alpha', 'Seq02', NULL)");
+    expect(db.query('SELECT jira_key FROM cinematics ORDER BY id')).toEqual([{ jira_key: 'PROD-1' }, { jira_key: null }]);
+  });
+
+  it('is idempotent when re-opening an already-migrated v9 database', async () => {
+    const { bytes } = await buildV7Bytes();
+    const migrated = await PlannerDatabase.openFromBytes(bytes);
+    const reopened = await PlannerDatabase.openFromBytes(migrated.export());
+
+    expect(reopened.getSetting('schema_version')).toBe(SCHEMA_VERSION);
+    const columns = reopened.query<{ name: string }>('PRAGMA table_info(cinematics)').map((c) => c.name);
+    expect(columns).toContain('jira_key');
+  });
+});
+
+describe('v9 -> v10 migration', () => {
+  it('adds paused (default 0) to cinematics and loqs on a legacy database, without losing data', async () => {
+    const { bytes, cinematicId, loqId } = await buildV7Bytes();
+
+    const db = await PlannerDatabase.openFromBytes(bytes);
+    expect(db.getSetting('schema_version')).toBe(SCHEMA_VERSION);
+
+    const cinematicColumns = db.query<{ name: string }>('PRAGMA table_info(cinematics)').map((c) => c.name);
+    const loqColumns = db.query<{ name: string }>('PRAGMA table_info(loqs)').map((c) => c.name);
+    expect(cinematicColumns).toContain('paused');
+    expect(loqColumns).toContain('paused');
+
+    // Pre-existing rows default to unpaused, and their other data survives the migration.
+    expect(db.query('SELECT id, name, paused FROM cinematics WHERE id = ?', [cinematicId])).toEqual([
+      { id: cinematicId, name: 'Seq01', paused: 0 },
+    ]);
+    expect(db.query('SELECT id, type, paused FROM loqs WHERE id = ?', [loqId])).toEqual([
+      { id: loqId, type: 'L1', paused: 0 },
+    ]);
+
+    // The column is usable going forward.
+    db.exec("UPDATE cinematics SET paused = 1 WHERE id = ?", [cinematicId]);
+    expect(db.query('SELECT paused FROM cinematics WHERE id = ?', [cinematicId])).toEqual([{ paused: 1 }]);
+  });
+
+  it('is idempotent when re-opening an already-migrated v10 database', async () => {
+    const { bytes, cinematicId, loqId } = await buildV7Bytes();
+    const migrated = await PlannerDatabase.openFromBytes(bytes);
+    const reopened = await PlannerDatabase.openFromBytes(migrated.export());
+
+    expect(reopened.getSetting('schema_version')).toBe(SCHEMA_VERSION);
+    expect(reopened.query('SELECT paused FROM cinematics WHERE id = ?', [cinematicId])).toEqual([{ paused: 0 }]);
+    expect(reopened.query('SELECT paused FROM loqs WHERE id = ?', [loqId])).toEqual([{ paused: 0 }]);
   });
 });
