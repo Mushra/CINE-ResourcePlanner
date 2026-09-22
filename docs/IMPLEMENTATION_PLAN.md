@@ -307,6 +307,63 @@ rewriting working functionality.
   identified in `COLLABORATION_MODEL.md` §3 — additive, low risk, but only worth doing once this
   phase is actually scheduled.
 
+## Addendum — Day-precise FTE allocations + Timeline granularity — **shipped**
+
+Independent of Phases 0-7 above (no Cinematic/LOQ/Jira/MPP involvement): the product owner needed
+staffing to be precise to the day ("si quelqu'un commence le 12 avril, il commence le 12 avril, pas
+le 1er"), plus a readable day/week axis on the portfolio Timeline. Tracked in its own plan
+(`mutable-honking-rose.md`), five phases:
+
+- **Phase 1 — storage + resolver.** `requirement_allocations`/`person_assignment_allocations`
+  (schema v10→v11) became interval rows (`id`, `start_date`, `finish_date`, `fte` — replacing the old
+  `(parent, period)` primary key) instead of one row per month. `PlanningEngine`'s two private choke
+  points, `requirementAllocationAt`/`personAllocationAt` (`src/engine/planning.ts`), now sum each
+  interval's day-overlap contribution to a month (`monthOverlapFraction`, `src/domain/periods.ts`)
+  instead of an exact `period` match — every public getter routes through these two, so this was the
+  only engine change needed. A full-month interval resolves to exactly its own `fte` for that month,
+  so migrating existing data (one bucket → one full-month interval) produces byte-identical numbers;
+  only new day-precise data prorates. `repository.ts` kept the old period-keyed setters
+  (`setRequirementAllocation(s)`/`setPersonAssignmentAllocation(s)`) as backward-compatible wrappers
+  that convert `period` → a full-month interval under the hood, alongside new per-interval CRUD
+  (`create/update/deleteRequirementInterval`, same for person assignments) for the day-precise editor
+  in Phase 2. This is why imports (`rpmImport.ts`/`staffingImport.ts`, both strictly month-columned
+  source formats — no real day-precise dates ever exist there) and exports/validation
+  (`export/xlsx.ts`, `engine/validation.ts`) needed **zero** code changes for Phase 4 below: they
+  already write/read through the same wrappers/getters that now produce/consume real intervals.
+- **Phase 2 — day-level editing UI.** `RequirementTimeline.tsx`'s per-block editor gained an
+  alternate `IntervalListEditor` (date-range + FTE rows, add/delete) used whenever a lane supplies
+  `intervals`/`onAddInterval`/`onUpdateInterval`/`onDeleteInterval` — wired in for both
+  `ProjectDetail.tsx` (discipline-requirement lanes) and `PersonDetail.tsx` (person-assignment lanes).
+  The original month-grid drag/click editing stays the default, unchanged, quick-edit path; the
+  interval editor is an additive alternate view, not a replacement.
+- **Phase 3 — Timeline granularity + drag helper.** `timelineMath.ts` gained
+  `timelineGranularity(pxPerDay)` (`month` → `week` → `day` at the 7/18 px-per-day thresholds) and
+  `fineAxisTicks()`. `Timeline.tsx` renders a second sticky sub-header + vertical guide-line overlay
+  once granularity passes `month`; data cells stay month-aggregated regardless (only the axis reads
+  finer). `TIMELINE_ZOOM_MAX` raised 200→800 (`useUiStore.ts`) so day granularity is actually reachable
+  and legible. `ProjectBar.tsx` shows a floating date bubble (reusing Dashboard's `.mix-tooltip`
+  pattern) on the dragged edge while resizing/moving, suppressed at day granularity where the axis
+  itself already shows the exact day.
+- **Phase 4 — imports/export/validation.** Verified, no code changes (see Phase 1 note above):
+  `applyImport.ts` (shared by both RPM and staffing imports) already writes correct full-month
+  intervals via the backward-compatible setters; `xlsx.ts` and `validation.ts` are both pure
+  engine-getter consumers, so they already read correctly-prorated numbers. Locked in with two new
+  `tests/validation.test.ts` cases asserting `understaffed_project`/`over_allocated_person` correctly
+  reflect a mid-month interval start (~0.63 FTE for a 19-of-30-day month, matching the product's own
+  "12 avril" example).
+- **Phase 5 — this note**, plus the full suite green (`tests/timelineMath.test.ts` new; `fixtures.ts`,
+  `migration.test.ts`, `planning.test.ts`, `repository.test.ts`, `validation.test.ts` extended).
+
+**Migration considerations**: schema v10→v11, rebuild-pattern migration (see `migrateV10toV11` in
+`database.ts`) converting every existing `(parent, period, fte)` row into a full-month
+`(start_date, finish_date, fte)` interval — lossless, proven by a `tests/migration.test.ts` case
+asserting identical monthly numbers before/after.
+
+This is why the "does not include" note at the bottom of this document (written for Phases 0-7 only)
+no longer holds for `src/ui/timeline/`, `Requirement`/`PersonAssignment` allocation storage, or
+`rpmImport.ts`/`staffingImport.ts`'s write path — all touched by this addendum, none of it related to
+Cinematics/LOQs/Jira/MPP.
+
 ## Decisions requiring product-owner validation (collected from all documents)
 
 Resolved 2026-09-18 directly with the product owner:
@@ -352,7 +409,11 @@ Resolved 2026-09-18 directly with the product owner:
 
 ## What this plan deliberately does not include
 
-No phase in this plan touches `src/ui/timeline/`, `src/ui/views/Dashboard.tsx`'s existing
-capacity/occupancy visualizations, `src/import/rpmImport.ts`/`staffingImport.ts`, or any existing
-`Requirement`/`PersonAssignment` behavior — all of that keeps working exactly as it does today
-throughout every phase above, per the brief's "preserve working functionality" rule.
+No phase in this plan (Phases 0-7, the Cinematic/LOQ/Jira/MPP work) touches `src/ui/timeline/`,
+`src/ui/views/Dashboard.tsx`'s existing capacity/occupancy visualizations,
+`src/import/rpmImport.ts`/`staffingImport.ts`, or `Requirement`/`PersonAssignment`'s *external*
+behavior — all of that keeps producing the same numbers throughout every phase above, per the
+brief's "preserve working functionality" rule. The **addendum above** (day-precise FTE allocations +
+Timeline granularity) is a separate initiative that does touch those files/areas — by design, since
+its whole point was day-precise staffing and a finer Timeline axis — but it too preserves existing
+numbers for any data that predates it (see that section's migration note).
