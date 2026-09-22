@@ -72,6 +72,56 @@ export function totalWindowWidth(window: Period[], pxPerDay: number): number {
   return window.reduce((sum, p) => sum + monthWidthPx(p, pxPerDay), 0);
 }
 
+export type TimelineGranularity = 'month' | 'week' | 'day';
+
+/** Below ~7px/day a week tick is unreadable; below ~18px/day a day tick is unreadable — so the fine
+ * axis (header sub-row + guide lines) only subdivides down to what's actually legible at the
+ * current zoom. Data cells stay month-aggregated regardless of granularity (see Phase 3 plan). */
+export function timelineGranularity(pxPerDay: number): TimelineGranularity {
+  if (pxPerDay >= 18) return 'day';
+  if (pxPerDay >= 7) return 'week';
+  return 'month';
+}
+
+/** ISO dates of every day (day granularity) or every Monday (week granularity) inside the visible
+ * window — ticks for the fine-axis header sub-row and its vertical guide lines. Empty at 'month'
+ * granularity, where the month header row alone is the axis. */
+export function fineAxisTicks(window: Period[], granularity: TimelineGranularity): string[] {
+  if (granularity === 'month' || window.length === 0) return [];
+  const { year, month0 } = parsePeriod(window[0]);
+  const windowStartIso = `${year}-${String(month0 + 1).padStart(2, '0')}-01`;
+  const lastMonth = window[window.length - 1];
+  const { year: endYear, month0: endMonth0 } = parsePeriod(lastMonth);
+  const windowEndIso = isoAddDays(`${endYear}-${String(endMonth0 + 1).padStart(2, '0')}-01`, daysInMonth(lastMonth));
+
+  const ticks: string[] = [];
+  if (granularity === 'day') {
+    let cursor = windowStartIso;
+    let guard = 0;
+    while (cursor < windowEndIso && guard < 3000) {
+      ticks.push(cursor);
+      cursor = isoAddDays(cursor, 1);
+      guard += 1;
+    }
+    return ticks;
+  }
+  // week: align ticks to the Monday on/before the window start.
+  const startDow = new Date(`${windowStartIso}T00:00:00Z`).getUTCDay(); // 0=Sun .. 6=Sat
+  const backToMonday = startDow === 0 ? 6 : startDow - 1;
+  let cursor = isoAddDays(windowStartIso, -backToMonday);
+  let guard = 0;
+  while (cursor < windowEndIso && guard < 600) {
+    if (cursor >= windowStartIso) ticks.push(cursor);
+    cursor = isoAddDays(cursor, 7);
+    guard += 1;
+  }
+  return ticks;
+}
+
+export function formatIsoDateShort(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+}
+
 let measureCanvas: HTMLCanvasElement | null = null;
 
 /** Pixel width of `text` rendered in `font` (CSS font shorthand), via an offscreen canvas. */

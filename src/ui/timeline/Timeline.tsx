@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState, type CSSProperties, type WheelEvent } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore, TIMELINE_ZOOM_MIN, TIMELINE_ZOOM_MAX } from '../../store/useUiStore';
-import { buildTimelineWindow, isoDiffDays, monthWidthPx, timelineLabelColumnWidth, totalWindowWidth, xForIsoDate } from './timelineMath';
+import { buildTimelineWindow, fineAxisTicks, isoDiffDays, isoToDayOfMonth, monthWidthPx, timelineGranularity, timelineLabelColumnWidth, totalWindowWidth, xForIsoDate } from './timelineMath';
 import { addMonths, comparePeriod, formatPeriodLabel, periodFromISODate, periodRange, todayPeriod } from '../../domain/periods';
 import { ProjectBar } from './ProjectBar';
 import { formatNum, hexToRgba } from './AllocationCell';
@@ -148,6 +148,8 @@ export function Timeline() {
   const isManualWindow = timelineFrom !== null && timelineTo !== null;
   const totalWidth = totalWindowWidth(window, pxPerDay);
   const todayX = xForIsoDate(`${todayPeriod()}-01`, window, pxPerDay) + (new Date().getDate() - 1) * pxPerDay;
+  const granularity = timelineGranularity(pxPerDay);
+  const fineTicks = useMemo(() => fineAxisTicks(window, granularity), [window, granularity]);
 
   const poolsAll = engine.pools();
   const pools = poolsAll.filter((p) => !isGenericPoolName(p.name));
@@ -307,6 +309,9 @@ export function Timeline() {
       >
         <div className="tl-scroll-inner" style={{ width: labelWidth + totalWidth, '--tl-label-w': `${labelWidth}px` } as CSSProperties}>
           <div className="tl-today-line" style={{ left: labelWidth + todayX }} title="Today" />
+          {granularity !== 'month' && fineTicks.map((iso) => (
+            <div key={`guide-${iso}`} className={`tl-fine-guide tl-fine-guide-${granularity}`} style={{ left: labelWidth + xForIsoDate(iso, window, pxPerDay) }} />
+          ))}
 
           <div className="tl-header-row">
             <div className="tl-label-cell tl-corner">Project / Emploi repère</div>
@@ -318,6 +323,18 @@ export function Timeline() {
               ))}
             </div>
           </div>
+          {granularity !== 'month' && (
+            <div className="tl-header-row tl-fine-header-row">
+              <div className="tl-label-cell tl-corner-fine" />
+              <div className="tl-fine-row" style={{ width: totalWidth }}>
+                {fineTicks.map((iso) => (
+                  <div key={iso} className="tl-fine-tick" style={{ left: xForIsoDate(iso, window, pxPerDay) }}>
+                    {isoToDayOfMonth(iso)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {scheduled.length === 0 && search ? (
             <div className="tl-no-match">No scheduled projects match "{search}"</div>
@@ -361,6 +378,7 @@ export function Timeline() {
                         project={project}
                         window={window}
                         pxPerDay={pxPerDay}
+                        granularity={granularity}
                         onClick={() => openProject(project.id)}
                         onDatesChange={async (start, end, mode, origStart, origEnd) => {
                           updateProject({ ...project, startDate: start, endDate: end });

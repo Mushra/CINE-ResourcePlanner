@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { Project } from '../../domain/types';
-import { isoAddDays, isoDiffDays, xForIsoDate } from './timelineMath';
+import { formatIsoDateShort, isoAddDays, isoDiffDays, xForIsoDate, type TimelineGranularity } from './timelineMath';
 import { periodFromISODate } from '../../domain/periods';
 import { formatNum } from './AllocationCell';
 import type { Period } from '../../domain/types';
@@ -37,16 +37,20 @@ function assignedSegments(
 }
 
 export function ProjectBar({
-  project, window, pxPerDay, onDatesChange, onClick, assignedByPeriod,
+  project, window, pxPerDay, granularity, onDatesChange, onClick, assignedByPeriod,
 }: {
   project: Project;
   window: Period[];
   pxPerDay: number;
+  granularity: TimelineGranularity;
   onDatesChange: (startDate: string, endDate: string, mode: DragMode, origStart: string, origEnd: string) => void;
   onClick: () => void;
   assignedByPeriod: Map<Period, number>;
 }) {
   const [preview, setPreview] = useState<{ start: string; end: string } | null>(null);
+  // Mirrors dragRef.current?.mode as state — refs can't be read during render (only in effects/
+  // handlers), and the drag-date tooltip below needs the current mode to render.
+  const [dragMode, setDragMode] = useState<DragMode | undefined>(undefined);
   const dragRef = useRef<{ mode: DragMode; startX: number; origStart: string; origEnd: string } | null>(null);
   const movedRef = useRef(false);
 
@@ -64,6 +68,7 @@ export function ProjectBar({
     e.stopPropagation();
     movedRef.current = false;
     dragRef.current = { mode, startX: e.clientX, origStart: project.startDate!, origEnd: project.endDate! };
+    setDragMode(mode);
     (e.target as Element).setPointerCapture(e.pointerId);
   }
 
@@ -95,9 +100,14 @@ export function ProjectBar({
       onDatesChange(preview.start, preview.end, drag.mode, drag.origStart, drag.origEnd);
     }
     setPreview(null);
+    setDragMode(undefined);
   }
 
   const isEstimated = project.startCertainty !== 'confirmed' || project.endCertainty !== 'confirmed';
+  // Below day granularity the fine axis isn't legible, so a floating date bubble helps pin the
+  // manipulated edge; at day granularity the axis itself already shows the exact day, so the
+  // bubble would be redundant.
+  const showDragTooltip = preview !== null && dragMode !== undefined && granularity !== 'day';
 
   return (
     <div
@@ -123,6 +133,11 @@ export function ProjectBar({
         {project.name}
       </button>
       <span className="bar-handle bar-handle-right" onPointerDown={(e) => beginDrag('resize-end', e)} />
+      {showDragTooltip && (
+        <span className="mix-tooltip bar-drag-tooltip" style={{ left: dragMode === 'resize-end' ? width : 0, top: -4 }}>
+          {formatIsoDateShort(dragMode === 'resize-end' ? end : start)}
+        </span>
+      )}
       {segments.map((seg) => (
         <span
           key={seg.x}

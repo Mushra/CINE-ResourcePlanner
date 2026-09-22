@@ -5,10 +5,11 @@ import type { Period } from '../domain/types';
 
 export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'people' | 'project-detail' | 'person-detail' | 'cinematic-detail';
 export type PeopleMode = 'availability' | 'assignments';
-/** Percentage zoom level, 10-200. 100 = the previous "Compact" scale (3px/day). */
+/** Percentage zoom level, 10-800. 100 = the previous "Compact" scale (3px/day). Raised from 200 to
+ * 800 (Phase 3) so day granularity (>=18px/day, i.e. zoom >= 600) is actually legible. */
 export type TimelineZoom = number;
 export const TIMELINE_ZOOM_MIN = 10;
-export const TIMELINE_ZOOM_MAX = 200;
+export const TIMELINE_ZOOM_MAX = 800;
 export const TIMELINE_ZOOM_DEFAULT = 100;
 
 const COLLAPSE_STORAGE_KEY = 'cine-planner-collapse';

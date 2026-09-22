@@ -163,6 +163,37 @@
   pointer-events: none;
 }
 
+/* Fine axis (Phase 3) — week/day sub-header + vertical guides, shown once pxPerDay is high enough
+ * to read them (see timelineGranularity). Data cells stay month-aggregated regardless. */
+.tl-fine-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-strong);
+  z-index: 1;
+  pointer-events: none;
+}
+.tl-fine-guide-week { opacity: 0.28; }
+.tl-fine-guide-day { opacity: 0.16; }
+.tl-fine-header-row {
+  position: sticky;
+  top: 36px;
+  z-index: 4;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+}
+.tl-corner-fine { height: 18px; background: var(--surface-1); }
+.tl-fine-row { position: relative; height: 18px; }
+.tl-fine-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 9px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
 .tl-project-group { border-bottom: 1px solid var(--border); }
 .tl-project-group:last-child { border-bottom: none; }
 
@@ -317,3 +348,6 @@
   cursor: default;
 }
 .bar-seg-compact { border-left-color: var(--border); }
+
+/* Drag-date bubble (Phase 3) — reuses .mix-tooltip's look, anchored to the edge being dragged. */
+.bar-drag-tooltip { z-index: 4; }
