@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PlanningEngine } from '../src/engine/planning';
 import { getSanityChecks } from '../src/engine/validation';
+import type { PersonAssignment, PersonAssignmentAllocation, Requirement, RequirementAllocation } from '../src/domain/types';
 import {
   cinematic,
   discipline,
@@ -181,6 +182,79 @@ describe('getSanityChecks — understaffing', () => {
     );
 
     expect(getSanityChecks(engine).filter((c) => c.category === 'available_not_assigned')).toHaveLength(0);
+  });
+});
+
+describe('getSanityChecks — day-precise intervals (sub-month proration)', () => {
+  it('prorates a mid-month assignment start into the understaffed gap, same as the engine getters', () => {
+    // Mirrors the product example ("starts on the 12th, not the 1st"): starting on the 12th covers
+    // 19 of a 30-day month's days (~0.63 FTE that month), not a full month — capacity_conflict/
+    // understaffed checks must reflect that prorated figure, proving they still run through the
+    // day-overlap resolver post-Phase 1. September (not the already-past April) keeps the project
+    // "active" per deriveProjectStatus, which is what checkProjectStaffing requires to run at all.
+    const vfx = pool({ name: 'VFX', capacityFte: 3 });
+    const elena = person({ poolId: vfx.id });
+    const p1 = project({ name: 'Alpha', startDate: '2026-09-01', endDate: '2026-09-30' });
+
+    const requirementId = 'req-day-precise';
+    const req: Requirement = { id: requirementId, projectId: p1.id, poolId: vfx.id, scenarioId: 'base' };
+    const reqAlloc: RequirementAllocation = {
+      id: 'reqalloc-day-precise', requirementId, startDate: '2026-09-01', finishDate: '2026-09-30', fte: 1,
+    };
+
+    const assignmentId = 'pasn-day-precise';
+    const asn: PersonAssignment = { id: assignmentId, personId: elena.id, projectId: p1.id, scenarioId: 'base' };
+    const asnAlloc: PersonAssignmentAllocation = {
+      id: 'pasnalloc-day-precise', personAssignmentId: assignmentId, startDate: '2026-09-12', finishDate: '2026-09-30', fte: 1,
+    };
+
+    const engine = new PlanningEngine(
+      planningData({
+        pools: [vfx],
+        people: [elena],
+        projects: [p1],
+        requirements: [req],
+        requirementAllocations: [reqAlloc],
+        personAssignments: [asn],
+        personAssignmentAllocations: [asnAlloc],
+      }),
+    );
+
+    const checks = getSanityChecks(engine).filter((c) => c.category === 'understaffed_project');
+    expect(checks).toHaveLength(1);
+    expect(checks[0].period).toBe('2026-09');
+    expect(checks[0].impact).toContain('0.37'); // missing ~= 1 - 19/30
+    expect(checks[0].impact).toContain('0.63'); // assigned ~= 19/30
+  });
+
+  it('does not flag over-allocation for a full-month-equivalent person capacity split across two intervals', () => {
+    const vfx = pool({ name: 'VFX', capacityFte: 3 });
+    const elena = person({ poolId: vfx.id, capacityFte: 1 });
+    const p1 = project({ name: 'Alpha', startDate: '2026-09-01', endDate: '2026-09-30' });
+    const p2 = project({ name: 'Bravo', startDate: '2026-09-01', endDate: '2026-09-30' });
+
+    const asn1Id = 'pasn-day-precise-1';
+    const asn1: PersonAssignment = { id: asn1Id, personId: elena.id, projectId: p1.id, scenarioId: 'base' };
+    const asn1Alloc: PersonAssignmentAllocation = {
+      id: 'pasnalloc-day-precise-1', personAssignmentId: asn1Id, startDate: '2026-09-01', finishDate: '2026-09-11', fte: 1,
+    };
+    const asn2Id = 'pasn-day-precise-2';
+    const asn2: PersonAssignment = { id: asn2Id, personId: elena.id, projectId: p2.id, scenarioId: 'base' };
+    const asn2Alloc: PersonAssignmentAllocation = {
+      id: 'pasnalloc-day-precise-2', personAssignmentId: asn2Id, startDate: '2026-09-12', finishDate: '2026-09-30', fte: 1,
+    };
+
+    const engine = new PlanningEngine(
+      planningData({
+        pools: [vfx],
+        people: [elena],
+        projects: [p1, p2],
+        personAssignments: [asn1, asn2],
+        personAssignmentAllocations: [asn1Alloc, asn2Alloc],
+      }),
+    );
+
+    expect(getSanityChecks(engine).filter((c) => c.category === 'over_allocated_person')).toHaveLength(0);
   });
 });
 
