@@ -19,6 +19,10 @@ release
 resources/mpp/shim
 resources/mpp/jre
 
+# Local scratch space: one-off discovery-spike scripts and captured samples (e.g. real Jira REST
+# responses pulled during the Phase 5 discovery spike) — never committed, may hold real prod data.
+.scratch
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
