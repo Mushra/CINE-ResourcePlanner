@@ -52,6 +52,20 @@ describe('suggestJiraBindings — Cinematics', () => {
     expect(proposals.cinematics).toEqual([{ via: 'cinematics-field', cinematicId: cine.id, proposedKey: 'PROD-300', score: expect.any(Number) }]);
   });
 
+  it('excludes LOQ-level issues (a populated LOQ Target) from the Cinematic field-match candidates', () => {
+    const cine = cinematic({ name: 'Seq010 Opening' });
+    // The true Cinematic-level match: same Cinematics List value, no LOQ Target, weaker name overlap.
+    const cinematicIssue = issue({ key: 'PROD-100', summary: 'Some Initiative', cinematicName: 'Seq010 Opening' });
+    // A LOQ-level issue that shares the same Cinematics List value but is scoped to a LOQ, with a
+    // summary that would win on name-similarity alone — must never be proposed for the Cinematic.
+    const loqIssue = issue({
+      key: 'PROD-101', summary: 'Seq010 Opening-Animation-L1', cinematicName: 'Seq010 Opening', loqTarget: 'L1',
+    });
+
+    const proposals = suggestJiraBindings([cine], [], [], batch([loqIssue, cinematicIssue]));
+    expect(proposals.cinematics).toEqual([{ via: 'cinematics-field', cinematicId: cine.id, proposedKey: 'PROD-100', score: expect.any(Number) }]);
+  });
+
   it('falls back to name-similarity when no issue carries a matching Cinematics List value', () => {
     const cine = cinematic({ name: 'Seq010 Opening' });
     const epic1 = issue({ key: 'PROD-100', summary: 'Seq010 - Opening sequence' });

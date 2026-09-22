@@ -80,7 +80,7 @@ export function LineChart({
       })}
       {labels.map((label, i) => (
         i % step === 0 ? (
-          <text key={label} x={pad + innerW * (n <= 1 ? 0 : i / (n - 1))} y={height - 4} className="line-chart-x-label" textAnchor="middle">
+          <text key={i} x={pad + innerW * (n <= 1 ? 0 : i / (n - 1))} y={height - 4} className="line-chart-x-label" textAnchor="middle">
             {label}
           </text>
         ) : null

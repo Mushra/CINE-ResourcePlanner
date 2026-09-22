@@ -146,7 +146,9 @@ export function suggestJiraBindings(
       continue;
     }
 
-    const fieldCandidates = scopedIssues.filter((issue) => issue.cinematicName === cinematic.name);
+    const fieldCandidates = scopedIssues.filter(
+      (issue) => issue.cinematicName === cinematic.name && issue.loqTarget === null,
+    );
     const fieldBest = bestCandidate(tokenize(cinematic.name), fieldCandidates);
     if (fieldBest) {
       cinematicProposals.push({ via: 'cinematics-field', cinematicId: cinematic.id, proposedKey: fieldBest.key, score: fieldBest.score });

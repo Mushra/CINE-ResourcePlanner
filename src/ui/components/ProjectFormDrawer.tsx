@@ -108,8 +108,9 @@ export function ProjectFormDrawer({ project, onClose, onSave }: { project?: Proj
       <div className="field field-checkbox">
         <label htmlFor="proj-dispo">
           <input id="proj-dispo" type="checkbox" checked={value.isDispo} onChange={(e) => set('isDispo', e.target.checked)} />
-          Projet dispo (placeholder)
+          Dispo (banc / hors capacité)
         </label>
+        <p className="field-hint">Exclut ce projet des calculs de capacité et de staffing réel.</p>
       </div>
 
       {value.startDate && value.endDate && value.startDate > value.endDate && (

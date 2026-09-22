@@ -367,20 +367,28 @@ function ProjectCapacity({ engine }: { engine: PlanningEngine }) {
     return required > 0.001 ? Math.min(100, round2((100 * assigned) / required)) : 0;
   }
 
+  /** Whether a project has any real activity (required or assigned) in the window — independent of
+   * `metric`, so switching FTE↔% never changes which projects appear. In "%" mode alone, `valueAt`
+   * is 0 whenever `required` is 0 even if the project is staffed, so filtering on the computed
+   * value (rather than on this) used to make projects without requirements vanish from "Par projet". */
+  function hasActivity(projectId: string): boolean {
+    return periods.some((p) => engine.getProjectAssigned(projectId, p) > 0.001 || engine.getProjectRequired(projectId, p) > 0.001);
+  }
+
   const ranked = useMemo(() => {
     return projects
+      .filter((p) => hasActivity(p.id))
       .map((p) => {
         const avg = periods.length ? periods.reduce((sum, period) => sum + valueAt(p.id, period), 0) / periods.length : 0;
         return { id: p.id, name: p.name, color: colorForProject(p.id, orderedIds), value: round2(avg) };
       })
-      .filter((p) => p.value > 0.001)
       .sort((a, b) => b.value - a.value);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects, periods, metric, engine]);
 
   const series = useMemo(() => projects
-    .map((p) => ({ id: p.id, label: p.name, color: colorForProject(p.id, orderedIds), values: periods.map((period) => round2(valueAt(p.id, period))) }))
-    .filter((s) => s.values.some((v) => v > 0.001)),
+    .filter((p) => hasActivity(p.id))
+    .map((p) => ({ id: p.id, label: p.name, color: colorForProject(p.id, orderedIds), values: periods.map((period) => round2(valueAt(p.id, period))) })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [projects, periods, metric, engine]);
 

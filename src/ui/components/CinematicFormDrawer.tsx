@@ -39,7 +39,7 @@ export function CinematicFormDrawer({ cinematic, onClose, onSave }: { cinematic?
       </div>
 
       <div className="field">
-        <label htmlFor="cine-jira">Jira key (Epic)</label>
+        <label htmlFor="cine-jira">Jira key</label>
         <input id="cine-jira" value={value.jiraKey ?? ''} onChange={(e) => set('jiraKey', e.target.value || null)} placeholder="PROD-100" />
       </div>
 
