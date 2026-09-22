@@ -4,6 +4,7 @@ import { useUiStore } from '../../store/useUiStore';
 import { formatPeriodLabel, todayPeriod } from '../../domain/periods';
 import { buildTimelineWindow } from '../timeline/timelineMath';
 import { isGenericPoolName } from '../../domain/identity';
+import { BASE_SCENARIO_ID } from '../../db/repository';
 import { deriveProjectStatus, STATUS_LABEL } from '../../domain/projectStatus';
 import type { ProjectStatus } from '../../domain/types';
 import { Button } from '../components/Button';
@@ -33,9 +34,13 @@ export function PersonDetail({ personId }: { personId: string }) {
   const projects = useStore((s) => s.data.projects);
   const deletePerson = useStore((s) => s.deletePerson);
   const createDiscipline = useStore((s) => s.createDiscipline);
+  const personAssignments = useStore((s) => s.data.personAssignments);
+  const personAssignmentAllocations = useStore((s) => s.data.personAssignmentAllocations);
   const setPersonAssignment = useStore((s) => s.setPersonAssignment);
   const setPersonAssignmentRange = useStore((s) => s.setPersonAssignmentRange);
   const clearPersonAssignment = useStore((s) => s.clearPersonAssignment);
+  const upsertPersonAssignmentInterval = useStore((s) => s.upsertPersonAssignmentInterval);
+  const removePersonAssignmentInterval = useStore((s) => s.removePersonAssignmentInterval);
   const backToTeam = useUiStore((s) => s.backToTeam);
   const openProject = useUiStore((s) => s.openProject);
   const { savePersonEdit } = usePersonSave();
@@ -136,21 +141,29 @@ export function PersonDetail({ personId }: { personId: string }) {
               {window.map((p) => <div key={p} className="req-timeline-month">{formatPeriodLabel(p, { withYear: false })}</div>)}
             </div>
             <div className="req-timeline-lanes">
-              {projectRows.map(([projectId, row]) => (
-                <RequirementLaneRow
-                  key={projectId}
-                  months={window}
-                  lane={{
-                    key: projectId,
-                    label: `${row.name} — ${STATUS_LABEL[row.status]}`,
-                    color: STATUS_DOT_COLOR[row.status] ?? 'var(--text-tertiary)',
-                    values: row.fte,
-                    onCommitRange: (periods, fte) => setPersonAssignmentRange(person.id, projectId, periods, fte),
-                    onRemove: () => clearPersonAssignment(person.id, projectId),
-                    onLabelClick: () => openProject(projectId),
-                  }}
-                />
-              ))}
+              {projectRows.map(([projectId, row]) => {
+                const asn = personAssignments.find((a) => a.personId === person.id && a.projectId === projectId && a.scenarioId === BASE_SCENARIO_ID);
+                const intervals = asn ? personAssignmentAllocations.filter((a) => a.personAssignmentId === asn.id) : [];
+                return (
+                  <RequirementLaneRow
+                    key={projectId}
+                    months={window}
+                    lane={{
+                      key: projectId,
+                      label: `${row.name} — ${STATUS_LABEL[row.status]}`,
+                      color: STATUS_DOT_COLOR[row.status] ?? 'var(--text-tertiary)',
+                      values: row.fte,
+                      onCommitRange: (periods, fte) => setPersonAssignmentRange(person.id, projectId, periods, fte),
+                      onRemove: () => clearPersonAssignment(person.id, projectId),
+                      onLabelClick: () => openProject(projectId),
+                      intervals,
+                      onAddInterval: (startDate, finishDate, fte) => upsertPersonAssignmentInterval(person.id, projectId, null, startDate, finishDate, fte),
+                      onUpdateInterval: (intervalId, startDate, finishDate, fte) => upsertPersonAssignmentInterval(person.id, projectId, intervalId, startDate, finishDate, fte),
+                      onDeleteInterval: (intervalId) => removePersonAssignmentInterval(intervalId),
+                    }}
+                  />
+                );
+              })}
             </div>
           </div>
         )}

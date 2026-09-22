@@ -6,17 +6,37 @@ import { useUiStore } from '../../store/useUiStore';
 
 const MONTH_W = 34;
 
+/** One day-precise interval row backing a lane — the same shape as RequirementAllocation /
+ * PersonAssignmentAllocation in types.ts, but kept generic here since a lane doesn't care which. */
+export interface IntervalRow {
+  id: string;
+  startDate: string;
+  finishDate: string;
+  fte: number;
+}
+
 export interface RequirementLane {
   key: string;
   label: string;
   color: string;
-  /** Required/assigned FTE per month, aligned index-for-index with the `months` prop. */
+  /** Required/assigned FTE per month, aligned index-for-index with the `months` prop — drives the
+   * month-grid display (blocks, drag create/move/resize) unchanged from Phase 1. */
   values: number[];
   onCommitRange: (periods: Period[], fte: number) => void;
   onRemove?: () => void;
   /** When set, the label renders as a clickable link instead of plain text (e.g. PersonDetail
    * linking each of its assignment lanes to that project). */
   onLabelClick?: () => void;
+  /**
+   * Day-precise editing (Phase 2): the raw interval rows backing this lane — not the month-
+   * aggregated `values` above. When provided, clicking a block opens an interval-list editor
+   * (real start/finish dates, not snapped to month boundaries) instead of the plain month-range
+   * FTE editor. Optional so a lane can still opt out and keep the old month-only editor.
+   */
+  intervals?: IntervalRow[];
+  onAddInterval?: (startDate: string, finishDate: string, fte: number) => void;
+  onUpdateInterval?: (id: string, startDate: string, finishDate: string, fte: number) => void;
+  onDeleteInterval?: (id: string) => void;
 }
 
 /** One emploi-repère (specific pool) under a discipline: its currently-assigned people as editable
@@ -180,6 +200,18 @@ function dragWalls(others: Block[], fromIdx: number, toIdx: number, monthCount: 
   return { min, max };
 }
 
+/** Best-effort: some browsers only auto-open the native calendar when the click lands on the
+ * icon rather than anywhere in the field. Forcing it on every click (the input itself is what
+ * received the click, so activation is always valid here) makes it consistent; failures are
+ * silently ignored since the input's own default click behavior already covers most cases. */
+function forceShowPicker(e: React.MouseEvent<HTMLInputElement>): void {
+  try {
+    e.currentTarget.showPicker();
+  } catch {
+    // ignore — default click behavior on the input already opens it in most browsers
+  }
+}
+
 /** Draggable FTE lane: create/move/resize blocks over month columns, click a block to edit its FTE.
  * Exported so PersonDetail can reuse the exact same editable primitive for a person's own timeline. */
 export function RequirementLaneRow({ lane, months, assignedValues, collapseToggle }: {
@@ -301,17 +333,6 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
     setEditingBlock({ startIdx: start, endIdx: end, fte: editingBlock.fte });
   }
 
-  /** Best-effort: some browsers only auto-open the native calendar when the click lands on the
-   * icon rather than anywhere in the field. Forcing it on every click (the input itself is what
-   * received the click, so activation is always valid here) makes it consistent; failures are
-   * silently ignored since the input's own default click behavior already covers most cases. */
-  function forceShowPicker(e: React.MouseEvent<HTMLInputElement>): void {
-    try {
-      e.currentTarget.showPicker();
-    } catch {
-      // ignore — default click behavior on the input already opens it in most browsers
-    }
-  }
 
   return (
     <div className="req-timeline-lane">
@@ -375,7 +396,23 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
           );
         })}
       </div>
-      {editingBlock && (
+      {editingBlock && lane.intervals && lane.onAddInterval && lane.onUpdateInterval && lane.onDeleteInterval ? (
+        <IntervalListEditor
+          style={{ left: 168 + editingBlock.startIdx * MONTH_W }}
+          windowMin={isoFirstDayOfPeriod(months[0])}
+          windowMax={isoLastDayOfPeriod(months[months.length - 1])}
+          defaultStart={isoFirstDayOfPeriod(months[editingBlock.startIdx])}
+          defaultFinish={isoLastDayOfPeriod(months[editingBlock.endIdx])}
+          intervals={lane.intervals.filter(
+            (iv) => iv.finishDate >= isoFirstDayOfPeriod(months[editingBlock.startIdx])
+              && iv.startDate <= isoLastDayOfPeriod(months[editingBlock.endIdx]),
+          )}
+          onAdd={lane.onAddInterval}
+          onUpdate={lane.onUpdateInterval}
+          onDelete={lane.onDeleteInterval}
+          onClose={() => setEditingBlock(null)}
+        />
+      ) : editingBlock && (
         <div className="req-block-editor" style={{ left: 168 + editingBlock.startIdx * MONTH_W }}>
           <span className="req-block-editor-label">FTE for</span>
           <span className="req-block-editor-date-wrap" title={formatPeriodLabel(months[editingBlock.startIdx], { withYear: true })}>
@@ -443,6 +480,88 @@ export function RequirementLaneRow({ lane, months, assignedValues, collapseToggl
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function IntervalListEditor({
+  style,
+  intervals,
+  windowMin,
+  windowMax,
+  defaultStart,
+  defaultFinish,
+  onAdd,
+  onUpdate,
+  onDelete,
+  onClose,
+}: {
+  style: React.CSSProperties;
+  intervals: IntervalRow[];
+  windowMin: string;
+  windowMax: string;
+  defaultStart: string;
+  defaultFinish: string;
+  onAdd: (startDate: string, finishDate: string, fte: number) => void;
+  onUpdate: (id: string, startDate: string, finishDate: string, fte: number) => void;
+  onDelete: (id: string) => void;
+  onClose: () => void;
+}) {
+  function updateStart(iv: IntervalRow, newStart: string): void {
+    onUpdate(iv.id, newStart, newStart > iv.finishDate ? newStart : iv.finishDate, iv.fte);
+  }
+  function updateFinish(iv: IntervalRow, newFinish: string): void {
+    onUpdate(iv.id, newFinish < iv.startDate ? newFinish : iv.startDate, newFinish, iv.fte);
+  }
+
+  return (
+    <div className="req-block-editor interval-list-editor" style={style}>
+      <div className="interval-list-editor-rows">
+        {intervals.length === 0 && <p className="interval-list-editor-empty">No interval yet.</p>}
+        {intervals.map((iv) => (
+          <div key={iv.id} className="interval-list-editor-row">
+            <input
+              type="date"
+              className="req-block-editor-date-input"
+              value={iv.startDate}
+              min={windowMin}
+              max={windowMax}
+              onClick={forceShowPicker}
+              onChange={(e) => e.target.value && updateStart(iv, e.target.value)}
+            />
+            <span className="req-block-editor-sep">–</span>
+            <input
+              type="date"
+              className="req-block-editor-date-input"
+              value={iv.finishDate}
+              min={windowMin}
+              max={windowMax}
+              onClick={forceShowPicker}
+              onChange={(e) => e.target.value && updateFinish(iv, e.target.value)}
+            />
+            <input
+              type="number"
+              step={0.5}
+              min={0}
+              className="num-input"
+              defaultValue={iv.fte}
+              onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+              onBlur={(e) => onUpdate(iv.id, iv.startDate, iv.finishDate, parseFloat(e.target.value) || 0)}
+            />
+            <button type="button" className="req-block-editor-delete" title="Delete this interval" onClick={() => onDelete(iv.id)}>
+              <Icon name="trash" size={11} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="interval-list-editor-footer">
+        <button type="button" className="interval-list-editor-add" onClick={() => onAdd(defaultStart, defaultFinish, 1)}>
+          <Icon name="plus" size={10} /> Add interval
+        </button>
+        <button type="button" className="req-block-editor-close" onClick={onClose}>
+          <Icon name="close" size={11} />
+        </button>
+      </div>
     </div>
   );
 }

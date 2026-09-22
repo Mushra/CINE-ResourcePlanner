@@ -4,6 +4,7 @@ import { useUiStore } from '../../store/useUiStore';
 import { addMonths, comparePeriod, periodFromISODate, periodRange, todayPeriod } from '../../domain/periods';
 import { getSanityChecks } from '../../engine/validation';
 import { UNASSIGNED_DISCIPLINE_ID } from '../../engine/planning';
+import { BASE_SCENARIO_ID } from '../../db/repository';
 import { isGenericPoolName } from '../../domain/identity';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
@@ -34,12 +35,20 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const createCinematic = useStore((s) => s.createCinematic);
   const updateCinematic = useStore((s) => s.updateCinematic);
   const deleteCinematic = useStore((s) => s.deleteCinematic);
+  const requirements = useStore((s) => s.data.requirements);
+  const requirementAllocations = useStore((s) => s.data.requirementAllocations);
+  const personAssignments = useStore((s) => s.data.personAssignments);
+  const personAssignmentAllocations = useStore((s) => s.data.personAssignmentAllocations);
   const setDisciplineRequirement = useStore((s) => s.setDisciplineRequirement);
   const setDisciplineRequirementRange = useStore((s) => s.setDisciplineRequirementRange);
   const setPersonAssignment = useStore((s) => s.setPersonAssignment);
   const setPersonAssignmentRange = useStore((s) => s.setPersonAssignmentRange);
   const clearRequirementPool = useStore((s) => s.clearRequirementPool);
   const clearPersonAssignment = useStore((s) => s.clearPersonAssignment);
+  const upsertDisciplineRequirementInterval = useStore((s) => s.upsertDisciplineRequirementInterval);
+  const removeDisciplineRequirementInterval = useStore((s) => s.removeDisciplineRequirementInterval);
+  const upsertPersonAssignmentInterval = useStore((s) => s.upsertPersonAssignmentInterval);
+  const removePersonAssignmentInterval = useStore((s) => s.removePersonAssignmentInterval);
   const feedRequirementsFromAssignments = useStore((s) => s.feedRequirementsFromAssignments);
   const backToProjects = useUiStore((s) => s.backToProjects);
   const openCinematic = useUiStore((s) => s.openCinematic);
@@ -102,6 +111,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
   const timelineGroups: RequirementGroup[] = groupDefs.map((def) => {
     const genericPool = pools.find((p) => p.disciplineId === def.disciplineId && isGenericPoolName(p.name));
+    const genericReq = genericPool
+      ? requirements.find((r) => r.poolId === genericPool.id && r.projectId === project.id && r.scenarioId === BASE_SCENARIO_ID)
+      : undefined;
 
     const needLane: RequirementLane = {
       key: `disc:${def.disciplineId}`,
@@ -110,6 +122,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       values: disciplineStaffingByMonth.map((lines) => lines.find((l) => l.disciplineId === def.disciplineId)?.required ?? 0),
       onCommitRange: (periods, fte) => setDisciplineRequirementRange(project.id, def.disciplineId, periods, fte),
       onRemove: genericPool ? () => clearRequirementPool(project.id, genericPool.id) : undefined,
+      intervals: genericPool
+        ? (genericReq ? requirementAllocations.filter((a) => a.requirementId === genericReq.id) : [])
+        : undefined,
+      onAddInterval: genericPool
+        ? (startDate, finishDate, fte) => upsertDisciplineRequirementInterval(project.id, def.disciplineId, null, startDate, finishDate, fte)
+        : undefined,
+      onUpdateInterval: genericPool
+        ? (intervalId, startDate, finishDate, fte) => upsertDisciplineRequirementInterval(project.id, def.disciplineId, intervalId, startDate, finishDate, fte)
+        : undefined,
+      onDeleteInterval: genericPool ? (intervalId) => removeDisciplineRequirementInterval(intervalId) : undefined,
     };
     const assignedTotals = disciplineStaffingByMonth.map((lines) => lines.find((l) => l.disciplineId === def.disciplineId)?.assigned ?? 0);
 
@@ -132,14 +154,21 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       });
       const personLanes: RequirementLane[] = [...memberNames.keys()]
         .sort((a, b) => memberNames.get(a)!.localeCompare(memberNames.get(b)!))
-        .map((personId) => ({
-          key: personId,
-          label: memberNames.get(personId)!,
-          color: pool.color,
-          values: memberFteByMonth.get(personId)!,
-          onCommitRange: (periods, fte) => setPersonAssignmentRange(personId, project.id, periods, fte),
-          onRemove: () => clearPersonAssignment(personId, project.id),
-        }));
+        .map((personId) => {
+          const asn = personAssignments.find((a) => a.personId === personId && a.projectId === project.id && a.scenarioId === BASE_SCENARIO_ID);
+          return {
+            key: personId,
+            label: memberNames.get(personId)!,
+            color: pool.color,
+            values: memberFteByMonth.get(personId)!,
+            onCommitRange: (periods, fte) => setPersonAssignmentRange(personId, project.id, periods, fte),
+            onRemove: () => clearPersonAssignment(personId, project.id),
+            intervals: asn ? personAssignmentAllocations.filter((a) => a.personAssignmentId === asn.id) : [],
+            onAddInterval: (startDate, finishDate, fte) => upsertPersonAssignmentInterval(personId, project.id, null, startDate, finishDate, fte),
+            onUpdateInterval: (intervalId, startDate, finishDate, fte) => upsertPersonAssignmentInterval(personId, project.id, intervalId, startDate, finishDate, fte),
+            onDeleteInterval: (intervalId) => removePersonAssignmentInterval(intervalId),
+          };
+        });
       return { poolId: pool.id, poolName: pool.name, color: pool.color, personLanes };
     });
 

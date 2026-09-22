@@ -9,14 +9,23 @@ import {
   createLoqDependency,
   createLoqResource,
   createPerson,
+  createPersonAssignmentInterval,
+  createPool,
   createProject,
+  createRequirementInterval,
   createVarianceEvent,
   deleteLoq,
   deleteLoqResource,
+  deletePersonAssignmentInterval,
   deleteProject,
+  deleteRequirementInterval,
+  getOrCreatePersonAssignment,
+  getOrCreateRequirement,
   listLoqCommitmentEvents,
   loadPlanningData,
   updateLoqResource,
+  updatePersonAssignmentInterval,
+  updateRequirementInterval,
   upsertJiraSyncState,
 } from '../src/db/repository';
 
@@ -144,5 +153,48 @@ describe('cinematics/LOQ repository CRUD', () => {
     expect(afterDelete.loqs).toHaveLength(0);
     expect(afterDelete.loqCommitmentEvents).toHaveLength(0);
     expect(afterDelete.loqDependencies).toHaveLength(0);
+  });
+});
+
+describe('requirement/person-assignment interval CRUD (day-precise allocations)', () => {
+  it('createRequirementInterval/updateRequirementInterval/deleteRequirementInterval round-trip via loadPlanningData', async () => {
+    const db = await PlannerDatabase.createNew();
+    const { discipline, project } = await seedDisciplineAndProject(db);
+    const pool = createPool(db, { name: 'Animation - Generic', disciplineId: discipline.id, capacityFte: 0, color: '#4f7cff' });
+    const req = getOrCreateRequirement(db, project.id, pool.id);
+
+    const interval = createRequirementInterval(db, { requirementId: req.id, startDate: '2026-04-12', finishDate: '2026-05-31', fte: 1 });
+    let allocs = loadPlanningData(db).requirementAllocations.filter((a) => a.requirementId === req.id);
+    expect(allocs).toEqual([{ id: interval.id, requirementId: req.id, startDate: '2026-04-12', finishDate: '2026-05-31', fte: 1 }]);
+
+    updateRequirementInterval(db, { ...interval, startDate: '2026-04-13', fte: 0.5 });
+    allocs = loadPlanningData(db).requirementAllocations.filter((a) => a.requirementId === req.id);
+    expect(allocs).toEqual([{ id: interval.id, requirementId: req.id, startDate: '2026-04-13', finishDate: '2026-05-31', fte: 0.5 }]);
+
+    deleteRequirementInterval(db, interval.id);
+    allocs = loadPlanningData(db).requirementAllocations.filter((a) => a.requirementId === req.id);
+    expect(allocs).toHaveLength(0);
+  });
+
+  it('createPersonAssignmentInterval/updatePersonAssignmentInterval/deletePersonAssignmentInterval round-trip, multiple disjoint intervals per assignment', async () => {
+    const db = await PlannerDatabase.createNew();
+    const { project } = await seedDisciplineAndProject(db);
+    const person = createPerson(db, { name: 'Alice', poolId: null, capacityFte: 1, active: true, notes: '', team: '', site: '' });
+    const asn = getOrCreatePersonAssignment(db, person.id, project.id);
+
+    const iv1 = createPersonAssignmentInterval(db, { personAssignmentId: asn.id, startDate: '2026-04-12', finishDate: '2026-06-30', fte: 1 });
+    const iv2 = createPersonAssignmentInterval(db, { personAssignmentId: asn.id, startDate: '2026-09-01', finishDate: '2026-09-30', fte: 0.5 });
+    let allocs = loadPlanningData(db).personAssignmentAllocations.filter((a) => a.personAssignmentId === asn.id);
+    expect(allocs).toHaveLength(2);
+
+    updatePersonAssignmentInterval(db, { ...iv2, finishDate: '2026-10-15', fte: 0.75 });
+    allocs = loadPlanningData(db).personAssignmentAllocations.filter((a) => a.personAssignmentId === asn.id);
+    expect(allocs.find((a) => a.id === iv2.id)).toMatchObject({ finishDate: '2026-10-15', fte: 0.75 });
+    expect(allocs.find((a) => a.id === iv1.id)).toMatchObject({ startDate: '2026-04-12', finishDate: '2026-06-30', fte: 1 });
+
+    deletePersonAssignmentInterval(db, iv1.id);
+    allocs = loadPlanningData(db).personAssignmentAllocations.filter((a) => a.personAssignmentId === asn.id);
+    expect(allocs).toHaveLength(1);
+    expect(allocs[0].id).toBe(iv2.id);
   });
 });

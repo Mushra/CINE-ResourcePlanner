@@ -272,6 +272,32 @@
 .req-block-editor-date-input:hover { background: var(--surface-2); border-color: var(--border-strong); }
 .req-block-editor-close, .req-block-editor-delete { border: none; background: none; cursor: pointer; color: var(--text-tertiary); display: inline-flex; }
 .req-block-editor-delete:hover { color: var(--status-critical); }
+.interval-list-editor { flex-direction: column; align-items: stretch; white-space: normal; gap: 4px; min-width: 220px; }
+.interval-list-editor-rows { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+.interval-list-editor-row { display: flex; align-items: center; gap: 6px; }
+.interval-list-editor-empty { color: var(--text-tertiary); font-size: 11.5px; margin: 2px 0; }
+.interval-list-editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+  margin-top: 2px;
+}
+.interval-list-editor-add {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+}
+.interval-list-editor-add:hover { text-decoration: underline; }
 .pool-add-select { font-size: 12.5px; }
 .empty-inline { color: var(--text-tertiary); font-size: 12.5px; margin: 4px 0; }
 
