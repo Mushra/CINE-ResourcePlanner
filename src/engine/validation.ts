@@ -20,7 +20,8 @@ export type CheckCategory =
   | 'capacity_conflict_cinematic'
   | 'loq_at_risk'
   | 'loq_root_cause'
-  | 'loq_early_opportunity';
+  | 'loq_early_opportunity'
+  | 'jira_inconsistency';
 
 export interface SanityCheck {
   id: string;
@@ -44,8 +45,12 @@ export interface SanityCheck {
 /**
  * Runs every V1 sanity check over the current scenario. Deterministic — no heuristics beyond
  * simple threshold comparisons, per the "no predictive AI" requirement.
+ *
+ * `jiraToleranceDaysByProjectId` is an optional per-Project override for the jira_inconsistency
+ * date tolerance (from that Project's JiraProjectConfig, see docs/INTEGRATIONS.md §3) — omitted
+ * callers get DEFAULT_JIRA_TOLERANCE_DAYS, which keeps every pre-Jira call site unchanged.
  */
-export function getSanityChecks(engine: PlanningEngine): SanityCheck[] {
+export function getSanityChecks(engine: PlanningEngine, jiraToleranceDaysByProjectId?: Map<string, number>): SanityCheck[] {
   const checks: SanityCheck[] = [];
   const periods = engine.allKnownPeriods();
 
@@ -60,6 +65,7 @@ export function getSanityChecks(engine: PlanningEngine): SanityCheck[] {
   checks.push(...checkLoqAtRisk(engine));
   checks.push(...checkLoqRootCause(engine));
   checks.push(...checkLoqEarlyOpportunity(engine));
+  checks.push(...checkJiraInconsistency(engine, jiraToleranceDaysByProjectId));
 
   for (const check of checks) {
     if (check.disciplineId) continue;
@@ -278,7 +284,7 @@ function checkLoqAtRisk(engine: PlanningEngine): SanityCheck[] {
   const checks: SanityCheck[] = [];
   for (const [loqId, forecast] of engine.getLoqForecasts()) {
     const loq = engine.loq(loqId);
-    if (!loq || loq.status === 'DONE' || forecast.deltaDays <= 0) continue;
+    if (!loq || loq.status === 'DONE' || loq.paused || forecast.deltaDays <= 0) continue;
     const project = engine.loqProject(loqId);
     const severity: Severity = forecast.deltaDays >= 5 ? 'critical' : 'warning';
     checks.push({
@@ -308,7 +314,7 @@ function checkLoqRootCause(engine: PlanningEngine): SanityCheck[] {
     const impacted = impactedLoqIds(loqId, forecasts);
     if (impacted.length === 0) continue;
     const loq = engine.loq(loqId);
-    if (!loq) continue;
+    if (!loq || loq.paused) continue;
     const project = engine.loqProject(loqId);
     checks.push({
       id: `loq-root-cause:${loqId}`,
@@ -334,7 +340,7 @@ function checkLoqEarlyOpportunity(engine: PlanningEngine): SanityCheck[] {
   for (const [loqId, forecast] of engine.getLoqForecasts()) {
     if (forecast.deltaDays >= 0 || !engine.loqHasDownstreamDependency(loqId)) continue;
     const loq = engine.loq(loqId);
-    if (!loq) continue;
+    if (!loq || loq.paused) continue;
     const project = engine.loqProject(loqId);
     checks.push({
       id: `loq-early-opportunity:${loqId}`,
@@ -349,6 +355,182 @@ function checkLoqEarlyOpportunity(engine: PlanningEngine): SanityCheck[] {
       impact: `Forecast finish ${forecast.forecastFinish ?? '—'} vs. committed ${forecast.committedFinish ?? '—'} — a downstream LOQ could be pulled earlier if re-committed`,
     });
   }
+  return checks;
+}
+
+const DEFAULT_JIRA_TOLERANCE_DAYS = 1;
+
+/** Statuses observed in the instance-wide vocabulary (689 statuses, `/rest/api/2/status`) that read
+ * as a Cinematic/LOQ being paused rather than actively worked — see docs/INTEGRATIONS.md §3.3. No
+ * single confirmed real-world "paused Cinematic" example was inspected during the discovery spike,
+ * so this set is built generically from the vocabulary rather than from a pinned real case; it's
+ * intentionally conservative (only genuinely pause-shaped strings), never guessed from surrounding
+ * context. */
+const PAUSED_STATUSES = new Set(['on hold', 'blocked', 'paused', 'waiting for', 'qa paused', 'on hold / blocked']);
+
+/** Conservative, explicit-only mapping onto the planning status model — an unrecognized raw Jira
+ * status is deliberately left 'unknown' rather than guessed, per docs/INTEGRATIONS.md §3.1 ("any
+ * status this mapping can't confidently place should surface as a jira_inconsistency warning rather
+ * than being silently forced into one of the buckets"). Confirmed against real OVR Task statuses
+ * (Resolved/Open/Ready for Review/Waiting For/Closed) during the discovery spike; 'PAUSED' is
+ * signal-only (see checkJiraInconsistency) — it never overwrites the plan's own `paused` flag. */
+function mapJiraStatus(raw: string): 'TODO' | 'IN_PROGRESS' | 'DONE' | 'PAUSED' | 'unknown' {
+  const normalized = raw.trim().toLowerCase();
+  if (PAUSED_STATUSES.has(normalized)) return 'PAUSED';
+  switch (normalized) {
+    case 'to do':
+    case 'todo':
+    case 'open':
+    case 'backlog':
+      return 'TODO';
+    case 'in progress':
+    case 'in review':
+    case 'ready for review':
+      return 'IN_PROGRESS';
+    case 'done':
+    case 'closed':
+    case 'resolved':
+      return 'DONE';
+    default:
+      return 'unknown';
+  }
+}
+
+/** jira_sync_state.raw_snapshot is a JSON-serialized NormalizedJiraIssue (see applyJiraSync.ts) —
+ * parsed defensively since it's just a blob, not a typed column. */
+function parseJiraSnapshotDates(rawSnapshot: string): { startDate: string | null; dueDate: string | null } {
+  try {
+    const parsed = JSON.parse(rawSnapshot) as { startDate?: unknown; dueDate?: unknown };
+    return {
+      startDate: typeof parsed.startDate === 'string' ? parsed.startDate : null,
+      dueDate: typeof parsed.dueDate === 'string' ? parsed.dueDate : null,
+    };
+  } catch {
+    return { startDate: null, dueDate: null };
+  }
+}
+
+function daysBetween(isoA: string, isoB: string): number {
+  return Math.round((new Date(isoB).getTime() - new Date(isoA).getTime()) / 86_400_000);
+}
+
+/**
+ * jira_inconsistency (docs/INTEGRATIONS.md §3.3, PLANNING_ENGINE.md §8): compares each synced LOQ's
+ * own committed dates and planning status against its latest Jira pull. Signal only — never writes
+ * back, never adopts Jira's dates, per the app's "never silently adapt to reality" principle
+ * (applyJiraSync.ts enforces the write side of this; this check is purely the comparison side).
+ */
+function checkJiraInconsistency(engine: PlanningEngine, toleranceDaysByProjectId?: Map<string, number>): SanityCheck[] {
+  const checks: SanityCheck[] = [];
+
+  for (const { loq, state } of engine.loqsWithJiraSync()) {
+    const project = engine.loqProject(loq.id);
+    const disciplineName = engine.discipline(loq.disciplineId)?.name;
+    const base = {
+      projectId: project?.id,
+      projectName: project?.name,
+      disciplineId: loq.disciplineId,
+      disciplineName,
+      loqId: loq.id,
+    };
+
+    if (state.jiraStatus) {
+      const bucket = mapJiraStatus(state.jiraStatus);
+      if (bucket === 'unknown') {
+        checks.push({
+          id: `jira-inconsistency-status:${loq.id}`,
+          severity: 'warning',
+          category: 'jira_inconsistency',
+          ...base,
+          message: `${loqLabel(engine, loq.id)} has an unrecognized Jira status ("${state.jiraStatus}")`,
+          impact: 'This status is not mapped to TODO/IN PROGRESS/DONE — confirm the mapping before trusting this LOQ\'s Jira signal',
+        });
+      } else if (bucket === 'DONE' && loq.status === 'TODO') {
+        checks.push({
+          id: `jira-inconsistency-status:${loq.id}`,
+          severity: 'critical',
+          category: 'jira_inconsistency',
+          ...base,
+          message: `${loqLabel(engine, loq.id)} is planned as TODO but Jira reports it DONE`,
+          impact: 'Work appears to have happened without planning knowing — confirm before treating this as the actual finish',
+        });
+      } else if (bucket === 'DONE' && loq.status === 'IN_PROGRESS') {
+        const { dueDate } = parseJiraSnapshotDates(state.rawSnapshot);
+        const early = dueDate && loq.committedFinish ? dueDate < loq.committedFinish : false;
+        checks.push({
+          id: `jira-inconsistency-status:${loq.id}`,
+          severity: 'info',
+          category: 'jira_inconsistency',
+          ...base,
+          message: early
+            ? `${loqLabel(engine, loq.id)} could finish early — Jira already reports it DONE`
+            : `${loqLabel(engine, loq.id)} is planned as IN PROGRESS but Jira reports it DONE`,
+          impact: `Jira due date ${dueDate ?? '—'} vs. committed finish ${loq.committedFinish ?? '—'}`,
+        });
+      } else if (bucket === 'TODO' && loq.status === 'IN_PROGRESS') {
+        checks.push({
+          id: `jira-inconsistency-status:${loq.id}`,
+          severity: 'warning',
+          category: 'jira_inconsistency',
+          ...base,
+          message: `${loqLabel(engine, loq.id)} is planned as IN PROGRESS but Jira reports it TODO`,
+          impact: 'Could be a planning lag, or a Jira regression — worth confirming',
+        });
+      } else if (bucket === 'PAUSED' && !loq.paused) {
+        // Signal-only, like every other jira_inconsistency comparison: Jira's status is never
+        // adopted into loq.paused automatically — see Cinematic.paused/Loq.paused in types.ts.
+        checks.push({
+          id: `jira-inconsistency-pause:${loq.id}`,
+          severity: 'info',
+          category: 'jira_inconsistency',
+          ...base,
+          message: `${loqLabel(engine, loq.id)} looks paused in Jira ("${state.jiraStatus}") but isn't marked paused in the plan`,
+          impact: 'Jira never auto-pauses the plan — confirm and toggle "Paused" on this LOQ if the work has genuinely stopped',
+        });
+      } else if ((bucket === 'TODO' || bucket === 'IN_PROGRESS') && loq.paused) {
+        checks.push({
+          id: `jira-inconsistency-pause:${loq.id}`,
+          severity: 'info',
+          category: 'jira_inconsistency',
+          ...base,
+          message: `${loqLabel(engine, loq.id)} is marked paused in the plan but Jira reports active work ("${state.jiraStatus}")`,
+          impact: 'Confirm whether the pause still applies, or update the LOQ if work has resumed',
+        });
+      }
+    }
+
+    const tolerance = (project && toleranceDaysByProjectId?.get(project.id)) ?? DEFAULT_JIRA_TOLERANCE_DAYS;
+    const { startDate, dueDate } = parseJiraSnapshotDates(state.rawSnapshot);
+
+    if (dueDate && loq.committedFinish) {
+      const delta = daysBetween(loq.committedFinish, dueDate);
+      if (Math.abs(delta) > tolerance) {
+        checks.push({
+          id: `jira-inconsistency-finish:${loq.id}`,
+          severity: 'warning',
+          category: 'jira_inconsistency',
+          ...base,
+          message: `${loqLabel(engine, loq.id)}'s Jira due date doesn't match its committed finish`,
+          impact: `Jira due date ${dueDate} vs. committed finish ${loq.committedFinish} — ${Math.abs(delta)}d apart`,
+        });
+      }
+    }
+
+    if (startDate && loq.committedStart) {
+      const delta = daysBetween(loq.committedStart, startDate);
+      if (Math.abs(delta) > tolerance) {
+        checks.push({
+          id: `jira-inconsistency-start:${loq.id}`,
+          severity: 'warning',
+          category: 'jira_inconsistency',
+          ...base,
+          message: `${loqLabel(engine, loq.id)}'s Jira start date doesn't match its committed start`,
+          impact: `Jira start date ${startDate} vs. committed start ${loq.committedStart} — ${Math.abs(delta)}d apart`,
+        });
+      }
+    }
+  }
+
   return checks;
 }
 

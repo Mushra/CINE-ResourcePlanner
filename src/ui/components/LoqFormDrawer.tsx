@@ -16,6 +16,7 @@ export interface LoqFormValue {
   status: LoqStatus;
   estimateDays: number | null;
   dodRef: string;
+  paused: boolean;
 }
 
 function fromLoq(disciplines: Discipline[], loq?: Loq): LoqFormValue {
@@ -27,6 +28,7 @@ function fromLoq(disciplines: Discipline[], loq?: Loq): LoqFormValue {
       status: 'TODO',
       estimateDays: null,
       dodRef: '',
+      paused: false,
     };
   }
   return {
@@ -36,6 +38,7 @@ function fromLoq(disciplines: Discipline[], loq?: Loq): LoqFormValue {
     status: loq.status,
     estimateDays: loq.estimateDays,
     dodRef: loq.dodRef,
+    paused: loq.paused,
   };
 }
 
@@ -118,6 +121,13 @@ export function LoqFormDrawer({
       <div className="field">
         <label htmlFor="loq-dod">Definition of done</label>
         <textarea id="loq-dod" rows={3} value={value.dodRef} onChange={(e) => set('dodRef', e.target.value)} placeholder="Reference or checklist…" />
+      </div>
+
+      <div className="field field-checkbox">
+        <label htmlFor="loq-paused">
+          <input id="loq-paused" type="checkbox" checked={value.paused} onChange={(e) => set('paused', e.target.checked)} />
+          Paused
+        </label>
       </div>
 
       <div className="drawer-footer" style={{ margin: '4px -20px -18px', width: 'calc(100% + 40px)' }}>

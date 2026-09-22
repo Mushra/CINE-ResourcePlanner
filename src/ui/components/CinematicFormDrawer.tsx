@@ -5,13 +5,15 @@ import type { Cinematic } from '../../domain/types';
 
 export interface CinematicFormValue {
   name: string;
+  jiraKey: string | null;
   targetDate: string | null;
   notes: string;
+  paused: boolean;
 }
 
 function fromCinematic(cinematic?: Cinematic): CinematicFormValue {
-  if (!cinematic) return { name: '', targetDate: null, notes: '' };
-  return { name: cinematic.name, targetDate: cinematic.targetDate, notes: cinematic.notes };
+  if (!cinematic) return { name: '', jiraKey: null, targetDate: null, notes: '', paused: false };
+  return { name: cinematic.name, jiraKey: cinematic.jiraKey, targetDate: cinematic.targetDate, notes: cinematic.notes, paused: cinematic.paused };
 }
 
 export function CinematicFormDrawer({ cinematic, onClose, onSave }: { cinematic?: Cinematic; onClose: () => void; onSave: (value: CinematicFormValue) => void }) {
@@ -37,8 +39,20 @@ export function CinematicFormDrawer({ cinematic, onClose, onSave }: { cinematic?
       </div>
 
       <div className="field">
+        <label htmlFor="cine-jira">Jira key (Epic)</label>
+        <input id="cine-jira" value={value.jiraKey ?? ''} onChange={(e) => set('jiraKey', e.target.value || null)} placeholder="PROD-100" />
+      </div>
+
+      <div className="field">
         <label htmlFor="cine-notes">Notes</label>
         <textarea id="cine-notes" rows={4} value={value.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Context, references…" />
+      </div>
+
+      <div className="field field-checkbox">
+        <label htmlFor="cine-paused">
+          <input id="cine-paused" type="checkbox" checked={value.paused} onChange={(e) => set('paused', e.target.checked)} />
+          Paused
+        </label>
       </div>
 
       <div className="drawer-footer" style={{ margin: '4px -20px -18px', width: 'calc(100% + 40px)' }}>

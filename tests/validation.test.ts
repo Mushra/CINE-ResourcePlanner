@@ -4,6 +4,7 @@ import { getSanityChecks } from '../src/engine/validation';
 import {
   cinematic,
   discipline,
+  jiraSyncState,
   loq,
   loqDependency,
   person,
@@ -347,6 +348,23 @@ describe('getSanityChecks — LOQ forecast (at risk, root cause, early opportuni
     expect(getSanityChecks(engine).filter((c) => c.category === 'loq_at_risk')).toHaveLength(0);
   });
 
+  it('does not flag loq_at_risk (or loq_root_cause/loq_early_opportunity) once the LOQ is paused', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, committedStart: '2026-09-01', committedFinish: '2026-09-10', paused: true });
+    const variance = varianceEvent({ loqId: l1.id, forecastDateAtDeclaration: '2026-09-16', deltaDays: 6 });
+
+    const engine = new PlanningEngine(
+      planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1], varianceEvents: [variance] }),
+    );
+
+    const checks = getSanityChecks(engine);
+    expect(checks.filter((c) => c.category === 'loq_at_risk')).toHaveLength(0);
+    expect(checks.filter((c) => c.category === 'loq_root_cause')).toHaveLength(0);
+    expect(checks.filter((c) => c.category === 'loq_early_opportunity')).toHaveLength(0);
+  });
+
   it('emits a single loq_root_cause naming the downstream impact, not a separate check per LOQ', () => {
     const animation = discipline({ name: 'Animation' });
     const p1 = project({ name: 'Alpha' });
@@ -437,5 +455,166 @@ describe('getSanityChecks — LOQ forecast (at risk, root cause, early opportuni
     const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1], varianceEvents: [variance] }));
 
     expect(getSanityChecks(engine).filter((c) => c.category === 'loq_early_opportunity')).toHaveLength(0);
+  });
+});
+
+describe('getSanityChecks — jira_inconsistency', () => {
+  it('flags a committed finish beyond tolerance of the Jira due date', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, committedFinish: '2026-09-10' });
+    const state = jiraSyncState({ loqId: l1.id, rawSnapshot: JSON.stringify({ dueDate: '2026-09-20' }) });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1], jiraSyncStates: [state] }));
+    const checks = getSanityChecks(engine).filter((c) => c.category === 'jira_inconsistency' && c.id.includes('finish'));
+    expect(checks).toHaveLength(1);
+    expect(checks[0].severity).toBe('warning');
+    expect(checks[0].impact).toContain('10d apart');
+  });
+
+  it('does not flag a date delta within the default tolerance', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, committedFinish: '2026-09-10' });
+    const state = jiraSyncState({ loqId: l1.id, rawSnapshot: JSON.stringify({ dueDate: '2026-09-11' }) });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1], jiraSyncStates: [state] }));
+    expect(getSanityChecks(engine).filter((c) => c.category === 'jira_inconsistency')).toHaveLength(0);
+  });
+
+  it('respects a wider per-project tolerance override', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, committedFinish: '2026-09-10' });
+    const state = jiraSyncState({ loqId: l1.id, rawSnapshot: JSON.stringify({ dueDate: '2026-09-13' }) });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1], jiraSyncStates: [state] }));
+    const withDefaultTolerance = getSanityChecks(engine).filter((c) => c.category === 'jira_inconsistency');
+    expect(withDefaultTolerance).toHaveLength(1);
+
+    const withWiderTolerance = getSanityChecks(engine, new Map([[p1.id, 5]])).filter((c) => c.category === 'jira_inconsistency');
+    expect(withWiderTolerance).toHaveLength(0);
+  });
+
+  it('flags planning TODO vs. Jira DONE as critical, without touching status or dates', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'TODO' });
+    const state = jiraSyncState({ loqId: l1.id, jiraStatus: 'Done' });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1], jiraSyncStates: [state] }));
+    const checks = getSanityChecks(engine).filter((c) => c.category === 'jira_inconsistency' && c.id.includes('status'));
+    expect(checks).toHaveLength(1);
+    expect(checks[0].severity).toBe('critical');
+    expect(l1.status).toBe('TODO'); // the check never mutates the LOQ itself
+  });
+
+  it('flags planning IN_PROGRESS vs. Jira TODO as a warning', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'IN_PROGRESS' });
+    const state = jiraSyncState({ loqId: l1.id, jiraStatus: 'To Do' });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1], jiraSyncStates: [state] }));
+    const checks = getSanityChecks(engine).filter((c) => c.category === 'jira_inconsistency' && c.id.includes('status'));
+    expect(checks).toHaveLength(1);
+    expect(checks[0].severity).toBe('warning');
+  });
+
+  it('surfaces an unrecognized Jira status as its own warning rather than guessing', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'TODO' });
+    const state = jiraSyncState({ loqId: l1.id, jiraStatus: 'Some Custom Workflow State' });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1], jiraSyncStates: [state] }));
+    const checks = getSanityChecks(engine).filter((c) => c.category === 'jira_inconsistency');
+    expect(checks).toHaveLength(1);
+    expect(checks[0].message).toContain('unrecognized');
+  });
+
+  it('maps a pause-shaped Jira status (e.g. "Blocked") onto the PAUSED bucket rather than "unrecognized"', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'TODO' });
+    const state = jiraSyncState({ loqId: l1.id, jiraStatus: 'Blocked' });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1], jiraSyncStates: [state] }));
+    const checks = getSanityChecks(engine).filter((c) => c.category === 'jira_inconsistency');
+    expect(checks).toHaveLength(1);
+    expect(checks[0].message).not.toContain('unrecognized');
+    expect(checks[0].message).toContain('paused in Jira');
+    expect(checks[0].severity).toBe('info');
+  });
+
+  it('flags a LOQ that looks paused in Jira but is not marked paused in the plan', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'IN_PROGRESS', paused: false });
+    const state = jiraSyncState({ loqId: l1.id, jiraStatus: 'On Hold' });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1], jiraSyncStates: [state] }));
+    const checks = getSanityChecks(engine).filter((c) => c.category === 'jira_inconsistency');
+    expect(checks).toHaveLength(1);
+    expect(checks[0].severity).toBe('info');
+    expect(checks[0].message).toContain('looks paused in Jira');
+    expect(checks[0].message).toContain('isn\'t marked paused in the plan');
+  });
+
+  it('flags a LOQ marked paused in the plan while Jira reports active work', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'IN_PROGRESS', paused: true });
+    const state = jiraSyncState({ loqId: l1.id, jiraStatus: 'In Progress' });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1], jiraSyncStates: [state] }));
+    const checks = getSanityChecks(engine).filter((c) => c.category === 'jira_inconsistency');
+    expect(checks).toHaveLength(1);
+    expect(checks[0].severity).toBe('info');
+    expect(checks[0].message).toContain('marked paused in the plan');
+    expect(checks[0].message).toContain('Jira reports active work');
+  });
+
+  it('does not flag a pause mismatch when the LOQ is already marked paused and Jira agrees', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'IN_PROGRESS', paused: true });
+    const state = jiraSyncState({ loqId: l1.id, jiraStatus: 'On Hold' });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1], jiraSyncStates: [state] }));
+    expect(getSanityChecks(engine).filter((c) => c.category === 'jira_inconsistency')).toHaveLength(0);
+  });
+
+  it('marks a Jira DONE ahead of the committed finish as an info-level early opportunity, not a warning', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'IN_PROGRESS', committedFinish: '2026-09-20' });
+    const state = jiraSyncState({ loqId: l1.id, jiraStatus: 'Done', rawSnapshot: JSON.stringify({ dueDate: '2026-09-10' }) });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1], jiraSyncStates: [state] }));
+    const statusChecks = getSanityChecks(engine).filter((c) => c.category === 'jira_inconsistency' && c.id.includes('status'));
+    expect(statusChecks).toHaveLength(1);
+    expect(statusChecks[0].severity).toBe('info');
+  });
+
+  it('emits nothing for a LOQ that has never been synced with Jira', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, committedFinish: '2026-09-10' });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1] }));
+    expect(getSanityChecks(engine).filter((c) => c.category === 'jira_inconsistency')).toHaveLength(0);
   });
 });

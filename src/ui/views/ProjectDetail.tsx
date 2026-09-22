@@ -13,6 +13,7 @@ import { Collapsible } from '../components/Collapsible';
 import { ProjectFormDrawer, type ProjectFormValue } from '../components/ProjectFormDrawer';
 import { CinematicFormDrawer, type CinematicFormValue } from '../components/CinematicFormDrawer';
 import { MppImportDrawer } from '../components/MppImportDrawer';
+import { JiraBindingDrawer } from '../components/JiraBindingDrawer';
 import { RequirementTimeline, type AssignmentPoolGroup, type RequirementGroup, type RequirementLane } from '../components/RequirementTimeline';
 import { deriveProjectStatus, STATUS_LABEL } from '../../domain/projectStatus';
 import type { Cinematic } from '../../domain/types';
@@ -46,6 +47,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [newCinematic, setNewCinematic] = useState(false);
   const [editingCinematic, setEditingCinematic] = useState<Cinematic | null>(null);
   const [importingMpp, setImportingMpp] = useState(false);
+  const [syncingJira, setSyncingJira] = useState(false);
 
   const checks = project ? getSanityChecks(engine).filter((c) => c.projectId === project.id) : [];
 
@@ -223,6 +225,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <span className="panel-sub">LOQ-level milestones under this project</span>
           <div className="panel-header-toggles">
             <Button variant="secondary" size="sm" icon="file-plus" onClick={() => setImportingMpp(true)}>Import .mpp</Button>
+            <Button variant="secondary" size="sm" icon="link" onClick={() => setSyncingJira(true)}>Sync with Jira</Button>
             <Button variant="primary" size="sm" icon="plus" onClick={() => setNewCinematic(true)}>New cinematic</Button>
           </div>
         </div>
@@ -330,6 +333,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
       {importingMpp && (
         <MppImportDrawer projectId={project.id} projectName={project.name} onClose={() => setImportingMpp(false)} />
+      )}
+
+      {syncingJira && (
+        <JiraBindingDrawer projectId={project.id} projectName={project.name} onClose={() => setSyncingJira(false)} />
       )}
     </div>
   );

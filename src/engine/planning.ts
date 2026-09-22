@@ -1,6 +1,7 @@
 import type {
   Cinematic,
   Discipline,
+  JiraSyncState,
   Loq,
   LoqDependency,
   Person,
@@ -94,6 +95,7 @@ export class PlanningEngine {
   private readonly cinematicsByProject: Map<string, Cinematic[]>;
   private readonly cinematicsById: Map<string, Cinematic>;
   private readonly loqsById: Map<string, Loq>;
+  private readonly jiraSyncStatesByLoqId: Map<string, JiraSyncState>;
   private readonly dependenciesByPredecessor: Map<string, LoqDependency[]>;
   private loqForecastsCache: Map<string, LoqForecast> | null = null;
   private loqForecastsByCinematicCache: Map<string, Map<string, LoqForecast>> | null = null;
@@ -161,6 +163,7 @@ export class PlanningEngine {
     }
 
     this.loqsById = new Map(data.loqs.map((l) => [l.id, l]));
+    this.jiraSyncStatesByLoqId = new Map(data.jiraSyncStates.map((s) => [s.loqId, s]));
 
     this.dependenciesByPredecessor = new Map();
     for (const dep of data.loqDependencies) {
@@ -471,6 +474,17 @@ export class PlanningEngine {
    * loq_early_opportunity to gate on "has a downstream dependent that could be pulled earlier". */
   loqHasDownstreamDependency(loqId: string): boolean {
     return (this.dependenciesByPredecessor.get(loqId)?.length ?? 0) > 0;
+  }
+
+  /** Every LOQ that has been linked and synced with Jira at least once, paired with its latest
+   * sync snapshot — feeds the jira_inconsistency check. */
+  loqsWithJiraSync(): { loq: Loq; state: JiraSyncState }[] {
+    const result: { loq: Loq; state: JiraSyncState }[] = [];
+    for (const [loqId, state] of this.jiraSyncStatesByLoqId) {
+      const loq = this.loqsById.get(loqId);
+      if (loq) result.push({ loq, state });
+    }
+    return result;
   }
 
   /** Per-person assigned FTE for one project at one period — drives the ProjectDetail UI. */

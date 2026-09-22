@@ -27,6 +27,7 @@ function allCheckCategories(): CheckCategory[] {
     'loq_at_risk',
     'loq_root_cause',
     'loq_early_opportunity',
+    'jira_inconsistency',
   ];
   for (const category of categories) {
     switch (category) {
@@ -45,6 +46,7 @@ function allCheckCategories(): CheckCategory[] {
       case 'loq_at_risk':
       case 'loq_root_cause':
       case 'loq_early_opportunity':
+      case 'jira_inconsistency':
         break;
       default: {
         const exhaustive: never = category;

@@ -136,3 +136,50 @@ function openXlsxFileFallback(): Promise<OpenedXlsx | null> {
     input.click();
   });
 }
+
+export interface OpenedJson {
+  text: string;
+  name: string;
+}
+
+const JSON_TYPES = {
+  description: 'JSON file',
+  accept: { 'application/json': ['.json'] },
+};
+
+/** Picks a .json file — the manual bridge for a Jira REST search-response export (see
+ * docs/INTEGRATIONS.md §3.1: "even a manual CSV/export step ... as a bridge until real API access
+ * is arranged") until Phase 5b wires up the real Jira HTTP client. */
+export async function openJsonFile(): Promise<OpenedJson | null> {
+  if (hasFileSystemAccess()) {
+    try {
+      const win = window as unknown as { showOpenFilePicker: (opts: unknown) => Promise<FileSystemFileHandleLike[]> };
+      const [handle] = await win.showOpenFilePicker({ types: [JSON_TYPES], multiple: false });
+      const file = await handle.getFile();
+      const text = await file.text();
+      return { text, name: file.name };
+    } catch (err) {
+      if ((err as DOMException)?.name === 'AbortError') return null;
+      throw err;
+    }
+  }
+  return openJsonFileFallback();
+}
+
+function openJsonFileFallback(): Promise<OpenedJson | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) {
+        resolve(null);
+        return;
+      }
+      const text = await file.text();
+      resolve({ text, name: file.name });
+    };
+    input.click();
+  });
+}

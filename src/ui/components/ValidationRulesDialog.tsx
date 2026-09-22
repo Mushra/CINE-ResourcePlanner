@@ -100,6 +100,12 @@ const RULES: RuleDoc[] = [
     severities: ['info'],
     description: 'A LOQ is forecast (or actually finished) ahead of its committed date and has a downstream dependent that could be pulled earlier — a flag only, never applied automatically.',
   },
+  {
+    category: 'jira_inconsistency',
+    title: 'Jira inconsistency',
+    severities: ['critical', 'warning', 'info'],
+    description: "A synced LOQ's committed dates or planning status disagree with its latest Jira pull (start/finish beyond tolerance, a status mismatch like planning TODO vs. Jira DONE, or a paused/active mismatch). Signal only — Jira never overwrites the plan.",
+  },
 ];
 
 // Exported so tests/validationRulesDialog.test.ts can assert RULES stays in sync with CheckCategory

@@ -19,6 +19,7 @@ import {
 } from '../db/repository';
 import { applyRpmImport, type ImportMode } from '../db/applyImport';
 import { applyMppImport, type MppApplyReport, type MppDisciplineResolution } from '../db/applyMppImport';
+import { applyJiraBindings, type ConfirmedJiraBindings, type JiraApplyReport } from '../db/applyJiraSync';
 import { seedDemoData } from '../db/seed';
 import { getStoredFileName, loadAutosave, saveAutosave, setStoredFileName } from '../persistence/indexeddb';
 import * as files from '../persistence/files';
@@ -27,6 +28,7 @@ import type { ImportReport, NormalizedImport } from '../import/rpmImport';
 import { parseRpmWorkbook } from '../import/rpmImport';
 import { parseStaffingWorkbook } from '../import/staffingImport';
 import { parseMppJson, type NormalizedMppImport } from '../import/mppImport';
+import { parseJiraSearchResponse, defaultJiraFieldMapping, type JiraRawSearchResponse, type NormalizedJiraBatch } from '../import/jiraSync';
 import { PlanningEngine, round2 } from '../engine/planning';
 import type { Cinematic, Discipline, Loq, LoqDependency, LoqResource, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
 import { wouldCreateCycle } from '../domain/loqGraph';
@@ -87,6 +89,15 @@ interface StoreState {
   /** Writes a parsed .mpp import into exactly one project — see applyMppImport for the "never
    * touch another project" guarantee. disciplineMap resolves every Text1 code the file used. */
   applyMppImportToProject: (projectId: string, normalized: NormalizedMppImport, disciplineMap: Record<string, MppDisciplineResolution>) => MppApplyReport;
+
+  /** Manual bridge until Phase 5b's real Jira HTTP client: opens a file picker for a Jira REST
+   * `/search` response exported to .json, and parses it with default field mapping (native
+   * duedate; no custom start-date field, since there is no Settings screen yet to configure one).
+   * Returns null on cancel or a parse failure it already toasted — never throws. */
+  loadJiraExportFile: () => Promise<{ fileName: string; batch: NormalizedJiraBatch } | null>;
+  /** Writes confirmed Jira bindings into exactly one project — see applyJiraBindings for the
+   * "never touch another project" guarantee and the signal-only (never overwrites status/dates). */
+  applyJiraBindingsToProject: (projectId: string, batch: NormalizedJiraBatch, confirmed: ConfirmedJiraBindings) => JiraApplyReport;
 
   createProject: (input: Omit<Project, 'id' | 'sortOrder'>) => Project;
   updateProject: (project: Project) => void;
@@ -492,6 +503,30 @@ export const useStore = create<StoreState>((set, get) => {
       get().toast(
         'success',
         `MS Project import: ${report.loqsCreated} LOQ${report.loqsCreated === 1 ? '' : 's'} created, ${report.loqsUpdated} updated`,
+      );
+      return report;
+    },
+
+    loadJiraExportFile: async () => {
+      const picked = await files.openJsonFile();
+      if (!picked) return null;
+      let raw: unknown;
+      try {
+        raw = JSON.parse(picked.text);
+      } catch {
+        get().toast('error', `${picked.name} is not valid JSON.`);
+        return null;
+      }
+      const batch = parseJiraSearchResponse(raw as JiraRawSearchResponse, defaultJiraFieldMapping());
+      return { fileName: picked.name, batch };
+    },
+    applyJiraBindingsToProject: (projectId, batch, confirmed) => {
+      const db = get().db!;
+      const report = applyJiraBindings(db, batch, projectId, confirmed);
+      persist();
+      get().toast(
+        'success',
+        `Jira sync: ${report.cinematicsLinked} cinematic${report.cinematicsLinked === 1 ? '' : 's'} linked, ${report.loqsLinked} LOQ${report.loqsLinked === 1 ? '' : 's'} linked`,
       );
       return report;
     },
