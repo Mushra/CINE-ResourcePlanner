@@ -181,21 +181,83 @@ rewriting working functionality.
   (rendered nesting + absence of standalone rows). See `PLANNING_ENGINE.md` §6/§8 for the exact shape.
   `jira_inconsistency` remains the only deferred check category (Phase 5).
 
-## Phase 5 — Jira read adapter (discovery-gated)
+## Phase 5 — Jira binding + date/status verification
 
-- **Objective**: per `INTEGRATIONS.md` §3, but **only after** the discovery spike against a real
-  Jira project has happened.
-- **Files/components affected**: `src/import/jiraSync.ts` (new, parse/normalize step),
-  `src/db/applyLoqSync.ts` (new, apply step, mirroring `applyImport.ts`'s shape), `jira_sync_state`
-  repository functions, new `jira_inconsistency` wiring already stubbed in Phase 2.
-- **Dependencies**: Phase 3 (needs LOQs to sync against); the discovery spike in
-  `INTEGRATIONS.md` §4 step 1, which is a **prerequisite research task, not an engineering task**,
-  and should be scheduled explicitly rather than assumed to happen implicitly during this phase.
-- **Acceptance criteria**: TBD pending discovery spike findings — cannot be written precisely yet;
-  placeholder until real Jira structure is known.
-- **Tests**: fixture-based tests against a captured real (or realistically-shaped) sample of Jira
-  API responses, once available.
-- **Migration considerations**: none beyond Phase 1's `jira_sync_state` table.
+### Phase 5a — Pure layers, manual-export bridge, UI drawer — **shipped**
+
+- **Objective**: per `INTEGRATIONS.md` §3. Propose bindings between Cinematics/LOQs and Jira issues
+  via a **cascade of signals tried by decreasing confidence** — pre-existing `jiraKey`, then the
+  "Cinematics List"/"LOQ Target" custom fields, then an Epic Link/Parent relationship, then
+  name-similarity — let the user confirm/override each one per Project, and surface
+  committed-date/status/pause disagreement as a signal-only `jira_inconsistency` check — Jira never
+  writes `loqs.status`, any committed/forecast date, or the plan's own `paused` flags. No real
+  network client yet: a Jira REST search-response exported to `.json` is the manual bridge
+  (`INTEGRATIONS.md` §3.1), swapped for a real HTTP client in 5b without touching anything below
+  the parse layer. A discovery spike against the real instance (`OVR`/`NEO` projects) **invalidated
+  the original Epic→children assumption** mid-phase (no real hierarchy on `OVR`) and confirmed the
+  cascade design in `INTEGRATIONS.md` §3.1/§3.2 instead — see that doc for the full rationale.
+- **Files/components affected**: `src/import/jiraSync.ts` (pure parse/normalize of a Jira REST
+  `/search` response, incl. the "Cinematics List"/"LOQ Target"/"CIN level" scope/Epic Link picklist
+  fields, defensively unwrapping `{value}` objects), `src/domain/jiraBinding.ts` (pure cascade
+  binding heuristic — `exact-key` → `cinematics-field` → `epic-link` → `name` → `unmatched`, each
+  proposal tagged with its `via: BindingKind` — in the spirit of `identity.ts`'s `personMatchKey`),
+  `src/db/applyJiraSync.ts` (project-scoped apply + `jira_sync_state` upsert),
+  `src/engine/planning.ts`/`src/engine/validation.ts` (`jira_inconsistency` check against the
+  date-tolerance + status matrix in `INTEGRATIONS.md` §3.3, incl. the `PAUSED` status bucket and its
+  two-way pause-mismatch signal), `src/domain/types.ts`/`src/db/repository.ts`/`src/db/schema.sql`
+  (`Cinematic.paused`/`Loq.paused`, independent manual booleans — Jira's `PAUSED` bucket only ever
+  compares against them, never sets them), `src/ui/components/CinematicFormDrawer.tsx`/
+  `LoqFormDrawer.tsx` (pause toggle), `src/persistence/files.ts` (`.json` file picker),
+  `src/store/useStore.ts` (`loadJiraExportFile`/`applyJiraBindingsToProject`),
+  `src/ui/components/JiraBindingDrawer.tsx` (interactive binding UI with a per-row signal badge,
+  mirroring `MppImportDrawer.tsx`), wired into `src/ui/views/ProjectDetail.tsx`'s Cinematics card.
+  `cinematics.jira_key` added (schema v9); `cinematics.paused`/`loqs.paused` added (schema v10).
+- **Dependencies**: Phase 1 (schema), Phase 3 (LOQs to sync against), Phase 6 (an imported `.mpp`
+  may already carry `loqs.jira_key`, which the heuristic trusts as an exact match).
+- **Acceptance criteria**: met — a Cinematic/LOQ with a pre-existing `jiraKey` present in the batch
+  binds directly (`via: 'exact-key'`), never filtered by scope; unmatched rows fall through the
+  cascade (field match → Epic Link → name-similarity above a fixed threshold), each proposal
+  labeled with the signal that produced it and editable via an override `<select>` (including
+  "don't link"); an optional scope filter (`CIN level`) excludes other-department candidates before
+  the cascade runs on projects that need it; the drawer auto-applies when every proposal is already
+  an exact key; a `jiraKey` already claimed by a different row, or one outside the target Project,
+  is skipped with a warning, never reassigned; an unmapped Jira status surfaces its own warning
+  rather than being guessed into TODO/IN PROGRESS/DONE/PAUSED; committed-date/status mismatches
+  beyond tolerance, and a plan↔Jira pause mismatch in either direction, appear in "Needs attention"
+  as `jira_inconsistency`; `loqs.status`/committed dates/`paused` are provably untouched even when
+  the linked issue is Done or pause-shaped; a paused LOQ is excluded from `loq_at_risk`/
+  `loq_root_cause`/`loq_early_opportunity`.
+- **Tests**: `tests/jiraSync.test.ts` (parse layer, incl. the picklist fields), `tests/jiraBinding.test.ts`
+  (full cascade incl. scope filtering), `tests/applyJiraSync.test.ts` (project-scoped apply, incl.
+  cross-project collision and idempotent re-application), `tests/validation.test.ts`
+  (`jira_inconsistency` date/status/pause cases, `PAUSED` bucket mapping, paused-LOQ exclusion from
+  the forecast checks), `tests/ui/jiraBinding.test.tsx` (drawer + mapping step + signal badge +
+  override, via `ProjectDetail`), `tests/migration.test.ts` (v9→v10 `paused` migration).
+- **Migration considerations**: schema v8→v9, additive only (`cinematics.jira_key` column + partial
+  unique index) — see `migrateV8toV9` in `database.ts`; schema v9→v10, additive only
+  (`cinematics.paused`/`loqs.paused`, default 0) — see `migrateV9toV10`.
+
+### Phase 5b — Real HTTP client (structure confirmed, engineering not yet started)
+
+- **Objective**: replace the manual `.json` bridge with a real Jira client. The discovery-spike
+  *research* this phase used to be gated on (`INTEGRATIONS.md` §4 step 1) is now done — see
+  `INTEGRATIONS.md` §3.1 for the confirmed structure — so what remains here is purely the
+  engineering: secret storage, the HTTP client, and a Settings screen.
+- **Files/components affected**: `electron/main.cjs` (`safeStorage`-encrypted token storage,
+  `fetch`-based paginated JQL search, Bearer PAT auth per `INTEGRATIONS.md` §3.1 — the confirmed
+  instance is Server/DC, not Cloud), `electron/preload.cjs`
+  (`contextBridge.exposeInMainWorld('jira', ...)`), `src/store/useStore.ts` (`syncJira(projectId)`),
+  a `JiraProjectConfig` repository layer (`settings` table, per-Project, no secret — field mapping
+  defaults per `defaultJiraFieldMapping()`), and the app's first Settings screen (base URL, Jira
+  project key, PAT entry, `scopeValue`, custom date-field ids — including resolving which of the two
+  competing `OVR` start-date fields is canonical, still open — and tolerance days).
+- **Acceptance criteria**: real token round-trips through `safeStorage` without ever touching the
+  shared plan file; "Synchroniser avec Jira" on a real Project produces the same binding
+  cascade/drawer/report as the 5a fixture path, populates `jira_sync_state`, and the
+  `jira_inconsistency`/pause checks read consistently off real data.
+- **Tests**: fixture-based tests against a captured real sample of Jira API responses (the `.scratch/`
+  discovery-spike captures qualify).
+- **Migration considerations**: none beyond Phase 5a's `jira_sync_state`/`jira_key`/`paused` columns.
 
 ## Phase 6 — MS Project import adapter — **shipped**
 

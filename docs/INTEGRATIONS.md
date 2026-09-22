@@ -144,67 +144,119 @@ symmetric with import.
 
 ## 3. Jira integration
 
-### 3.1 What must be confirmed before designing further
+**Implementation status**: Phase 5a ships everything below that doesn't require a real API key —
+the binding heuristic (`src/domain/jiraBinding.ts`), the project-scoped apply step
+(`src/db/applyJiraSync.ts`), the `jira_inconsistency` check (§3.3, `src/engine/validation.ts`), and
+the interactive drawer (`src/ui/components/JiraBindingDrawer.tsx`). It is fed by the manual
+`.json`-export bridge (`src/import/jiraSync.ts`, `parseJiraSearchResponse`) rather than a live REST
+call. A discovery spike against the real instance (Server/DC, `ne1-tomcat-jira153-dc.ubisoft.org`,
+projects `OVR` and `NEO`) has since **confirmed** the structure below, replacing the original §3.1
+open questions and the Epic→children assumption the first cut of §3.2 made — see §3.1/§3.2. A live
+HTTP client (`safeStorage`-backed token, real polling) remains Phase 5b (see
+`IMPLEMENTATION_PLAN.md`).
 
-Brief §13 itself warns "do not assume rich Jira metadata exists... may rely heavily on naming,
-hierarchy, assignees." This needs a **discovery spike against a real Jira project** before the
-`jira_sync_state` mapping can be trusted:
+### 3.1 Confirmed structure (discovery spike, 2026-09)
 
-- What issue type represents a LOQ in practice — a dedicated type, or a labeled/named convention on
-  a generic task type?
-- Is there a reliable field (custom field, label, epic link) that already encodes
-  Cinematic/Discipline, or does matching have to happen by name/parsing like the existing Excel
-  importers do?
-- What statuses does the real workflow use, and how do they map onto the three-value TODO/IN
-  PROGRESS/DONE model (brief §4)? Real Jira workflows often have more granular statuses (e.g. "In
-  Review", "Blocked") — these need an explicit mapping table, not a guess, and any status this
-  mapping can't confidently place should surface as a `jira_inconsistency` warning rather than being
-  silently forced into one of the three buckets.
-- Read access mechanism available now: REST API with an API token, a webhook, or only manual
-  CSV/export? This determines whether sync can be near-real-time or has to start as a periodic pull
-  (or even a manual "import Jira export" step, following the existing Excel-import pattern, as a
-  bridge until real API access is arranged).
+Brief §13 warned "do not assume rich Jira metadata exists... may rely heavily on naming, hierarchy,
+assignees." The spike found a mix of both — some strong global fields, and per-project structural
+variance underneath them:
 
-### 3.2 Proposed sync shape (provisional, pending §3.1)
+- **No reliable Epic→children hierarchy.** The original design assumed a Cinematic is an Epic and
+  its LOQs are child issues linked via `fields.parent`. On `OVR`, `parent` is null on every issue —
+  the Cinematic is a separate `Initiative`-type issue, structurally unrelated to its LOQs' issues.
+  `NEO` does carry a real `Epic Link`/`Parent Issue` relationship, but it's project-specific, not a
+  Jira-wide guarantee — so it can only ever be a fallback signal, never the primary one (§3.2).
+- **Two global custom fields carry the strongest, most reliable signal**, present with the same
+  field id on both `OVR` and `NEO` (Ubisoft-wide fields, not per-project):
+  - `customfield_10420` **"Cinematics List"** — single-value picklist holding the *exact Cinematic
+    name* (e.g. `"SOLO_MQ1020_S000_CIN Fixers_Car"`). Present on ~85% of `OVR` Tasks; absent on some
+    (`AudioPass`, `AudioRetakes`, `NEO`'s Scene Tasks).
+  - `customfield_12338` **"LOQ Target"** — single-value picklist holding the LOQ level (`L0`-`L3`).
+- **`customfield_57706` "CIN level"** is a **department-ownership scope filter, not a maturity
+  indicator** — `CIN 2` means "this department's own work" (relevant), `CIN 1` means another
+  department's issue that happens to share the same project (ignore). Present on `NEO` (which mixes
+  departments in one project), absent on `OVR`. Matching must filter to the configured scope value
+  *before* running the binding cascade, or department-crossover issues become false-positive
+  candidates.
+- **Per-project summary conventions differ**: `OVR` uses a `-`-separated summary
+  (`"SOLO_..._Car-Animation-L1"`), `NEO` uses ` | `. Name-similarity matching (§3.2's last-resort
+  signal) tokenizes rather than pattern-matches the separator, so this doesn't need per-project
+  special-casing — but it does mean name similarity alone is the weakest signal, consistent with it
+  being last in the cascade.
+- **Dates**: `duedate` (native) is reliable. Start date is split across two competing `OVR` custom
+  fields (`customfield_13302` "Start Date" and `customfield_12309` "Start (date)") — which one is
+  canonical is still unconfirmed; `defaultJiraFieldMapping()` currently leaves `startDateField`
+  unset (`null`) rather than guessing. `customfield_11919` "End Date" turned out to be a *completion*
+  date (≈ `resolutiondate`), not a planned end — **not used**. Per product decision, Jira
+  fixVersion/"target version" fields are explicitly **not** used for dates either; when Jira doesn't
+  supply a real start/due date, the date comes from the `.mpp` import or manual entry — the sync
+  never synthesizes one.
+- **Statuses observed on `OVR`**: `Resolved`, `Open`, `Ready for Review`, `Waiting For`, `Closed`.
+  The wider instance vocabulary (689 statuses total, `/rest/api/2/status`) also includes several
+  pause-shaped statuses (`On Hold`, `Blocked`, `Paused`, `Waiting For`, `QA Paused`, …) — see §3.3's
+  `PAUSED` bucket. No single confirmed real "paused Cinematic" example was inspected during the
+  spike, so the pause-status set (`PAUSED_STATUSES` in `validation.ts`) is built conservatively from
+  the vocabulary rather than a pinned case.
+- Read access: REST API with a Bearer PAT (Server/DC auth, not Cloud's Basic email+token) — Phase 5b
+  wires this up behind `safeStorage`; Phase 5a is fed by a manually-exported `/rest/api/2/search`
+  response `.json` instead, following the existing Excel-import bridge pattern.
 
-- **Read-only from the Planner's perspective in V1.** The Planner never writes back to Jira (brief
-  §13 frames Jira purely as the execution/status source; nothing in the brief asks for write-back,
-  and it would be a large trust/authority question to open unprompted).
-  - Polling pull (interval TBD by whatever access mechanism §3.1 confirms) rather than webhooks for
-    V1 — simpler, and this app has no server to receive a webhook against yet (see
-    `COLLABORATION_MODEL.md`).
-  - Each pull updates `jira_sync_state` for matched LOQs (by `jira_key`) and recomputes the
-    `jira_inconsistency` sanity checks (§3.3) — it never writes into `loqs.status` directly; `LOQ`
-    status stays a value the planning side owns, compared against (not overwritten by) Jira's
-    status.
+### 3.2 Binding: a cascade of signals, by decreasing confidence
 
-  This is a specific, deliberate design choice worth confirming with the product owner: brief §4
-  describes LOQ status as if it's one shared value, but §13's own examples ("Planning says TODO,
-  Jira says DONE → inconsistency") only make sense if planning-status and Jira-status are two
-  separate values being *compared*, not one value Jira silently overwrites. Recommend keeping them
-  separate (`loqs.status` = planning's own tracked status, `jira_sync_state.jira_status` = latest
-  raw pull) and surfacing disagreement as an explicit, visible inconsistency rather than one
-  silently winning — this is the same "never silently adapt to reality" principle the whole
-  committed-plan model is built on (brief §5), applied to status instead of dates.
+Rather than one fixed rule, `suggestJiraBindings()` tries progressively weaker signals and keeps the
+first one that finds a candidate — never guessing past that point. Every proposal carries a `via`
+tag (`BindingKind`) shown in the drawer as a badge, so the user always sees *what it matched to* and
+*how*, and can override via the row's `<select>` regardless of which signal proposed it:
+
+1. **`exact-key`** — `jiraKey` is already set (from a prior confirm, or the `.mpp` import's
+   `OVR-\d+` pattern) and present in the current batch. Trusted outright, no scoring, and — unlike
+   every other signal — never filtered by the scope value below (an explicit prior link is always
+   honored).
+2. **`cinematics-field`** — exact equality between `cinematic.name` and the issue's "Cinematics
+   List" value. The strongest heuristic signal, since it's an exact string match on a field humans
+   maintain deliberately. For LOQs, additionally requires "LOQ Target" to equal `loq.type`.
+3. **`epic-link`** — falls back to `Epic Link`/`Parent Issue`/native `parent`, restricted to
+   children of the issue already matched to the LOQ's Cinematic. Only meaningful for LOQs (a
+   Cinematic has no natural "parent" to link via); only really populated on `NEO`.
+4. **`name`** — token-overlap (Jaccard) similarity between the Cinematic/LOQ's name and the issue's
+   summary, the same canonicalization style as `personMatchKey` (accent/case/order-insensitive).
+   Last resort, since summary conventions vary per project (§3.1).
+5. **`unmatched`** — nothing cleared the threshold (or the batch is empty) → left for manual choice,
+   never a guessed pick.
+
+An optional **scope filter** (`customfield_57706` / configured `scopeValue`) restricts the candidate
+pool to matching-department issues *before* the cascade runs (steps 2-4) — absent by default (the
+`OVR`-only case, where the field doesn't exist), used on projects like `NEO` that mix departments.
 
 ### 3.3 Inconsistency detection (feeds `PLANNING_ENGINE.md` §8's `jira_inconsistency` check)
 
-Directly from brief §13's own examples:
+Directly from brief §13's own examples, plus the confirmed `PAUSED` status bucket (§3.1):
 
-| Planning status | Jira status | Signal |
+| Planning side | Jira side | Signal |
 |---|---|---|
 | TODO | DONE | critical — work happened without planning knowing; forecast/actual should likely adopt Jira's completion date pending human confirmation |
 | IN PROGRESS | TODO | warning — potential inconsistency, could be a planning lag or a Jira regression |
 | anything not DONE | DONE, before committed date | info — early completion opportunity (`PLANNING_ENGINE.md` §4.2) |
 | anything not DONE | still open/in-progress, past committed date | warning/critical scaled by how far past — this is the ordinary "late" case, already covered by `loq_at_risk` |
+| any Jira status this mapping can't confidently place | — | warning — "unrecognized Jira status," never silently forced into a bucket |
+| `loq.paused === false` | mapped `PAUSED` (`On Hold`/`Blocked`/`Paused`/`Waiting For`/`QA Paused`/…) | info — "looks paused in Jira but isn't marked paused in the plan" |
+| `loq.paused === true` | mapped `TODO`/`IN PROGRESS` (i.e. Jira looks active) | info — "marked paused in the plan but Jira reports active work" |
+
+Pause is a **manual, Planner-owned attribute** on both `Cinematic` and `Loq` (independent booleans,
+`schema.sql` v10) — Jira's status is only ever compared against it, never written into it. A paused
+LOQ is also excluded from `loq_at_risk`/`loq_root_cause`/`loq_early_opportunity`, since a
+deliberately-paused LOQ slipping its committed date isn't a planning risk.
 
 ### 3.4 Where actuals come from
 
-`LOQ.actual_finish` (`DATA_MODEL.md` §2) is written **only** by the Jira sync adapter reading a
-completion date/status transition from Jira, or by an explicit manual "mark done" action when no
-`jira_key` is linked yet. This is the brief's own model (§5: "Actual... usually derived from Jira
-completion state/date") — the Planner does not independently decide when something is "actually"
-done.
+Still deferred, unimplemented in Phase 5a. `LOQ.actual_finish` (`DATA_MODEL.md` §2) is intended to
+be written **only** by the Jira sync adapter reading a completion date/status transition from Jira,
+or by an explicit manual "mark done" action when no `jira_key` is linked yet — the brief's own model
+(§5: "Actual... usually derived from Jira completion state/date"). Phase 5a's sync is signal-only
+end to end (`jira_inconsistency` reports the mismatch; nothing writes `loqs.status` or any LOQ date)
+— adopting a Jira completion date into `actual_finish` would be the first exception to that
+principle, so it's intentionally left for a later phase, to reopen only if the product asks for it
+after Phase 5b.
 
 ## 4. Sequencing recommendation
 
