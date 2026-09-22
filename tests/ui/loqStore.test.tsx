@@ -26,7 +26,7 @@ describe('useStore — Cinematic CRUD', () => {
     const { project } = seedProjectAndDiscipline();
     const { createCinematic, updateCinematic, deleteCinematic } = useStore.getState();
 
-    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
     expect(useStore.getState().data.cinematics.find((c) => c.id === cinematic.id)?.name).toBe('Seq01');
 
     updateCinematic({ ...cinematic, name: 'Seq01 - Renamed' });
@@ -41,8 +41,8 @@ describe('useStore — Cinematic CRUD', () => {
     const { project } = seedProjectAndDiscipline();
     const { createCinematic } = useStore.getState();
 
-    const first = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
-    const second = createCinematic({ projectId: project.id, name: 'Seq02', targetDate: null, notes: '' });
+    const first = createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
+    const second = createCinematic({ projectId: project.id, name: 'Seq02', jiraKey: null, targetDate: null, notes: '' });
     expect(first.sortOrder).toBe(0);
     expect(second.sortOrder).toBe(1);
   });
@@ -53,7 +53,7 @@ describe('useStore — LOQ CRUD', () => {
     await seedStore();
     const { project, discipline } = seedProjectAndDiscipline();
     const { createCinematic, createLoq, updateLoq, deleteLoq } = useStore.getState();
-    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
 
     const loq = createLoq({
       cinematicId: cinematic.id,
@@ -80,7 +80,7 @@ describe('useStore — LOQ CRUD', () => {
     await seedStore();
     const { project, discipline } = seedProjectAndDiscipline();
     const { createCinematic, createLoq } = useStore.getState();
-    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
 
     createLoq({
       cinematicId: cinematic.id,
@@ -104,7 +104,7 @@ describe('useStore — LOQ CRUD', () => {
     await seedStore();
     const { project, discipline } = seedProjectAndDiscipline();
     const { createCinematic, createLoq, createLoqResource, createPool, createPerson, deleteCinematic } = useStore.getState();
-    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
     const loq = createLoq({
       cinematicId: cinematic.id,
       disciplineId: discipline.id,
@@ -134,7 +134,7 @@ describe('useStore — recommitLoq', () => {
     const { project, discipline } = seedProjectAndDiscipline();
     const { createCinematic, createLoq, recommitLoq } = useStore.getState();
     useUiStore.getState().setProducerName('Alex Martin');
-    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
     const loq = createLoq({
       cinematicId: cinematic.id,
       disciplineId: discipline.id,
@@ -171,7 +171,7 @@ describe('useStore — recommitLoq', () => {
     await seedStore();
     const { project, discipline } = seedProjectAndDiscipline();
     const { createCinematic, createLoq, recommitLoq } = useStore.getState();
-    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
     const loq = createLoq({
       cinematicId: cinematic.id,
       disciplineId: discipline.id,
@@ -198,7 +198,7 @@ describe('useStore — declareVariance', () => {
     const { project, discipline } = seedProjectAndDiscipline();
     const { createCinematic, createLoq, declareVariance } = useStore.getState();
     useUiStore.getState().setProducerName('Alex Martin');
-    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
     const loq = createLoq({
       cinematicId: cinematic.id,
       disciplineId: discipline.id,
@@ -227,7 +227,7 @@ describe('useStore — declareVariance', () => {
     await seedStore();
     const { project, discipline } = seedProjectAndDiscipline();
     const { createCinematic, createLoq, declareVariance } = useStore.getState();
-    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
     const loq = createLoq({
       cinematicId: cinematic.id,
       disciplineId: discipline.id,
@@ -255,7 +255,7 @@ describe('useStore — LoqResource CRUD', () => {
     await seedStore();
     const { project, discipline } = seedProjectAndDiscipline();
     const { createCinematic, createLoq, createPool, createPerson, createLoqResource, updateLoqResource, deleteLoqResource } = useStore.getState();
-    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
     const loq = createLoq({
       cinematicId: cinematic.id,
       disciplineId: discipline.id,
@@ -286,7 +286,7 @@ describe('useStore — LoqDependency CRUD', () => {
   function seedTwoLoqs() {
     const { project, discipline } = seedProjectAndDiscipline();
     const { createCinematic, createLoq } = useStore.getState();
-    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
     const base = {
       cinematicId: cinematic.id,
       disciplineId: discipline.id,

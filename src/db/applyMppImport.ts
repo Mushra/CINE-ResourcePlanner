@@ -99,7 +99,7 @@ export function applyMppImport(
       }
       return existingId;
     }
-    const created: Cinematic = createCinematic(db, { projectId: targetProjectId, name, targetDate: null, notes: '' });
+    const created: Cinematic = createCinematic(db, { projectId: targetProjectId, name, jiraKey: null, targetDate: null, notes: '', paused: false });
     cinematics.push(created);
     cinematicIdByKey.set(key, created.id);
     resolvedCinematicKeys.add(key);
@@ -220,6 +220,7 @@ export function applyMppImport(
         committedFinish: null,
         actualFinish: null,
         dodRef: '',
+        paused: false,
       });
       // Establishes an audit-trail entry for the import-sourced commitment, unlike the plain
       // manual "New LOQ" UI flow (CinematicDetail.tsx) which has no prior state to record against.

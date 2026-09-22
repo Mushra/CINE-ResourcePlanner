@@ -60,7 +60,7 @@ describe('Dashboard', () => {
       notes: '',
       isDispo: false,
     });
-    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
     const base = {
       cinematicId: cinematic.id,
       disciplineId: discipline.id,

@@ -114,21 +114,21 @@ export function loadPlanningData(db: PlannerDatabase): PlanningData {
     .map((r): StructureOverride => ({ id: r.id, kind: r.kind as StructureOverrideKind, sourceKey: r.source_key, targetKey: r.target_key }));
 
   const cinematics = db
-    .query<{ id: string; project_id: string; name: string; target_date: string | null; sort_order: number; notes: string }>(
+    .query<{ id: string; project_id: string; name: string; jira_key: string | null; target_date: string | null; sort_order: number; notes: string; paused: number }>(
       'SELECT * FROM cinematics ORDER BY sort_order, name',
     )
-    .map((r): Cinematic => ({ id: r.id, projectId: r.project_id, name: r.name, targetDate: r.target_date, sortOrder: r.sort_order, notes: r.notes }));
+    .map((r): Cinematic => ({ id: r.id, projectId: r.project_id, name: r.name, jiraKey: r.jira_key, targetDate: r.target_date, sortOrder: r.sort_order, notes: r.notes, paused: r.paused === 1 }));
 
   const loqs = db
     .query<{
       id: string; cinematic_id: string; discipline_id: string; jira_key: string | null; type: string; status: string;
       estimate_days: number | null; committed_start: string | null; committed_finish: string | null; actual_finish: string | null;
-      dod_ref: string; sort_order: number;
+      dod_ref: string; sort_order: number; paused: number;
     }>('SELECT * FROM loqs ORDER BY sort_order')
     .map((r): Loq => ({
       id: r.id, cinematicId: r.cinematic_id, disciplineId: r.discipline_id, jiraKey: r.jira_key, type: r.type,
       status: r.status as LoqStatus, estimateDays: r.estimate_days, committedStart: r.committed_start, committedFinish: r.committed_finish,
-      actualFinish: r.actual_finish, dodRef: r.dod_ref, sortOrder: r.sort_order,
+      actualFinish: r.actual_finish, dodRef: r.dod_ref, sortOrder: r.sort_order, paused: r.paused === 1,
     }));
 
   const loqCommitmentEvents = db
@@ -469,15 +469,15 @@ export function setPersonAssignmentAllocations(db: PlannerDatabase, personAssign
 export function createCinematic(db: PlannerDatabase, input: Omit<Cinematic, 'id' | 'sortOrder'>): Cinematic {
   const id = newId('cine');
   const maxOrder = db.query<{ m: number | null }>('SELECT MAX(sort_order) as m FROM cinematics WHERE project_id = ?', [input.projectId])[0]?.m ?? -1;
-  db.exec('INSERT INTO cinematics (id, project_id, name, target_date, sort_order, notes) VALUES (?, ?, ?, ?, ?, ?)', [
-    id, input.projectId, input.name, input.targetDate, maxOrder + 1, input.notes,
+  db.exec('INSERT INTO cinematics (id, project_id, name, jira_key, target_date, sort_order, notes, paused) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [
+    id, input.projectId, input.name, input.jiraKey, input.targetDate, maxOrder + 1, input.notes, input.paused ? 1 : 0,
   ]);
   return { ...input, id, sortOrder: maxOrder + 1 };
 }
 
 export function updateCinematic(db: PlannerDatabase, cinematic: Cinematic): void {
-  db.exec('UPDATE cinematics SET project_id=?, name=?, target_date=?, sort_order=?, notes=? WHERE id=?', [
-    cinematic.projectId, cinematic.name, cinematic.targetDate, cinematic.sortOrder, cinematic.notes, cinematic.id,
+  db.exec('UPDATE cinematics SET project_id=?, name=?, jira_key=?, target_date=?, sort_order=?, notes=?, paused=? WHERE id=?', [
+    cinematic.projectId, cinematic.name, cinematic.jiraKey, cinematic.targetDate, cinematic.sortOrder, cinematic.notes, cinematic.paused ? 1 : 0, cinematic.id,
   ]);
 }
 
@@ -498,9 +498,9 @@ export function createLoq(db: PlannerDatabase, input: Omit<Loq, 'id' | 'sortOrde
   const id = newId('loq');
   const maxOrder = db.query<{ m: number | null }>('SELECT MAX(sort_order) as m FROM loqs WHERE cinematic_id = ?', [input.cinematicId])[0]?.m ?? -1;
   db.exec(
-    `INSERT INTO loqs (id, cinematic_id, discipline_id, jira_key, type, status, estimate_days, committed_start, committed_finish, actual_finish, dod_ref, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, input.cinematicId, input.disciplineId, input.jiraKey, input.type, input.status, input.estimateDays, input.committedStart, input.committedFinish, input.actualFinish, input.dodRef, maxOrder + 1],
+    `INSERT INTO loqs (id, cinematic_id, discipline_id, jira_key, type, status, estimate_days, committed_start, committed_finish, actual_finish, dod_ref, sort_order, paused)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, input.cinematicId, input.disciplineId, input.jiraKey, input.type, input.status, input.estimateDays, input.committedStart, input.committedFinish, input.actualFinish, input.dodRef, maxOrder + 1, input.paused ? 1 : 0],
   );
   return { ...input, id, sortOrder: maxOrder + 1 };
 }
@@ -510,9 +510,9 @@ export function createLoq(db: PlannerDatabase, input: Omit<Loq, 'id' | 'sortOrde
  * (engine) work — this is a plain field-for-field update. */
 export function updateLoq(db: PlannerDatabase, loq: Loq): void {
   db.exec(
-    `UPDATE loqs SET cinematic_id=?, discipline_id=?, jira_key=?, type=?, status=?, estimate_days=?, committed_start=?, committed_finish=?, actual_finish=?, dod_ref=?, sort_order=?
+    `UPDATE loqs SET cinematic_id=?, discipline_id=?, jira_key=?, type=?, status=?, estimate_days=?, committed_start=?, committed_finish=?, actual_finish=?, dod_ref=?, sort_order=?, paused=?
      WHERE id=?`,
-    [loq.cinematicId, loq.disciplineId, loq.jiraKey, loq.type, loq.status, loq.estimateDays, loq.committedStart, loq.committedFinish, loq.actualFinish, loq.dodRef, loq.sortOrder, loq.id],
+    [loq.cinematicId, loq.disciplineId, loq.jiraKey, loq.type, loq.status, loq.estimateDays, loq.committedStart, loq.committedFinish, loq.actualFinish, loq.dodRef, loq.sortOrder, loq.paused ? 1 : 0, loq.id],
   );
 }
 

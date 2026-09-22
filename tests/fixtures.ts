@@ -1,6 +1,7 @@
 import type {
   Cinematic,
   Discipline,
+  JiraSyncState,
   Loq,
   LoqDependency,
   LoqResource,
@@ -130,9 +131,11 @@ export function cinematic(overrides: Partial<Cinematic> = {}): Cinematic {
     id: nextId('cine'),
     projectId: '',
     name: 'Seq01',
+    jiraKey: null,
     targetDate: null,
     sortOrder: 0,
     notes: '',
+    paused: false,
     ...overrides,
   };
 }
@@ -151,6 +154,7 @@ export function loq(overrides: Partial<Loq> = {}): Loq {
     actualFinish: null,
     dodRef: '',
     sortOrder: 0,
+    paused: false,
     ...overrides,
   };
 }
@@ -191,6 +195,18 @@ export function varianceEvent(overrides: Partial<VarianceEvent> = {}): VarianceE
     committedDateAtDeclaration: null,
     forecastDateAtDeclaration: null,
     deltaDays: 0,
+    ...overrides,
+  };
+}
+
+export function jiraSyncState(overrides: Partial<JiraSyncState> = {}): JiraSyncState {
+  return {
+    loqId: '',
+    jiraStatus: 'TODO',
+    jiraAssignee: null,
+    jiraUpdatedAt: null,
+    lastSyncedAt: '2026-09-01T00:00:00.000Z',
+    rawSnapshot: '{}',
     ...overrides,
   };
 }

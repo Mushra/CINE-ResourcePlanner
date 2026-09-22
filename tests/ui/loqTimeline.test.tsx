@@ -18,7 +18,7 @@ function seedScheduledLoq() {
     notes: '',
     isDispo: false,
   });
-  const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+  const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
   const loq = createLoq({
     cinematicId: cinematic.id,
     disciplineId: discipline.id,

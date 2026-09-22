@@ -159,10 +159,15 @@ export interface Cinematic {
   id: string;
   projectId: string;
   name: string;
+  /** Epic-level Jira binding, e.g. "PROD-100"; null until synced/linked. See docs/INTEGRATIONS.md §3. */
+  jiraKey: string | null;
   /** ISO date (yyyy-mm-dd) or null when TBD */
   targetDate: string | null;
   sortOrder: number;
   notes: string;
+  /** Manual, user-driven — never written by Jira sync. A Jira "paused-like" status only ever
+   * surfaces as a jira_inconsistency comparison against this, never overwrites it. */
+  paused: boolean;
 }
 
 export interface Loq {
@@ -183,6 +188,8 @@ export interface Loq {
   actualFinish: string | null;
   dodRef: string;
   sortOrder: number;
+  /** Manual, user-driven — never written by Jira sync; see Cinematic.paused. */
+  paused: boolean;
 }
 
 /** Append-only: the first row for a LOQ is its initial commitment, every later row is an explicit
@@ -260,6 +267,44 @@ export interface JiraSyncState {
   lastSyncedAt: string;
   /** JSON blob of whatever fields the adapter cared about. */
   rawSnapshot: string;
+}
+
+/**
+ * Non-secret, per-Project Jira connection config (see docs/INTEGRATIONS.md §3) — the API token
+ * itself never lives here or anywhere in the plan file; it's kept in Electron's OS-level
+ * safeStorage (Phase 5b). Persisted as JSON under a `jira.config.<projectId>` key in `settings`
+ * (see getSetting/setSetting in database.ts) rather than as its own table, since it's a single
+ * small per-project blob, not a collection.
+ */
+export interface JiraProjectConfig {
+  projectId: string;
+  baseUrl: string;
+  jiraProjectKey: string;
+  authMode: 'cloud' | 'server';
+  /** Required for 'cloud' (Basic email+token); unused for 'server' (Bearer PAT). */
+  email: string | null;
+  /** Custom field id carrying the issue's start date, e.g. "customfield_10015"; null = unknown. */
+  startDateField: string | null;
+  /** Defaults to Jira's native "duedate" when null. */
+  dueDateField: string | null;
+  /** Days of slack before a date mismatch surfaces as jira_inconsistency. */
+  dateToleranceDays: number;
+  /** Custom field id holding the Cinematic-name picklist (Ubisoft-wide: "customfield_10420" on
+   * both discovery-spike projects); strongest binding signal — see jiraBinding.ts's cascade.
+   * Defaults to "customfield_10420" when null. */
+  cinematicsListField: string | null;
+  /** Custom field id holding the LOQ-level picklist (e.g. "customfield_12338"); confirms the
+   * name-parsed LOQ type. Defaults to "customfield_12338" when null. */
+  loqTargetField: string | null;
+  /** Custom field id for a real Epic Link / parent-issue relationship, when the Jira project has
+   * one (confirmed present on some projects, absent on others — see jiraBinding.ts's cascade).
+   * null = not available, cascade falls through to name matching. */
+  epicLinkField: string | null;
+  /** Optional department/ownership scope filter (e.g. "CIN level" custom field id) — restricts
+   * binding candidates to issues where this field equals scopeValue before the cascade runs.
+   * Both null = no filtering. */
+  scopeField: string | null;
+  scopeValue: string | null;
 }
 
 /** Full snapshot of persisted data the engine operates on. Pure — no DB or UI concerns. */

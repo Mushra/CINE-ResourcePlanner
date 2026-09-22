@@ -19,7 +19,7 @@ function seedProjectAndCinematic() {
     notes: '',
     isDispo: false,
   });
-  const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+  const cinematic = createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
   return { discipline, project, cinematic };
 }
 

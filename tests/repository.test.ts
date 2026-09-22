@@ -34,8 +34,8 @@ describe('cinematics/LOQ repository CRUD', () => {
     const db = await PlannerDatabase.createNew();
     const { discipline, project } = await seedDisciplineAndProject(db);
 
-    const cine1 = createCinematic(db, { projectId: project.id, name: 'Seq01', targetDate: '2026-10-15', notes: '' });
-    const cine2 = createCinematic(db, { projectId: project.id, name: 'Seq02', targetDate: null, notes: '' });
+    const cine1 = createCinematic(db, { projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: '2026-10-15', notes: '' });
+    const cine2 = createCinematic(db, { projectId: project.id, name: 'Seq02', jiraKey: null, targetDate: null, notes: '' });
     expect(cine1.sortOrder).toBe(0);
     expect(cine2.sortOrder).toBe(1); // scoped per-project, not a global MAX
 
@@ -56,7 +56,7 @@ describe('cinematics/LOQ repository CRUD', () => {
     const { discipline, project } = await seedDisciplineAndProject(db);
     const person = createPerson(db, { name: 'Alice', poolId: null, capacityFte: 1, active: true, notes: '', team: '', site: '' });
 
-    const cinematic = createCinematic(db, { projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const cinematic = createCinematic(db, { projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
     const loqA = createLoq(db, {
       cinematicId: cinematic.id, disciplineId: discipline.id, jiraKey: null, type: 'L1', status: 'TODO',
       estimateDays: null, committedStart: null, committedFinish: null, actualFinish: null, dodRef: '',
@@ -89,7 +89,7 @@ describe('cinematics/LOQ repository CRUD', () => {
     const db = await PlannerDatabase.createNew();
     const { discipline, project } = await seedDisciplineAndProject(db);
     const person = createPerson(db, { name: 'Alice', poolId: null, capacityFte: 1, active: true, notes: '', team: '', site: '' });
-    const cinematic = createCinematic(db, { projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const cinematic = createCinematic(db, { projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
     const loq = createLoq(db, {
       cinematicId: cinematic.id, disciplineId: discipline.id, jiraKey: null, type: 'L1', status: 'TODO',
       estimateDays: null, committedStart: null, committedFinish: null, actualFinish: null, dodRef: '',

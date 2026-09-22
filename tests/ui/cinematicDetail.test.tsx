@@ -40,7 +40,7 @@ describe('ProjectDetail — Cinematics section', () => {
   it('drills into a cinematic and back again', async () => {
     await seedStore();
     const project = seedProject();
-    const cinematic = useStore.getState().createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const cinematic = useStore.getState().createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
     useUiStore.getState().openProject(project.id);
     const { user } = renderView(<ProjectDetail projectId={project.id} />);
 
@@ -53,7 +53,7 @@ describe('ProjectDetail — Cinematics section', () => {
   it('edits and deletes a cinematic from the list', async () => {
     await seedStore();
     const project = seedProject();
-    useStore.getState().createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    useStore.getState().createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
     useUiStore.getState().openProject(project.id);
     const { user } = renderView(<ProjectDetail projectId={project.id} />);
 
@@ -76,7 +76,7 @@ describe('CinematicDetail', () => {
   it('renders the cinematic header and returns to the project', async () => {
     await seedStore();
     const project = seedProject();
-    const cinematic = useStore.getState().createCinematic({ projectId: project.id, name: 'Seq01', targetDate: '2026-10-15', notes: 'Hero beat' });
+    const cinematic = useStore.getState().createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: '2026-10-15', notes: 'Hero beat' });
     useUiStore.getState().openCinematic(cinematic.id);
     useUiStore.setState({ selectedProjectId: project.id });
     const { user } = renderView(<CinematicDetail cinematicId={cinematic.id} />);
@@ -93,7 +93,7 @@ describe('CinematicDetail', () => {
   it('deletes the cinematic through the two-step confirm', async () => {
     await seedStore();
     const project = seedProject();
-    const cinematic = useStore.getState().createCinematic({ projectId: project.id, name: 'Seq01', targetDate: null, notes: '' });
+    const cinematic = useStore.getState().createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
     useUiStore.getState().openCinematic(cinematic.id);
     const { user } = renderView(<CinematicDetail cinematicId={cinematic.id} />);
 
