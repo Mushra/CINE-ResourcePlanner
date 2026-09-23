@@ -39,7 +39,7 @@ import { applyStructureOverrides } from '../domain/overrides';
 import { normalizeKey, genericPoolName, isGenericPoolName } from '../domain/identity';
 import { addMonths, comparePeriod, formatPeriodLabel, isoFirstDayOfPeriod, isoLastDayOfPeriod, periodFromISODate, periodRange } from '../domain/periods';
 import { spreadHue } from '../ui/lib/colors';
-import { isoDiffDays } from '../ui/timeline/timelineMath';
+import { isoAddDays, isoDiffDays } from '../ui/timeline/timelineMath';
 import { useUiStore } from './useUiStore';
 
 export type ToastKind = 'success' | 'error' | 'info';
@@ -139,9 +139,10 @@ interface StoreState {
   feedRequirementsFromAssignments: (projectId: string, mode: FeedRequirementsMode) => void;
   feedAllRequirementsFromAssignments: (mode: FeedRequirementsMode) => void;
 
-  /** Shifts every requirement/assignment allocation of a project by `monthDelta` months — used when the
-   * user drags a project bar to move it and chooses to bring its resources along. */
-  shiftProjectAllocations: (projectId: string, monthDelta: number) => void;
+  /** Shifts every requirement/assignment allocation interval of a project by `dayDelta` days, in
+   * lockstep with the project bar being dragged — day-precise, since allocation intervals aren't
+   * necessarily month-aligned. */
+  shiftProjectAllocations: (projectId: string, dayDelta: number) => void;
   /** Fills newly-added months (when a project's end is dragged later) from the last recorded value at
    * each pool/person, for needs and/or assignments per the user's choice. */
   autofillProjectExtension: (projectId: string, fromPeriod: Period, toPeriod: Period, opts: { needs: boolean; assignments: boolean }) => void;
@@ -905,29 +906,26 @@ export const useStore = create<StoreState>((set, get) => {
         : 'Requirements already match assignments everywhere');
     },
 
-    shiftProjectAllocations: (projectId, monthDelta) => {
-      if (monthDelta === 0) return;
+    shiftProjectAllocations: (projectId, dayDelta) => {
+      if (dayDelta === 0) return;
       const db = get().db!;
       const data = get().data;
       let changed = 0;
 
-      // Every allocation here is still full-month-aligned (Phase 2 day-precise editing isn't wired
-      // up yet), so "the period of a row" can be safely derived from its startDate.
+      // Interval rows aren't necessarily month-aligned (day-precise editing), so shifting has to
+      // move each interval's own start/finish by the same day offset, not re-bucket it into a
+      // different whole month.
       for (const req of data.requirements.filter((r) => r.projectId === projectId && r.scenarioId === BASE_SCENARIO_ID)) {
-        const allocs = data.requirementAllocations.filter((a) => a.requirementId === req.id && Math.abs(a.fte) > 0.001);
-        if (allocs.length === 0) continue;
-        const shifted = allocs.map((a) => ({ period: addMonths(periodFromISODate(a.startDate)!, monthDelta), fte: a.fte }));
-        for (const a of allocs) repoSetRequirementAllocation(db, req.id, periodFromISODate(a.startDate)!, 0);
-        for (const s of shifted) repoSetRequirementAllocation(db, req.id, s.period, s.fte);
-        changed += allocs.length;
+        for (const a of data.requirementAllocations.filter((a) => a.requirementId === req.id)) {
+          repoUpdateRequirementInterval(db, { ...a, startDate: isoAddDays(a.startDate, dayDelta), finishDate: isoAddDays(a.finishDate, dayDelta) });
+          changed++;
+        }
       }
       for (const asn of data.personAssignments.filter((a) => a.projectId === projectId && a.scenarioId === BASE_SCENARIO_ID)) {
-        const allocs = data.personAssignmentAllocations.filter((a) => a.personAssignmentId === asn.id && Math.abs(a.fte) > 0.001);
-        if (allocs.length === 0) continue;
-        const shifted = allocs.map((a) => ({ period: addMonths(periodFromISODate(a.startDate)!, monthDelta), fte: a.fte }));
-        for (const a of allocs) repoSetPersonAssignmentAllocation(db, asn.id, periodFromISODate(a.startDate)!, 0);
-        for (const s of shifted) repoSetPersonAssignmentAllocation(db, asn.id, s.period, s.fte);
-        changed += allocs.length;
+        for (const a of data.personAssignmentAllocations.filter((a) => a.personAssignmentId === asn.id)) {
+          repoUpdatePersonAssignmentInterval(db, { ...a, startDate: isoAddDays(a.startDate, dayDelta), finishDate: isoAddDays(a.finishDate, dayDelta) });
+          changed++;
+        }
       }
       persist();
       get().toast(changed > 0 ? 'success' : 'info', changed > 0

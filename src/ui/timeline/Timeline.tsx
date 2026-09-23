@@ -112,7 +112,7 @@ export function Timeline() {
   const createProject = useStore((s) => s.createProject);
   const shiftProjectAllocations = useStore((s) => s.shiftProjectAllocations);
   const autofillProjectExtension = useStore((s) => s.autofillProjectExtension);
-  const { confirm, confirm3, dialog } = useConfirmDialog();
+  const { confirm, dialog } = useConfirmDialog();
   const openProject = useUiStore((s) => s.openProject);
   const openPerson = useUiStore((s) => s.openPerson);
   const collapsed = useUiStore((s) => s.collapsed);
@@ -390,15 +390,10 @@ export function Timeline() {
                         onDatesChange={async (start, end, mode, origStart, origEnd) => {
                           updateProject({ ...project, startDate: start, endDate: end });
                           if (mode === 'move') {
-                            const monthDelta = Math.round(isoDiffDays(origStart, start) / 30.44);
-                            if (monthDelta !== 0) {
-                              const choice = await confirm3('Déplacer aussi les ressources et besoins avec le projet ?');
-                              if (choice === 'yes') {
-                                shiftProjectAllocations(project.id, monthDelta);
-                              } else if (choice === 'cancel') {
-                                updateProject({ ...project, startDate: origStart, endDate: origEnd });
-                              }
-                            }
+                            // A pure move is a translation — requirements/assignments follow the
+                            // project bar unconditionally, day-precise, no prompt.
+                            const dayDelta = isoDiffDays(origStart, start);
+                            if (dayDelta !== 0) shiftProjectAllocations(project.id, dayDelta);
                           } else if (mode === 'resize-end') {
                             const origEndP = periodFromISODate(origEnd);
                             const newEndP = periodFromISODate(end);
