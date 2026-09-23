@@ -6,9 +6,16 @@ on:
       - feature/cinematic-production-planner
   workflow_dispatch:
 
-# Produces a downloadable Windows installer for this branch's in-progress work, without touching
-# package.json's version, creating a tag, or publishing a GitHub Release — main's tag-driven
-# release.yml is the only workflow allowed to do any of that.
+permissions:
+  contents: write
+
+# Publishes a downloadable, auto-updatable Windows installer for this branch's in-progress work, as
+# a GitHub *pre-release* on its own "cinematic" update channel — never touching package.json's
+# committed version, never creating a `v*` tag, and never publishing to the "latest" channel that
+# main's tag-driven release.yml owns. electron-builder/electron-updater derive the channel entirely
+# from the version's pre-release component (e.g. "0.2.32-cinematic.42" -> channel "cinematic",
+# feed file "cinematic.yml"), so a main build (plain "x.y.z") and a branch build never see each
+# other's updates.
 jobs:
   build:
     runs-on: windows-latest
@@ -26,9 +33,23 @@ jobs:
       - run: npm run lint
       - run: npx tsc -b
       - run: npm test
-      - run: npm run electron:build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cine-resource-planner-${{ github.sha }}
-          path: release/*.exe
-          retention-days: 14
+      - name: Set branch pre-release version
+        shell: bash
+        run: |
+          base="$(node -p "require('./package.json').version")"
+          version="${base}-cinematic.${{ github.run_number }}"
+          npm pkg set version="$version"
+          echo "CINEMATIC_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Build and publish cinematic channel pre-release
+        run: npm run build && npm run prepare:mpp && npx electron-builder --win --publish always -c.publish.vPrefixedTagName=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EP_PRE_RELEASE: 'true'
+      - name: Prune old cinematic pre-releases (keep latest 5)
+        shell: bash
+        run: |
+          gh release list --limit 200 --json tagName,createdAt \
+            | jq -r '[.[] | select(.tagName | test("cinematic"))] | sort_by(.createdAt) | reverse | .[5:] | .[].tagName' \
+            | while read -r t; do gh release delete "$t" --cleanup-tag --yes; done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
