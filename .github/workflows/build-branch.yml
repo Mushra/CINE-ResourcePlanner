@@ -41,7 +41,7 @@ jobs:
           npm pkg set version="$version"
           echo "CINEMATIC_VERSION=$version" >> "$GITHUB_ENV"
       - name: Build and publish cinematic channel pre-release
-        run: npm run build && npm run prepare:mpp && npx electron-builder --win --publish always -c.publish.vPrefixedTagName=false
+        run: npm run build && npm run prepare:mpp && npx electron-builder --win --publish always --config.publish.vPrefixedTagName=false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EP_PRE_RELEASE: 'true'
