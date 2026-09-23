@@ -1,4 +1,4 @@
-# Cinematic Resource Planner
+# Cinematic Watchtower
 
 A planning tool for a Cinematic Production/Tech team to manage **resource capacity** across
 projects — disciplines/pools measured in FTE, not individual named people. It answers: *do we

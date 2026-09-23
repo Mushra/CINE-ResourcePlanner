@@ -1,4 +1,4 @@
--- Cinematic Resource Planner — SQLite schema
+-- Cinematic Watchtower — SQLite schema
 -- Every requirement/assignment carries a scenario_id so future what-if scenarios are additive
 -- (new scenario rows + a filter) rather than a breaking schema change.
 

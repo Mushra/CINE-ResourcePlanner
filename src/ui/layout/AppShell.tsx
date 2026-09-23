@@ -23,8 +23,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark">CRP</span>
-          <span className="brand-name">Resource Planner</span>
+          <span className="brand-mark">CW</span>
+          <span className="brand-name">Watchtower</span>
         </div>
         <nav className="nav">
           {NAV.map((item) => (

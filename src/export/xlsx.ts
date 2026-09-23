@@ -32,7 +32,7 @@ function overallStatus(gaps: number[]): { label: string; fill: string } {
 
 export async function buildWorkbook(engine: PlanningEngine): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Cinematic Resource Planner';
+  wb.creator = 'Cinematic Watchtower';
   wb.created = new Date();
 
   buildOverviewSheet(wb, engine);
