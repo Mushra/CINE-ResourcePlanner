@@ -360,11 +360,14 @@ function ProjectCapacity({ engine }: { engine: PlanningEngine }) {
   /** Unfiltered order so a project's color spread matches ProjectMix even though dispo projects are excluded here. */
   const orderedIds = useMemo(() => engine.projects().map((p) => p.id), [engine]);
 
-  function valueAt(projectId: string, p: Period): number {
+  /** `null` when metric is "occupancy" and the project has no requirement this period — there's
+   * nothing to divide by, so this is "no data", not "0% occupied" (see hasActivity below). */
+  function valueAt(projectId: string, p: Period): number | null {
     if (metric === 'staffed') return engine.getProjectAssigned(projectId, p);
     const required = engine.getProjectRequired(projectId, p);
+    if (required <= 0.001) return null;
     const assigned = engine.getProjectAssigned(projectId, p);
-    return required > 0.001 ? Math.min(100, round2((100 * assigned) / required)) : 0;
+    return Math.min(100, round2((100 * assigned) / required));
   }
 
   /** Whether a project has any real activity (required or assigned) in the window — independent of
@@ -379,7 +382,10 @@ function ProjectCapacity({ engine }: { engine: PlanningEngine }) {
     return projects
       .filter((p) => hasActivity(p.id))
       .map((p) => {
-        const avg = periods.length ? periods.reduce((sum, period) => sum + valueAt(p.id, period), 0) / periods.length : 0;
+        // Average only over periods with real data — a period with no requirement (null) doesn't
+        // count as 0% and shouldn't drag the average down for a project that's actually staffed.
+        const values = periods.map((period) => valueAt(p.id, period)).filter((v): v is number => v !== null);
+        const avg = values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : 0;
         return { id: p.id, name: p.name, color: colorForProject(p.id, orderedIds), value: round2(avg) };
       })
       .sort((a, b) => b.value - a.value);
@@ -388,7 +394,7 @@ function ProjectCapacity({ engine }: { engine: PlanningEngine }) {
 
   const series = useMemo(() => projects
     .filter((p) => hasActivity(p.id))
-    .map((p) => ({ id: p.id, label: p.name, color: colorForProject(p.id, orderedIds), values: periods.map((period) => round2(valueAt(p.id, period))) })),
+    .map((p) => ({ id: p.id, label: p.name, color: colorForProject(p.id, orderedIds), values: periods.map((period) => valueAt(p.id, period)) })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [projects, periods, metric, engine]);
 
