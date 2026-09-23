@@ -59,10 +59,9 @@ function PersonCell({ width, fte }: { width: number; fte: number }) {
 
 /** One assigned person's row under a pool, with their FTE for each period in the window. */
 function PersonRows({
-  engine, projectId, poolId, window, pxPerDay, openPerson,
+  personStaffingByPeriod, poolId, window, pxPerDay, openPerson,
 }: {
-  engine: PlanningEngine;
-  projectId: string;
+  personStaffingByPeriod: Map<Period, ReturnType<PlanningEngine['getProjectPersonStaffing']>>;
   poolId: string;
   window: Period[];
   pxPerDay: number;
@@ -71,7 +70,7 @@ function PersonRows({
   const names = new Map<string, string>();
   const fteByPersonPeriod = new Map<string, Map<Period, number>>();
   for (const period of window) {
-    for (const line of engine.getProjectPersonStaffing(projectId, period).lines) {
+    for (const line of personStaffingByPeriod.get(period)!.lines) {
       if (line.poolId !== poolId) continue;
       names.set(line.personId, line.personName);
       if (!fteByPersonPeriod.has(line.personId)) fteByPersonPeriod.set(line.personId, new Map());
@@ -187,6 +186,10 @@ export function Timeline() {
     labelEntries.push({ text: project.name, font: font(600, 12.5), extra: 110 });
     const allPoolIds = engine.projectPoolIds(project.id);
     const discIdsInProject = new Set(allPoolIds.map((id) => poolById.get(id)?.disciplineId ?? UNASSIGNED_DISCIPLINE_ID));
+    // Computed once per project (not once per pool × period) — getProjectPersonStaffing re-derives
+    // day-overlap FTE for every assignment, so calling it inside the pool loop below was recomputing
+    // the same per-period result once per pool instead of once total.
+    const personStaffingByPeriod = window.map((period) => engine.getProjectPersonStaffing(project.id, period));
     let anyGroup = false;
     for (const discId of discIdsInProject) {
       const specificPoolIds = allPoolIds.filter((id) => {
@@ -200,8 +203,8 @@ export function Timeline() {
       for (const poolId of specificPoolIds) {
         labelEntries.push({ text: poolById.get(poolId)!.name, font: font(400, 11.5), extra: 97 });
         const names = new Set<string>();
-        for (const period of window) {
-          for (const line of engine.getProjectPersonStaffing(project.id, period).lines) {
+        for (const staffing of personStaffingByPeriod) {
+          for (const line of staffing.lines) {
             if (line.poolId === poolId) names.add(line.personName);
           }
         }
@@ -358,6 +361,10 @@ export function Timeline() {
               const collapseKey = `timeline:proj:${project.id}`;
               const projectCollapsed = collapsed[collapseKey] === true;
               const assignedByPeriod = new Map(window.map((period) => [period, engine.getProjectAssigned(project.id, period)] as const));
+              // Computed once per project instead of once per discipline/pool row (both used to call
+              // engine.getProjectStaffing / getProjectPersonStaffing independently for the same period).
+              const staffingByPeriod = new Map(window.map((period) => [period, engine.getProjectStaffing(project.id, period)] as const));
+              const personStaffingByPeriod = new Map(window.map((period) => [period, engine.getProjectPersonStaffing(project.id, period)] as const));
               return (
                 <div key={project.id} className="tl-project-group">
                   <div className="tl-project-header-row">
@@ -437,7 +444,7 @@ export function Timeline() {
                             </div>
                             <div className="tl-cells-row">
                               {window.map((period) => {
-                                const staffing = engine.getProjectStaffing(project.id, period);
+                                const staffing = staffingByPeriod.get(period)!;
                                 let required = 0;
                                 let assigned = 0;
                                 for (const id of allPoolIds) {
@@ -486,7 +493,7 @@ export function Timeline() {
                                   </div>
                                   <div className="tl-cells-row">
                                     {window.map((period) => {
-                                      const staffing = engine.getProjectStaffing(project.id, period);
+                                      const staffing = staffingByPeriod.get(period)!;
                                       const line = staffing.lines.find((l) => l.poolId === poolId);
                                       return (
                                         <DisciplineCell
@@ -503,7 +510,7 @@ export function Timeline() {
                                   </div>
                                 </div>
                                 {peopleShown && (
-                                  <PersonRows engine={engine} projectId={project.id} poolId={poolId} window={window} pxPerDay={pxPerDay} openPerson={openPerson} />
+                                  <PersonRows personStaffingByPeriod={personStaffingByPeriod} poolId={poolId} window={window} pxPerDay={pxPerDay} openPerson={openPerson} />
                                 )}
                               </Fragment>
                             );
