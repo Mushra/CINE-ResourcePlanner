@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState, type CSSProperties, type WheelEvent } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore, TIMELINE_ZOOM_MIN, TIMELINE_ZOOM_MAX } from '../../store/useUiStore';
-import { buildTimelineWindow, fineAxisTicks, isoDiffDays, isoToDayOfMonth, monthWidthPx, timelineGranularity, timelineLabelColumnWidth, totalWindowWidth, xForIsoDate } from './timelineMath';
+import { buildTimelineWindow, fineAxisTicks, isoDiffDays, isoToDayOfMonth, monthWidthPx, timelineGranularity, timelineLabelColumnWidth, totalWindowWidth, xForIsoDate, type TimelineGranularity } from './timelineMath';
 import { addMonths, comparePeriod, formatPeriodLabel, periodFromISODate, periodRange, todayPeriod } from '../../domain/periods';
 import { ProjectBar } from './ProjectBar';
 import { formatNum, hexToRgba } from './AllocationCell';
@@ -15,7 +15,7 @@ import { PoolFilterMenu } from './PoolFilterMenu';
 import { round2, UNASSIGNED_DISCIPLINE_ID } from '../../engine/planning';
 import { isGenericPoolName } from '../../domain/identity';
 import type { PlanningEngine } from '../../engine/planning';
-import type { Period } from '../../domain/types';
+import type { Period, Project, ResourcePool } from '../../domain/types';
 
 /** Read-only required/assigned cell for a discipline total or a specific pool's row — needs are
  * discipline-only now, so neither level is editable here; edit needs and assignments on the
@@ -105,6 +105,207 @@ function PersonRows({
   );
 }
 
+/** One project's group of rows (bar + discipline/pool cells) — split out of Timeline's render loop
+ * so its `useMemo`s cache `disciplineGroups` per project instead of rebuilding it on every render
+ * of the whole view (search keystrokes, an unrelated row's collapse toggle, the zoom slider…). The
+ * heavy per-period staffing maps are computed once for all projects by the parent and passed in. */
+function ProjectRow({
+  project, engine, window, pxPerDay, granularity, totalWidth, poolById, activePoolIds, disciplineOrder,
+  assignedByPeriod, staffingByPeriod, personStaffingByPeriod, collapsed, toggleCollapse, openProject, openPerson,
+  updateProject, shiftProjectAllocations, autofillProjectExtension, confirm,
+}: {
+  project: Project;
+  engine: PlanningEngine;
+  window: Period[];
+  pxPerDay: number;
+  granularity: TimelineGranularity;
+  totalWidth: number;
+  poolById: Map<string, ResourcePool>;
+  activePoolIds: Set<string>;
+  disciplineOrder: Map<string, number>;
+  assignedByPeriod: Map<Period, number>;
+  staffingByPeriod: Map<Period, ReturnType<PlanningEngine['getProjectStaffing']>>;
+  personStaffingByPeriod: Map<Period, ReturnType<PlanningEngine['getProjectPersonStaffing']>>;
+  collapsed: Record<string, boolean>;
+  toggleCollapse: (key: string) => void;
+  openProject: (projectId: string) => void;
+  openPerson: (personId: string) => void;
+  updateProject: (project: Project) => void;
+  shiftProjectAllocations: (projectId: string, dayDelta: number) => void;
+  autofillProjectExtension: (projectId: string, fromPeriod: Period, toPeriod: Period, opts: { needs: boolean; assignments: boolean }) => void;
+  confirm: (message: string) => Promise<boolean>;
+}) {
+  const allPoolIds = useMemo(() => engine.projectPoolIds(project.id), [engine, project.id]);
+  const disciplineGroups = useMemo(() => {
+    const disciplineIdsInProject = new Set(allPoolIds.map((id) => poolById.get(id)?.disciplineId ?? UNASSIGNED_DISCIPLINE_ID));
+    return [...disciplineIdsInProject]
+      .map((discId) => ({
+        discId,
+        specificPoolIds: allPoolIds.filter((id) => {
+          const pool = poolById.get(id);
+          if (!pool || isGenericPoolName(pool.name)) return false;
+          return (pool.disciplineId ?? UNASSIGNED_DISCIPLINE_ID) === discId && activePoolIds.has(id);
+        }),
+      }))
+      .filter((g) => g.specificPoolIds.length > 0)
+      .sort((a, b) => (disciplineOrder.get(a.discId) ?? Infinity) - (disciplineOrder.get(b.discId) ?? Infinity));
+  }, [allPoolIds, poolById, activePoolIds, disciplineOrder]);
+  const collapseKey = `timeline:proj:${project.id}`;
+  const projectCollapsed = collapsed[collapseKey] === true;
+
+  return (
+    <div className="tl-project-group">
+      <div className="tl-project-header-row">
+        <div className="tl-label-cell tl-project-label">
+          <button
+            type="button"
+            className="tl-project-collapse"
+            onClick={() => toggleCollapse(collapseKey)}
+            aria-label={projectCollapsed ? 'Expand' : 'Collapse'}
+          >
+            <Icon name="chevron-right" size={12} className={projectCollapsed ? '' : 'tl-project-collapse-open'} />
+          </button>
+          <button type="button" className="tl-project-name" onClick={() => openProject(project.id)}>{project.name}</button>
+          <span className={`priority-badge priority-${project.priority} tl-priority-badge`}>{project.priority}</span>
+        </div>
+        <div className="tl-lane" style={{ width: totalWidth }}>
+          <ProjectBar
+            project={project}
+            window={window}
+            pxPerDay={pxPerDay}
+            granularity={granularity}
+            onClick={() => openProject(project.id)}
+            onDatesChange={async (start, end, mode, origStart, origEnd) => {
+              updateProject({ ...project, startDate: start, endDate: end });
+              if (mode === 'move') {
+                // A pure move is a translation — requirements/assignments follow the
+                // project bar unconditionally, day-precise, no prompt.
+                const dayDelta = isoDiffDays(origStart, start);
+                if (dayDelta !== 0) shiftProjectAllocations(project.id, dayDelta);
+              } else if (mode === 'resize-end') {
+                const origEndP = periodFromISODate(origEnd);
+                const newEndP = periodFromISODate(end);
+                if (origEndP && newEndP && comparePeriod(newEndP, origEndP) > 0) {
+                  const fromPeriod = addMonths(origEndP, 1);
+                  const okNeeds = await confirm('Reporter les besoins sur les nouveaux mois ?');
+                  const okAssignments = await confirm('Reporter les assignations sur les nouveaux mois ?');
+                  if (okNeeds || okAssignments) {
+                    autofillProjectExtension(project.id, fromPeriod, newEndP, { needs: okNeeds, assignments: okAssignments });
+                  }
+                }
+              }
+            }}
+            assignedByPeriod={assignedByPeriod}
+          />
+        </div>
+      </div>
+      {projectCollapsed ? null : disciplineGroups.length === 0 ? (
+        <div className="tl-pool-row tl-pool-row-empty">
+          <div className="tl-label-cell tl-pool-label">No disciplines assigned</div>
+        </div>
+      ) : (
+        disciplineGroups.map((group) => {
+          const discipline = engine.discipline(group.discId);
+          const discName = discipline?.name ?? 'Unassigned';
+          const discColor = discipline?.color ?? '#9ca3af';
+          const discCollapseKey = `timeline:disc:${project.id}:${group.discId}`;
+          const discCollapsed = collapsed[discCollapseKey] === true;
+          return (
+            <div key={group.discId} className="tl-disc-group">
+              <div className="tl-pool-row tl-disc-row">
+                <div className="tl-label-cell tl-disc-label">
+                  <button
+                    type="button"
+                    className="tl-project-collapse"
+                    onClick={() => toggleCollapse(discCollapseKey)}
+                    aria-label={discCollapsed ? 'Expand' : 'Collapse'}
+                  >
+                    <Icon name="chevron-right" size={11} className={discCollapsed ? '' : 'tl-project-collapse-open'} />
+                  </button>
+                  <span className="discipline-dot" style={{ background: discColor }} />
+                  {discName}
+                </div>
+                <div className="tl-cells-row">
+                  {window.map((period) => {
+                    const staffing = staffingByPeriod.get(period)!;
+                    let required = 0;
+                    let assigned = 0;
+                    for (const id of allPoolIds) {
+                      const pool = poolById.get(id);
+                      if ((pool?.disciplineId ?? UNASSIGNED_DISCIPLINE_ID) !== group.discId) continue;
+                      const line = staffing.lines.find((l) => l.poolId === id);
+                      if (!line) continue;
+                      required += line.required;
+                      if (!pool || !isGenericPoolName(pool.name)) assigned += line.assigned;
+                    }
+                    const capacity = engine.getDisciplineCapacity(group.discId, period);
+                    const overCapacity = capacity < engine.getDisciplineRequiredCapacity(group.discId, period) - 0.001;
+                    return (
+                      <DisciplineCell
+                        key={period}
+                        width={monthWidthPx(period, pxPerDay)}
+                        required={round2(required)}
+                        assigned={round2(assigned)}
+                        capacity={capacity}
+                        color={discColor}
+                        overCapacity={overCapacity}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+              {!discCollapsed && group.specificPoolIds.map((poolId) => {
+                const pool = poolById.get(poolId)!;
+                const poolCollapseKey = `timeline:pool:${project.id}:${poolId}`;
+                // Reuses the shared collapsed map, but here `true` means "people shown" (default hidden).
+                const peopleShown = collapsed[poolCollapseKey] === true;
+                return (
+                  <Fragment key={poolId}>
+                    <div className="tl-pool-row tl-pool-row-nested">
+                      <div className="tl-label-cell tl-pool-label">
+                        <button
+                          type="button"
+                          className="tl-project-collapse"
+                          onClick={() => toggleCollapse(poolCollapseKey)}
+                          aria-label={peopleShown ? 'Hide people' : 'Show people'}
+                        >
+                          <Icon name="chevron-right" size={10} className={peopleShown ? 'tl-project-collapse-open' : ''} />
+                        </button>
+                        <span className="pool-dot" style={{ background: pool.color }} />
+                        {pool.name}
+                      </div>
+                      <div className="tl-cells-row">
+                        {window.map((period) => {
+                          const staffing = staffingByPeriod.get(period)!;
+                          const line = staffing.lines.find((l) => l.poolId === poolId);
+                          return (
+                            <DisciplineCell
+                              key={period}
+                              width={monthWidthPx(period, pxPerDay)}
+                              required={line?.required ?? 0}
+                              assigned={line?.assigned ?? 0}
+                              capacity={engine.getCapacity(poolId, period)}
+                              color={pool.color}
+                              overCapacity={engine.isOverCapacity(poolId, period)}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                    {peopleShown && (
+                      <PersonRows personStaffingByPeriod={personStaffingByPeriod} poolId={poolId} window={window} pxPerDay={pxPerDay} openPerson={openPerson} />
+                    )}
+                  </Fragment>
+                );
+              })}
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
 export function Timeline() {
   const engine = useStore((s) => s.engine);
   const projects = useStore((s) => s.data.projects);
@@ -128,7 +329,7 @@ export function Timeline() {
   const setTimelineWindow = useUiStore((s) => s.setTimelineWindow);
 
   const [showNew, setShowNew] = useState(false);
-  const poolFilter = storedPoolFilter ? new Set(storedPoolFilter) : null;
+  const poolFilter = useMemo(() => (storedPoolFilter ? new Set(storedPoolFilter) : null), [storedPoolFilter]);
   const setPoolFilter = (next: Set<string> | null) => setStoredPoolFilter(next ? Array.from(next) : null);
 
   const pxPerDay = 3 * (zoom / 100);
@@ -150,71 +351,101 @@ export function Timeline() {
   const granularity = timelineGranularity(pxPerDay);
   const fineTicks = useMemo(() => fineAxisTicks(window, granularity), [window, granularity]);
 
-  const poolsAll = engine.pools();
-  const pools = poolsAll.filter((p) => !isGenericPoolName(p.name));
-  const poolById = new Map(poolsAll.map((p) => [p.id, p] as const));
-  const disciplineOrder = new Map(engine.disciplines().map((d, i) => [d.id, i] as const));
-  const activePoolIds = poolFilter ?? new Set(pools.map((p) => p.id));
+  const poolsAll = useMemo(() => engine.pools(), [engine]);
+  const pools = useMemo(() => poolsAll.filter((p) => !isGenericPoolName(p.name)), [poolsAll]);
+  const poolById = useMemo(() => new Map(poolsAll.map((p) => [p.id, p] as const)), [poolsAll]);
+  const disciplineOrder = useMemo(() => new Map(engine.disciplines().map((d, i) => [d.id, i] as const)), [engine]);
+  const activePoolIds = useMemo(() => poolFilter ?? new Set(pools.map((p) => p.id)), [poolFilter, pools]);
 
-  const scheduled = projects.filter((p) => p.startDate && p.endDate)
-    .filter((p) => !search || p.name.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => (a.startDate! < b.startDate! ? -1 : a.startDate! > b.startDate! ? 1 : 0));
-  const unscheduled = projects.filter((p) => !p.startDate || !p.endDate)
-    .filter((p) => !search || p.name.toLowerCase().includes(search.toLowerCase()));
+  // Kept separate from `scheduled` below so the per-project staffing maps (the expensive part —
+  // day-overlap FTE resolution) don't get invalidated by every keystroke in the search box.
+  const projectsWithDates = useMemo(() => projects.filter((p) => p.startDate && p.endDate), [projects]);
+  const scheduled = useMemo(
+    () => projectsWithDates
+      .filter((p) => !search || p.name.toLowerCase().includes(search.toLowerCase()))
+      .sort((a, b) => (a.startDate! < b.startDate! ? -1 : a.startDate! > b.startDate! ? 1 : 0)),
+    [projectsWithDates, search],
+  );
+  const unscheduled = useMemo(
+    () => projects.filter((p) => !p.startDate || !p.endDate).filter((p) => !search || p.name.toLowerCase().includes(search.toLowerCase())),
+    [projects, search],
+  );
+
+  // One pass over every scheduled project, computed once and shared by the label-width pass and
+  // the render pass below — each of these three re-derives day-overlap FTE per allocation row, so
+  // calling them twice (once per consumer) or once per render (any unrelated state change: search
+  // text, a collapse toggle, the zoom slider) was the actual cost behind "switching tabs is slow".
+  const assignedByProject = useMemo(() => {
+    const map = new Map<string, Map<Period, number>>();
+    for (const project of projectsWithDates) map.set(project.id, new Map(window.map((period) => [period, engine.getProjectAssigned(project.id, period)] as const)));
+    return map;
+  }, [projectsWithDates, engine, window]);
+  const staffingByProject = useMemo(() => {
+    const map = new Map<string, Map<Period, ReturnType<PlanningEngine['getProjectStaffing']>>>();
+    for (const project of projectsWithDates) map.set(project.id, new Map(window.map((period) => [period, engine.getProjectStaffing(project.id, period)] as const)));
+    return map;
+  }, [projectsWithDates, engine, window]);
+  const personStaffingByProject = useMemo(() => {
+    const map = new Map<string, Map<Period, ReturnType<PlanningEngine['getProjectPersonStaffing']>>>();
+    for (const project of projectsWithDates) map.set(project.id, new Map(window.map((period) => [period, engine.getProjectPersonStaffing(project.id, period)] as const)));
+    return map;
+  }, [projectsWithDates, engine, window]);
 
   const setManyCollapsed = useUiStore((s) => s.setManyCollapsed);
-  const visibleCollapseKeys: string[] = [];
-  for (const project of scheduled) {
-    visibleCollapseKeys.push(`timeline:proj:${project.id}`);
-    const discIdsInProject = new Set(
-      engine.projectPoolIds(project.id)
-        .filter((id) => {
-          const pool = poolById.get(id);
-          return pool && !isGenericPoolName(pool.name) && activePoolIds.has(id);
-        })
-        .map((id) => poolById.get(id)?.disciplineId ?? UNASSIGNED_DISCIPLINE_ID),
-    );
-    for (const discId of discIdsInProject) visibleCollapseKeys.push(`timeline:disc:${project.id}:${discId}`);
-  }
-
-  const bodyFontFamily = typeof document !== 'undefined' ? getComputedStyle(document.body).fontFamily : 'system-ui, sans-serif';
-  const font = (weight: number, size: number) => `${weight} ${size}px ${bodyFontFamily}`;
-  const labelEntries: { text: string; font: string; extra: number }[] = [
-    { text: 'Project / Emploi repère', font: font(600, 11), extra: 30 },
-  ];
-  for (const project of scheduled) {
-    labelEntries.push({ text: project.name, font: font(600, 12.5), extra: 110 });
-    const allPoolIds = engine.projectPoolIds(project.id);
-    const discIdsInProject = new Set(allPoolIds.map((id) => poolById.get(id)?.disciplineId ?? UNASSIGNED_DISCIPLINE_ID));
-    // Computed once per project (not once per pool × period) — getProjectPersonStaffing re-derives
-    // day-overlap FTE for every assignment, so calling it inside the pool loop below was recomputing
-    // the same per-period result once per pool instead of once total.
-    const personStaffingByPeriod = window.map((period) => engine.getProjectPersonStaffing(project.id, period));
-    let anyGroup = false;
-    for (const discId of discIdsInProject) {
-      const specificPoolIds = allPoolIds.filter((id) => {
-        const pool = poolById.get(id);
-        if (!pool || isGenericPoolName(pool.name)) return false;
-        return (pool.disciplineId ?? UNASSIGNED_DISCIPLINE_ID) === discId && activePoolIds.has(id);
-      });
-      if (specificPoolIds.length === 0) continue;
-      anyGroup = true;
-      labelEntries.push({ text: engine.discipline(discId)?.name ?? 'Unassigned', font: font(600, 12), extra: 70 });
-      for (const poolId of specificPoolIds) {
-        labelEntries.push({ text: poolById.get(poolId)!.name, font: font(400, 11.5), extra: 97 });
-        const names = new Set<string>();
-        for (const staffing of personStaffingByPeriod) {
-          for (const line of staffing.lines) {
-            if (line.poolId === poolId) names.add(line.personName);
-          }
-        }
-        if (names.size === 0) labelEntries.push({ text: 'No one assigned yet', font: font(400, 11), extra: 88 });
-        else for (const name of names) labelEntries.push({ text: name, font: font(400, 11), extra: 88 });
-      }
+  const visibleCollapseKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const project of scheduled) {
+      keys.push(`timeline:proj:${project.id}`);
+      const discIdsInProject = new Set(
+        engine.projectPoolIds(project.id)
+          .filter((id) => {
+            const pool = poolById.get(id);
+            return pool && !isGenericPoolName(pool.name) && activePoolIds.has(id);
+          })
+          .map((id) => poolById.get(id)?.disciplineId ?? UNASSIGNED_DISCIPLINE_ID),
+      );
+      for (const discId of discIdsInProject) keys.push(`timeline:disc:${project.id}:${discId}`);
     }
-    if (!anyGroup) labelEntries.push({ text: 'No disciplines assigned', font: font(400, 11.5), extra: 56 });
-  }
-  const labelWidth = timelineLabelColumnWidth(labelEntries, { min: 200, max: 440 });
+    return keys;
+  }, [scheduled, engine, poolById, activePoolIds]);
+
+  const bodyFontFamily = useMemo(() => (typeof document !== 'undefined' ? getComputedStyle(document.body).fontFamily : 'system-ui, sans-serif'), []);
+  const labelWidth = useMemo(() => {
+    const font = (weight: number, size: number) => `${weight} ${size}px ${bodyFontFamily}`;
+    const labelEntries: { text: string; font: string; extra: number }[] = [
+      { text: 'Project / Emploi repère', font: font(600, 11), extra: 30 },
+    ];
+    for (const project of scheduled) {
+      labelEntries.push({ text: project.name, font: font(600, 12.5), extra: 110 });
+      const allPoolIds = engine.projectPoolIds(project.id);
+      const discIdsInProject = new Set(allPoolIds.map((id) => poolById.get(id)?.disciplineId ?? UNASSIGNED_DISCIPLINE_ID));
+      const personStaffingByPeriod = personStaffingByProject.get(project.id)!;
+      let anyGroup = false;
+      for (const discId of discIdsInProject) {
+        const specificPoolIds = allPoolIds.filter((id) => {
+          const pool = poolById.get(id);
+          if (!pool || isGenericPoolName(pool.name)) return false;
+          return (pool.disciplineId ?? UNASSIGNED_DISCIPLINE_ID) === discId && activePoolIds.has(id);
+        });
+        if (specificPoolIds.length === 0) continue;
+        anyGroup = true;
+        labelEntries.push({ text: engine.discipline(discId)?.name ?? 'Unassigned', font: font(600, 12), extra: 70 });
+        for (const poolId of specificPoolIds) {
+          labelEntries.push({ text: poolById.get(poolId)!.name, font: font(400, 11.5), extra: 97 });
+          const names = new Set<string>();
+          for (const staffing of personStaffingByPeriod.values()) {
+            for (const line of staffing.lines) {
+              if (line.poolId === poolId) names.add(line.personName);
+            }
+          }
+          if (names.size === 0) labelEntries.push({ text: 'No one assigned yet', font: font(400, 11), extra: 88 });
+          else for (const name of names) labelEntries.push({ text: name, font: font(400, 11), extra: 88 });
+        }
+      }
+      if (!anyGroup) labelEntries.push({ text: 'No disciplines assigned', font: font(400, 11.5), extra: 56 });
+    }
+    return timelineLabelColumnWidth(labelEntries, { min: 200, max: 440 });
+  }, [scheduled, engine, poolById, activePoolIds, personStaffingByProject, bodyFontFamily]);
 
   if (projects.length === 0) {
     return (
@@ -342,181 +573,31 @@ export function Timeline() {
           {scheduled.length === 0 && search ? (
             <div className="tl-no-match">No scheduled projects match "{search}"</div>
           ) : (
-            scheduled.map((project) => {
-              const allPoolIds = engine.projectPoolIds(project.id);
-              const disciplineIdsInProject = new Set(
-                allPoolIds.map((id) => poolById.get(id)?.disciplineId ?? UNASSIGNED_DISCIPLINE_ID),
-              );
-              const disciplineGroups = [...disciplineIdsInProject]
-                .map((discId) => ({
-                  discId,
-                  specificPoolIds: allPoolIds.filter((id) => {
-                    const pool = poolById.get(id);
-                    if (!pool || isGenericPoolName(pool.name)) return false;
-                    return (pool.disciplineId ?? UNASSIGNED_DISCIPLINE_ID) === discId && activePoolIds.has(id);
-                  }),
-                }))
-                .filter((g) => g.specificPoolIds.length > 0)
-                .sort((a, b) => (disciplineOrder.get(a.discId) ?? Infinity) - (disciplineOrder.get(b.discId) ?? Infinity));
-              const collapseKey = `timeline:proj:${project.id}`;
-              const projectCollapsed = collapsed[collapseKey] === true;
-              const assignedByPeriod = new Map(window.map((period) => [period, engine.getProjectAssigned(project.id, period)] as const));
-              // Computed once per project instead of once per discipline/pool row (both used to call
-              // engine.getProjectStaffing / getProjectPersonStaffing independently for the same period).
-              const staffingByPeriod = new Map(window.map((period) => [period, engine.getProjectStaffing(project.id, period)] as const));
-              const personStaffingByPeriod = new Map(window.map((period) => [period, engine.getProjectPersonStaffing(project.id, period)] as const));
-              return (
-                <div key={project.id} className="tl-project-group">
-                  <div className="tl-project-header-row">
-                    <div className="tl-label-cell tl-project-label">
-                      <button
-                        type="button"
-                        className="tl-project-collapse"
-                        onClick={() => toggleCollapse(collapseKey)}
-                        aria-label={projectCollapsed ? 'Expand' : 'Collapse'}
-                      >
-                        <Icon name="chevron-right" size={12} className={projectCollapsed ? '' : 'tl-project-collapse-open'} />
-                      </button>
-                      <button type="button" className="tl-project-name" onClick={() => openProject(project.id)}>{project.name}</button>
-                      <span className={`priority-badge priority-${project.priority} tl-priority-badge`}>{project.priority}</span>
-                    </div>
-                    <div className="tl-lane" style={{ width: totalWidth }}>
-                      <ProjectBar
-                        project={project}
-                        window={window}
-                        pxPerDay={pxPerDay}
-                        granularity={granularity}
-                        onClick={() => openProject(project.id)}
-                        onDatesChange={async (start, end, mode, origStart, origEnd) => {
-                          updateProject({ ...project, startDate: start, endDate: end });
-                          if (mode === 'move') {
-                            // A pure move is a translation — requirements/assignments follow the
-                            // project bar unconditionally, day-precise, no prompt.
-                            const dayDelta = isoDiffDays(origStart, start);
-                            if (dayDelta !== 0) shiftProjectAllocations(project.id, dayDelta);
-                          } else if (mode === 'resize-end') {
-                            const origEndP = periodFromISODate(origEnd);
-                            const newEndP = periodFromISODate(end);
-                            if (origEndP && newEndP && comparePeriod(newEndP, origEndP) > 0) {
-                              const fromPeriod = addMonths(origEndP, 1);
-                              const okNeeds = await confirm('Reporter les besoins sur les nouveaux mois ?');
-                              const okAssignments = await confirm('Reporter les assignations sur les nouveaux mois ?');
-                              if (okNeeds || okAssignments) {
-                                autofillProjectExtension(project.id, fromPeriod, newEndP, { needs: okNeeds, assignments: okAssignments });
-                              }
-                            }
-                          }
-                        }}
-                        assignedByPeriod={assignedByPeriod}
-                      />
-                    </div>
-                  </div>
-                  {projectCollapsed ? null : disciplineGroups.length === 0 ? (
-                    <div className="tl-pool-row tl-pool-row-empty">
-                      <div className="tl-label-cell tl-pool-label">No disciplines assigned</div>
-                    </div>
-                  ) : (
-                    disciplineGroups.map((group) => {
-                      const discipline = engine.discipline(group.discId);
-                      const discName = discipline?.name ?? 'Unassigned';
-                      const discColor = discipline?.color ?? '#9ca3af';
-                      const discCollapseKey = `timeline:disc:${project.id}:${group.discId}`;
-                      const discCollapsed = collapsed[discCollapseKey] === true;
-                      return (
-                        <div key={group.discId} className="tl-disc-group">
-                          <div className="tl-pool-row tl-disc-row">
-                            <div className="tl-label-cell tl-disc-label">
-                              <button
-                                type="button"
-                                className="tl-project-collapse"
-                                onClick={() => toggleCollapse(discCollapseKey)}
-                                aria-label={discCollapsed ? 'Expand' : 'Collapse'}
-                              >
-                                <Icon name="chevron-right" size={11} className={discCollapsed ? '' : 'tl-project-collapse-open'} />
-                              </button>
-                              <span className="discipline-dot" style={{ background: discColor }} />
-                              {discName}
-                            </div>
-                            <div className="tl-cells-row">
-                              {window.map((period) => {
-                                const staffing = staffingByPeriod.get(period)!;
-                                let required = 0;
-                                let assigned = 0;
-                                for (const id of allPoolIds) {
-                                  const pool = poolById.get(id);
-                                  if ((pool?.disciplineId ?? UNASSIGNED_DISCIPLINE_ID) !== group.discId) continue;
-                                  const line = staffing.lines.find((l) => l.poolId === id);
-                                  if (!line) continue;
-                                  required += line.required;
-                                  if (!pool || !isGenericPoolName(pool.name)) assigned += line.assigned;
-                                }
-                                const capacity = engine.getDisciplineCapacity(group.discId, period);
-                                const overCapacity = capacity < engine.getDisciplineRequiredCapacity(group.discId, period) - 0.001;
-                                return (
-                                  <DisciplineCell
-                                    key={period}
-                                    width={monthWidthPx(period, pxPerDay)}
-                                    required={round2(required)}
-                                    assigned={round2(assigned)}
-                                    capacity={capacity}
-                                    color={discColor}
-                                    overCapacity={overCapacity}
-                                  />
-                                );
-                              })}
-                            </div>
-                          </div>
-                          {!discCollapsed && group.specificPoolIds.map((poolId) => {
-                            const pool = poolById.get(poolId)!;
-                            const poolCollapseKey = `timeline:pool:${project.id}:${poolId}`;
-                            // Reuses the shared collapsed map, but here `true` means "people shown" (default hidden).
-                            const peopleShown = collapsed[poolCollapseKey] === true;
-                            return (
-                              <Fragment key={poolId}>
-                                <div className="tl-pool-row tl-pool-row-nested">
-                                  <div className="tl-label-cell tl-pool-label">
-                                    <button
-                                      type="button"
-                                      className="tl-project-collapse"
-                                      onClick={() => toggleCollapse(poolCollapseKey)}
-                                      aria-label={peopleShown ? 'Hide people' : 'Show people'}
-                                    >
-                                      <Icon name="chevron-right" size={10} className={peopleShown ? 'tl-project-collapse-open' : ''} />
-                                    </button>
-                                    <span className="pool-dot" style={{ background: pool.color }} />
-                                    {pool.name}
-                                  </div>
-                                  <div className="tl-cells-row">
-                                    {window.map((period) => {
-                                      const staffing = staffingByPeriod.get(period)!;
-                                      const line = staffing.lines.find((l) => l.poolId === poolId);
-                                      return (
-                                        <DisciplineCell
-                                          key={period}
-                                          width={monthWidthPx(period, pxPerDay)}
-                                          required={line?.required ?? 0}
-                                          assigned={line?.assigned ?? 0}
-                                          capacity={engine.getCapacity(poolId, period)}
-                                          color={pool.color}
-                                          overCapacity={engine.isOverCapacity(poolId, period)}
-                                        />
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                                {peopleShown && (
-                                  <PersonRows personStaffingByPeriod={personStaffingByPeriod} poolId={poolId} window={window} pxPerDay={pxPerDay} openPerson={openPerson} />
-                                )}
-                              </Fragment>
-                            );
-                          })}
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              );
-            })
+            scheduled.map((project) => (
+              <ProjectRow
+                key={project.id}
+                project={project}
+                engine={engine}
+                window={window}
+                pxPerDay={pxPerDay}
+                granularity={granularity}
+                totalWidth={totalWidth}
+                poolById={poolById}
+                activePoolIds={activePoolIds}
+                disciplineOrder={disciplineOrder}
+                assignedByPeriod={assignedByProject.get(project.id)!}
+                staffingByPeriod={staffingByProject.get(project.id)!}
+                personStaffingByPeriod={personStaffingByProject.get(project.id)!}
+                collapsed={collapsed}
+                toggleCollapse={toggleCollapse}
+                openProject={openProject}
+                openPerson={openPerson}
+                updateProject={updateProject}
+                shiftProjectAllocations={shiftProjectAllocations}
+                autofillProjectExtension={autofillProjectExtension}
+                confirm={confirm}
+              />
+            ))
           )}
         </div>
       </div>
