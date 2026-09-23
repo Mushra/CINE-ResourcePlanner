@@ -40,11 +40,26 @@ jobs:
           version="${base}-cinematic.${{ github.run_number }}"
           npm pkg set version="$version"
           echo "CINEMATIC_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Ensure GitHub release exists
+        shell: bash
+        # Unlike release.yml's tag (already pushed before that workflow runs), this tag has never
+        # existed — electron-builder's GitHubPublisher.createRelease() POSTs a *published* release
+        # for it directly, which GitHub rejects (422 "Published releases must have a valid tag").
+        # Pre-creating it as a draft (same as release.yml) sidesteps that, and --target pins the
+        # newly-created tag to this exact commit instead of GitHub's default-branch fallback.
+        run: gh release view "$CINEMATIC_VERSION" >/dev/null 2>&1 || gh release create "$CINEMATIC_VERSION" --draft --prerelease --title "$CINEMATIC_VERSION" --generate-notes --target "${{ github.sha }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and publish cinematic channel pre-release
         run: npm run build && npm run prepare:mpp && npx electron-builder --win --publish always --config.publish.vPrefixedTagName=false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EP_PRE_RELEASE: 'true'
+      - name: Publish the release
+        shell: bash
+        run: gh release edit "$CINEMATIC_VERSION" --draft=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Prune old cinematic pre-releases (keep latest 5)
         shell: bash
         run: |
