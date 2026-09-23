@@ -51,7 +51,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and publish cinematic channel pre-release
-        run: npm run build && npm run prepare:mpp && npx electron-builder --win --publish always --config.publish.vPrefixedTagName=false
+        # --config.publish.channel is what actually names the uploaded feed file (updateInfoBuilder.js
+        # defaults it to "latest" otherwise — the version's own "-cinematic.N" prerelease component
+        # only affects which channel electron-updater *reads* on the client, not what electron-builder
+        # *writes*, so without this the two sides silently disagree and updates never resolve).
+        run: npm run build && npm run prepare:mpp && npx electron-builder --win --publish always --config.publish.vPrefixedTagName=false --config.publish.channel=cinematic
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EP_PRE_RELEASE: 'true'
