@@ -1,35 +1,34 @@
 import { useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
+import { buildJiraToleranceMap, getSanityChecks, type SanityCheck } from '../../engine/validation';
+import {
+  HEALTH_LABEL, deriveLoqHealth, loqStatusLabel, projectAttention, representativeLoq, worstDiscipline,
+  type AttentionItem, type WatchtowerHealth,
+} from '../../engine/watchtower';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
 import { ConfirmButton } from '../components/ConfirmButton';
+import { EmptyState } from '../components/EmptyState';
 import { CinematicFormDrawer, type CinematicFormValue } from '../components/CinematicFormDrawer';
 import { LoqFormDrawer, type LoqFormValue } from '../components/LoqFormDrawer';
 import { LoqTimeline } from '../components/LoqTimeline';
 import { RecommitDialog } from '../components/RecommitDialog';
 import { VarianceDialog } from '../components/VarianceDialog';
-import { LoqDependencyEditor } from '../components/LoqDependencyEditor';
-import { Collapsible } from '../components/Collapsible';
 import type { Loq } from '../../domain/types';
 
 const LOQ_STATUS_LABEL: Record<Loq['status'], string> = { TODO: 'To do', IN_PROGRESS: 'In progress', DONE: 'Done' };
+const SEVERITY_RANK: Record<SanityCheck['severity'], number> = { critical: 2, warning: 1, info: 0 };
 
-/**
- * Capabilities the prototype's Cinematic Detail shows that have no backing integration in this
- * app yet — per the audit's "never mock, disclose the gap" rule (docs/WATCHTOWER.md §E). Each
- * names the specific system/API that would need to be wired up.
- */
-const INTEGRATION_GAPS: { title: string; need: string }[] = [
-  { title: 'Version player', need: 'Needs a ShotGrid/Flow connector to fetch and stream published review versions.' },
-  { title: 'Version push history', need: 'Needs a ShotGrid/Flow connector exposing the publish/push event log for this cinematic.' },
-  { title: 'QA bugs', need: 'Needs a QA bug tracker integration (e.g. ShotGrid Notes/Tickets or a dedicated bug DB) — no domain model exists yet.' },
-  { title: 'Hotlines', need: 'Needs a Hotline/escalation feed integration — no domain model exists yet.' },
-];
+const VERSION_PLAYER_GAP = "Needs a ShotGrid/Flow connector to fetch and stream published review versions, and to expose the publish/push event log.";
+const HOTLINES_GAP = "Needs a Hotline/escalation feed integration — no domain model exists yet.";
+const QA_BUGS_GAP = "Needs a QA bug tracker integration (e.g. ShotGrid Notes/Tickets, or a dedicated bug DB) — no domain model exists yet.";
 
 export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const cinematic = useStore((s) => s.data.cinematics.find((c) => c.id === cinematicId));
   const project = useStore((s) => s.data.projects.find((p) => p.id === cinematic?.projectId));
+  const engine = useStore((s) => s.engine);
+  const jiraConfigs = useStore((s) => s.jiraConfigs);
   const disciplines = useStore((s) => s.data.disciplines);
   const loqs = useStore((s) => s.data.loqs);
   const updateCinematic = useStore((s) => s.updateCinematic);
@@ -43,6 +42,7 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const [editingLoq, setEditingLoq] = useState<Loq | null>(null);
   const [recommitTarget, setRecommitTarget] = useState<{ loq: Loq; initialStart: string | null; initialFinish: string | null } | null>(null);
   const [varianceTarget, setVarianceTarget] = useState<Loq | null>(null);
+  const [focus, setFocus] = useState<string>('ALL');
 
   if (!cinematic) {
     return (
@@ -54,6 +54,22 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   }
 
   const cinematicLoqs = loqs.filter((l) => l.cinematicId === cinematic.id).sort((a, b) => a.sortOrder - b.sortOrder);
+  const disciplineIds = disciplines.map((d) => d.id);
+  const forecasts = engine.getLoqForecasts();
+
+  const checks = project ? getSanityChecks(engine, buildJiraToleranceMap(jiraConfigs)).filter((c) => c.projectId === project.id) : [];
+  const cinematicAttention: AttentionItem[] = project
+    ? projectAttention(engine, checks, project.id)
+      .filter((item) => item.cinematicId === cinematic.id && item.source !== 'Production Planning')
+      .filter((item) => focus === 'ALL' || item.check.disciplineId === focus)
+      .sort((a, b) => SEVERITY_RANK[b.check.severity] - SEVERITY_RANK[a.check.severity])
+    : [];
+
+  const focusDisciplineId = focus !== 'ALL' ? focus : worstDiscipline(cinematic.id, disciplineIds, loqs, forecasts);
+  const focusDisciplineName = focusDisciplineId ? disciplines.find((d) => d.id === focusDisciplineId)?.name ?? focusDisciplineId : null;
+  const focusLoq = focusDisciplineId ? representativeLoq(loqs, cinematic.id, focusDisciplineId) : null;
+  const focusHealth: WatchtowerHealth | null = focusLoq ? deriveLoqHealth(focusLoq, forecasts.get(focusLoq.id)) : null;
+  const focusForecastFinish = focusLoq ? forecasts.get(focusLoq.id)?.forecastFinish ?? focusLoq.actualFinish ?? null : null;
 
   return (
     <div className="cinematic-detail-view">
@@ -74,6 +90,90 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
         </div>
 
         {cinematic.notes && <p className="detail-notes">{cinematic.notes}</p>}
+      </div>
+
+      <div className="discipline-tabs">
+        <button type="button" className={`discipline-tab ${focus === 'ALL' ? 'active' : ''}`} onClick={() => setFocus('ALL')}>All</button>
+        {disciplines.map((d) => (
+          <button key={d.id} type="button" className={`discipline-tab ${focus === d.id ? 'active' : ''}`} onClick={() => setFocus(d.id)}>{d.name}</button>
+        ))}
+      </div>
+
+      <div className="card panel">
+        <div className="panel-header">
+          <h2>Attention</h2>
+          <span className="panel-sub">{cinematicAttention.length} issue{cinematicAttention.length === 1 ? '' : 's'} for this cinematic{focus !== 'ALL' && focusDisciplineName ? ` — ${focusDisciplineName}` : ''}</span>
+        </div>
+        {cinematicAttention.length === 0 ? (
+          <p className="empty-inline">No attention items{focus !== 'ALL' && focusDisciplineName ? ` for ${focusDisciplineName}` : ''}.</p>
+        ) : (
+          <ul className="issue-list">
+            {cinematicAttention.map((item) => {
+              const linkedLoq = item.check.loqId ? cinematicLoqs.find((l) => l.id === item.check.loqId) : undefined;
+              return (
+                <li key={item.check.id} className="issue-row">
+                  <Icon name="warning" size={14} />
+                  <div className="issue-body">
+                    <button
+                      type="button"
+                      className="issue-message"
+                      disabled={!linkedLoq}
+                      onClick={() => linkedLoq && setEditingLoq(linkedLoq)}
+                    >
+                      {item.check.disciplineName ? `${item.check.disciplineName} — ` : ''}{item.check.message}
+                    </button>
+                    <div className="issue-impact">{item.check.impact} · <span className="tbd-inline">{item.source}</span></div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      <div className="cd-grid2">
+        <div className="card panel">
+          <div className="panel-header">
+            <h2>Latest version</h2>
+          </div>
+          <EmptyState icon="info" title="Not available yet" description={VERSION_PLAYER_GAP} compact />
+        </div>
+        <div className="card panel">
+          <div className="panel-header">
+            <h2>Production</h2>
+            <span className="panel-sub">{focusDisciplineName ?? 'No discipline yet'}</span>
+          </div>
+          {focusLoq ? (
+            <div className="kv-rows">
+              <div className="kv-row"><span className="k">Current LOQ</span><span className="v">{focusLoq.type}</span></div>
+              <div className="kv-row"><span className="k">Status</span><span className="v">{loqStatusLabel(focusLoq)}</span></div>
+              {focusHealth && (
+                <div className="kv-row"><span className="k">Health</span><span className={`v health-text health-text-${focusHealth}`}>{HEALTH_LABEL[focusHealth]}</span></div>
+              )}
+              <div className="kv-row">
+                <span className="k">Committed window</span>
+                <span className="v">{focusLoq.committedStart ? `${focusLoq.committedStart} → ${focusLoq.committedFinish ?? '…'}` : 'Unscheduled'}</span>
+              </div>
+              <div className="kv-row"><span className="k">Forecast finish</span><span className="v">{focusForecastFinish ?? '—'}</span></div>
+            </div>
+          ) : (
+            <p className="empty-inline">No LOQ yet{focusDisciplineName ? ` for ${focusDisciplineName}` : ''}.</p>
+          )}
+        </div>
+      </div>
+
+      <div className="card panel">
+        <div className="panel-header">
+          <h2>Hotlines</h2>
+        </div>
+        <EmptyState icon="info" title="Not available yet" description={HOTLINES_GAP} compact />
+      </div>
+
+      <div className="card panel">
+        <div className="panel-header">
+          <h2>QA bugs</h2>
+        </div>
+        <EmptyState icon="info" title="Not available yet" description={QA_BUGS_GAP} compact />
       </div>
 
       <div className="card loqs-card">
@@ -143,23 +243,6 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
           />
         </div>
       )}
-
-      {cinematicLoqs.length > 1 && (
-        <LoqDependencyEditor loqs={cinematicLoqs} disciplines={disciplines} />
-      )}
-
-      <div className="card">
-        <Collapsible scopeKey={`cinematicdetail:gaps:${cinematic.id}`} defaultOpen={false} summary={<span>Not yet integrated</span>} count={INTEGRATION_GAPS.length}>
-          <ul className="gap-list">
-            {INTEGRATION_GAPS.map((gap) => (
-              <li key={gap.title} className="gap-row">
-                <span className="gap-row-title">{gap.title}</span>
-                <span className="gap-row-need">{gap.need}</span>
-              </li>
-            ))}
-          </ul>
-        </Collapsible>
-      </div>
 
       {editing && (
         <CinematicFormDrawer
