@@ -11,6 +11,7 @@ import { Team } from './ui/views/Team';
 import { People } from './ui/views/People';
 import { PersonDetail } from './ui/views/PersonDetail';
 import { CinematicDetail } from './ui/views/CinematicDetail';
+import { SettingsView } from './ui/views/SettingsView';
 
 function App() {
   const status = useStore((s) => s.status);
@@ -52,6 +53,7 @@ function App() {
         {view === 'project-detail' && selectedProjectId && <ProjectDetail projectId={selectedProjectId} />}
         {view === 'team' && <Team />}
         {view === 'people' && <People />}
+        {view === 'settings' && <SettingsView />}
         {view === 'person-detail' && selectedPersonId && <PersonDetail personId={selectedPersonId} />}
         {view === 'cinematic-detail' && selectedCinematicId && <CinematicDetail cinematicId={selectedCinematicId} />}
       </AppShell>

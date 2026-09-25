@@ -1,6 +1,6 @@
 // Electron main process. CommonJS on purpose — package.json is "type": "module" for the Vite
 // side, but Electron's main process is simplest as plain CJS, loaded via package.json's "main".
-const { app, BrowserWindow, protocol, net, dialog, Menu, ipcMain } = require('electron');
+const { app, BrowserWindow, protocol, net, dialog, Menu, ipcMain, safeStorage } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { spawn } = require('node:child_process');
@@ -207,6 +207,102 @@ function registerMppHandler() {
   });
 }
 
+// Phase 5b — live Jira sync. The PAT is per-user/per-machine (a Server/DC PAT is scoped to its
+// creating user's own account), encrypted with the OS-tied safeStorage and kept in its own file
+// under userData — never in the shared sql.js plan file, and never sent back to the renderer once
+// set (jira:search reads it here, server-side, and the renderer only ever gets ok/error).
+function jiraTokensPath() {
+  return path.join(app.getPath('userData'), 'jira-tokens.json');
+}
+
+function readJiraTokenStore() {
+  try {
+    return JSON.parse(fs.readFileSync(jiraTokensPath(), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function writeJiraTokenStore(store) {
+  fs.mkdirSync(path.dirname(jiraTokensPath()), { recursive: true });
+  fs.writeFileSync(jiraTokensPath(), JSON.stringify(store), 'utf8');
+}
+
+function getJiraTokenPlaintext(projectId) {
+  const store = readJiraTokenStore();
+  const encoded = store[projectId];
+  if (!encoded) return null;
+  try {
+    return safeStorage.decryptString(Buffer.from(encoded, 'base64'));
+  } catch {
+    return null;
+  }
+}
+
+// Paginates /rest/api/2/search (startAt/maxResults) and merges every page into one response
+// shaped exactly like JiraRawSearchResponse, so src/import/jiraSync.ts's parse layer stays
+// origin-agnostic — it never knows whether `raw` came from a file or a live paginated fetch.
+// testOnly (the Settings screen's "Test connection" probe) fetches a single maxResults=1 page —
+// enough to confirm auth + JQL are valid and report a total, without pulling the whole project.
+async function fetchJiraSearch({ baseUrl, authMode, email, pat, jql, fields, testOnly }) {
+  const maxResults = testOnly ? 1 : 100;
+  const authHeader = authMode === 'cloud'
+    ? `Basic ${Buffer.from(`${email}:${pat}`).toString('base64')}`
+    : `Bearer ${pat}`;
+  const issues = [];
+  let total = 0;
+  let startAt = 0;
+  for (;;) {
+    const url = new URL(`${baseUrl.replace(/\/+$/, '')}/rest/api/2/search`);
+    url.searchParams.set('jql', jql);
+    url.searchParams.set('startAt', String(startAt));
+    url.searchParams.set('maxResults', String(maxResults));
+    if (fields?.length) url.searchParams.set('fields', fields.join(','));
+
+    const res = await net.fetch(url.toString(), { headers: { Authorization: authHeader, Accept: 'application/json' } });
+    if (!res.ok) throw new Error(`Jira returned ${res.status} ${res.statusText}`);
+    const body = await res.json();
+    const page = body.issues ?? [];
+    issues.push(...page);
+    total = typeof body.total === 'number' ? body.total : issues.length;
+    if (testOnly || page.length === 0 || issues.length >= total) break;
+    startAt += page.length;
+  }
+  return { issues, total };
+}
+
+function registerJiraHandlers() {
+  ipcMain.handle('jira:has-token', (_event, projectId) => Boolean(readJiraTokenStore()[projectId]));
+
+  ipcMain.handle('jira:set-token', (_event, projectId, pat) => {
+    if (!safeStorage.isEncryptionAvailable()) {
+      return { ok: false, error: 'OS-level credential encryption is unavailable on this machine — the token was not saved.' };
+    }
+    const store = readJiraTokenStore();
+    store[projectId] = safeStorage.encryptString(pat).toString('base64');
+    writeJiraTokenStore(store);
+    return { ok: true };
+  });
+
+  ipcMain.handle('jira:clear-token', (_event, projectId) => {
+    const store = readJiraTokenStore();
+    delete store[projectId];
+    writeJiraTokenStore(store);
+    return { ok: true };
+  });
+
+  ipcMain.handle('jira:search', async (_event, { projectId, baseUrl, authMode, email, jql, fields, testOnly }) => {
+    const pat = getJiraTokenPlaintext(projectId);
+    if (!pat) return { ok: false, error: 'No Jira token stored for this project — set one in Settings.' };
+    try {
+      const raw = await fetchJiraSearch({ baseUrl, authMode, email, pat, jql, fields, testOnly });
+      return { ok: true, raw };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'Jira request failed' };
+    }
+  });
+}
+
 async function createWindow() {
   const win = new BrowserWindow({
     width: 1440,
@@ -235,6 +331,7 @@ async function createWindow() {
 app.whenReady().then(() => {
   registerAppProtocol();
   registerMppHandler();
+  registerJiraHandlers();
   void createWindow();
 
   app.on('activate', () => {

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
-import { getSanityChecks, type SanityCheck } from '../../engine/validation';
+import { buildJiraToleranceMap, getSanityChecks, type SanityCheck } from '../../engine/validation';
 import { getForecastWindowPeriods } from '../../engine/forecast';
 import { PlanningEngine, UNASSIGNED_DISCIPLINE_ID, round2 } from '../../engine/planning';
 import { addMonths, formatPeriodLabel, periodRange, todayPeriod } from '../../domain/periods';
@@ -22,10 +22,11 @@ export function Dashboard() {
   const { engine, options } = useFilteredEngine();
   const projects = useStore((s) => s.data.projects);
   const lastImportReport = useStore((s) => s.lastImportReport);
+  const jiraConfigs = useStore((s) => s.jiraConfigs);
   const openProject = useUiStore((s) => s.openProject);
   const openPerson = useUiStore((s) => s.openPerson);
   const newDatabase = useStore((s) => s.newDatabase);
-  const checks = useMemo(() => getSanityChecks(engine), [engine]);
+  const checks = useMemo(() => getSanityChecks(engine, buildJiraToleranceMap(jiraConfigs)), [engine, jiraConfigs]);
   const period = todayPeriod();
   const trendPeriods = useMemo(() => getForecastWindowPeriods(engine, 12), [engine]);
 

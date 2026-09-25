@@ -1,4 +1,4 @@
-import type { Period, Severity } from '../domain/types';
+import type { JiraProjectConfig, Period, Severity } from '../domain/types';
 import { PlanningEngine, UNASSIGNED_DISCIPLINE_ID, round2 } from './planning';
 import { getForecastWindowPeriods } from './forecast';
 import { impactedLoqIds } from './loqForecast';
@@ -50,6 +50,13 @@ export interface SanityCheck {
  * date tolerance (from that Project's JiraProjectConfig, see docs/INTEGRATIONS.md §3) — omitted
  * callers get DEFAULT_JIRA_TOLERANCE_DAYS, which keeps every pre-Jira call site unchanged.
  */
+/** Builds the `jiraToleranceDaysByProjectId` map getSanityChecks accepts from the store's saved
+ * JiraProjectConfig list (Settings screen, Phase 5b) — a project with no saved config is simply
+ * absent from the map, so it falls back to DEFAULT_JIRA_TOLERANCE_DAYS as before. */
+export function buildJiraToleranceMap(configs: JiraProjectConfig[]): Map<string, number> {
+  return new Map(configs.map((c) => [c.projectId, c.dateToleranceDays]));
+}
+
 export function getSanityChecks(engine: PlanningEngine, jiraToleranceDaysByProjectId?: Map<string, number>): SanityCheck[] {
   const checks: SanityCheck[] = [];
   const periods = engine.allKnownPeriods();
@@ -358,7 +365,7 @@ function checkLoqEarlyOpportunity(engine: PlanningEngine): SanityCheck[] {
   return checks;
 }
 
-const DEFAULT_JIRA_TOLERANCE_DAYS = 1;
+export const DEFAULT_JIRA_TOLERANCE_DAYS = 1;
 
 /** Statuses observed in the instance-wide vocabulary (689 statuses, `/rest/api/2/status`) that read
  * as a Cinematic/LOQ being paused rather than actively worked — see docs/INTEGRATIONS.md §3.3. No

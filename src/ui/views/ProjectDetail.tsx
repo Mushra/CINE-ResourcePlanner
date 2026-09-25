@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
-import { getSanityChecks } from '../../engine/validation';
+import { buildJiraToleranceMap, getSanityChecks } from '../../engine/validation';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
 import { ConfirmButton } from '../components/ConfirmButton';
@@ -24,6 +24,7 @@ const CERTAINTY_LABEL: Record<string, string> = { confirmed: 'Confirmed', estima
 export function ProjectDetail({ projectId }: { projectId: string }) {
   const project = useStore((s) => s.data.projects.find((p) => p.id === projectId));
   const engine = useStore((s) => s.engine);
+  const jiraConfigs = useStore((s) => s.jiraConfigs);
   const updateProject = useStore((s) => s.updateProject);
   const deleteProject = useStore((s) => s.deleteProject);
   const backToProjects = useUiStore((s) => s.backToProjects);
@@ -33,7 +34,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const setProductionScreen = useUiStore((s) => s.setProductionScreen);
   const [editing, setEditing] = useState(false);
 
-  const checks = project ? getSanityChecks(engine).filter((c) => c.projectId === project.id) : [];
+  const checks = project ? getSanityChecks(engine, buildJiraToleranceMap(jiraConfigs)).filter((c) => c.projectId === project.id) : [];
 
   if (!project) {
     return (

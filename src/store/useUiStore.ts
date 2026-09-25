@@ -3,7 +3,7 @@ import type { GlobalFilter } from '../domain/filter';
 import { EMPTY_GLOBAL_FILTER } from '../domain/filter';
 import type { Period } from '../domain/types';
 
-export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'people' | 'project-detail' | 'person-detail' | 'cinematic-detail';
+export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'people' | 'settings' | 'project-detail' | 'person-detail' | 'cinematic-detail';
 export type PeopleMode = 'availability' | 'assignments';
 /** Watchtower's Production/Staffing switch inside a Project — Production is the prototype's
  * Control Room/Matrix, Staffing is the pre-existing requirement/assignment timeline. */

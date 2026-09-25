@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PlanningEngine } from '../src/engine/planning';
-import { getSanityChecks } from '../src/engine/validation';
-import type { PersonAssignment, PersonAssignmentAllocation, Requirement, RequirementAllocation } from '../src/domain/types';
+import { buildJiraToleranceMap, getSanityChecks } from '../src/engine/validation';
+import type { JiraProjectConfig, PersonAssignment, PersonAssignmentAllocation, Requirement, RequirementAllocation } from '../src/domain/types';
 import {
   cinematic,
   discipline,
@@ -690,5 +690,31 @@ describe('getSanityChecks — jira_inconsistency', () => {
 
     const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1] }));
     expect(getSanityChecks(engine).filter((c) => c.category === 'jira_inconsistency')).toHaveLength(0);
+  });
+});
+
+describe('buildJiraToleranceMap', () => {
+  function config(overrides: Partial<JiraProjectConfig>): JiraProjectConfig {
+    return {
+      projectId: 'p1', baseUrl: '', jiraProjectKey: '', authMode: 'server', email: null,
+      startDateField: null, dueDateField: null, dateToleranceDays: 1,
+      cinematicsListField: null, loqTargetField: null, epicLinkField: null, scopeField: null, scopeValue: null,
+      ...overrides,
+    };
+  }
+
+  it('maps each config\'s projectId to its own dateToleranceDays', () => {
+    const map = buildJiraToleranceMap([config({ projectId: 'p1', dateToleranceDays: 3 }), config({ projectId: 'p2', dateToleranceDays: 7 })]);
+    expect(map.get('p1')).toBe(3);
+    expect(map.get('p2')).toBe(7);
+  });
+
+  it('leaves a project with no saved config absent from the map (falls back to DEFAULT_JIRA_TOLERANCE_DAYS at the call site)', () => {
+    const map = buildJiraToleranceMap([config({ projectId: 'p1', dateToleranceDays: 3 })]);
+    expect(map.has('p2')).toBe(false);
+  });
+
+  it('returns an empty map for an empty config list', () => {
+    expect(buildJiraToleranceMap([]).size).toBe(0);
   });
 });

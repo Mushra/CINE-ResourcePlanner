@@ -19,15 +19,19 @@ import {
   deletePersonAssignmentInterval,
   deleteProject,
   deleteRequirementInterval,
+  getJiraConfig,
   getOrCreatePersonAssignment,
   getOrCreateRequirement,
+  listJiraConfigs,
   listLoqCommitmentEvents,
   loadPlanningData,
+  setJiraConfig,
   updateLoqResource,
   updatePersonAssignmentInterval,
   updateRequirementInterval,
   upsertJiraSyncState,
 } from '../src/db/repository';
+import type { JiraProjectConfig } from '../src/domain/types';
 
 async function seedDisciplineAndProject(db: PlannerDatabase) {
   const discipline = createDiscipline(db, { name: 'Animation', color: '#4f7cff' });
@@ -196,5 +200,62 @@ describe('requirement/person-assignment interval CRUD (day-precise allocations)'
     allocs = loadPlanningData(db).personAssignmentAllocations.filter((a) => a.personAssignmentId === asn.id);
     expect(allocs).toHaveLength(1);
     expect(allocs[0].id).toBe(iv2.id);
+  });
+});
+
+describe('Jira project config (Phase 5b — non-secret settings only, no token)', () => {
+  function sampleConfig(projectId: string): JiraProjectConfig {
+    return {
+      projectId,
+      baseUrl: 'https://jira.example.com',
+      jiraProjectKey: 'OVR',
+      authMode: 'cloud',
+      email: 'producer@studio.com',
+      startDateField: 'customfield_10015',
+      dueDateField: 'duedate',
+      dateToleranceDays: 3,
+      cinematicsListField: 'customfield_10420',
+      loqTargetField: 'customfield_12338',
+      epicLinkField: 'customfield_10101',
+      scopeField: 'customfield_57706',
+      scopeValue: 'CIN 2',
+    };
+  }
+
+  it('setJiraConfig/getJiraConfig round-trip exactly, with no token field anywhere in the blob', async () => {
+    const db = await PlannerDatabase.createNew();
+    const { project } = await seedDisciplineAndProject(db);
+    const config = sampleConfig(project.id);
+
+    expect(getJiraConfig(db, project.id)).toBeNull();
+    setJiraConfig(db, config);
+    const loaded = getJiraConfig(db, project.id);
+    expect(loaded).toEqual(config);
+    expect(JSON.stringify(loaded)).not.toMatch(/token|pat/i);
+  });
+
+  it('listJiraConfigs returns every saved project config, and setJiraConfig overwrites in place', async () => {
+    const db = await PlannerDatabase.createNew();
+    const { project } = await seedDisciplineAndProject(db);
+    const otherProject = createProject(db, {
+      name: 'Cinematic Beta', status: 'planned', startDate: '2027-01-01', startCertainty: 'estimated',
+      endDate: '2027-06-30', endCertainty: 'estimated', priority: 'low', notes: '', isDispo: false,
+    });
+
+    setJiraConfig(db, sampleConfig(project.id));
+    setJiraConfig(db, sampleConfig(otherProject.id));
+    expect(listJiraConfigs(db)).toHaveLength(2);
+
+    setJiraConfig(db, { ...sampleConfig(project.id), dateToleranceDays: 9 });
+    const configs = listJiraConfigs(db);
+    expect(configs).toHaveLength(2); // overwrote, didn't duplicate
+    expect(configs.find((c) => c.projectId === project.id)?.dateToleranceDays).toBe(9);
+  });
+
+  it('a project with no saved config returns null / is absent from the list', async () => {
+    const db = await PlannerDatabase.createNew();
+    const { project } = await seedDisciplineAndProject(db);
+    expect(getJiraConfig(db, project.id)).toBeNull();
+    expect(listJiraConfigs(db)).toHaveLength(0);
   });
 });

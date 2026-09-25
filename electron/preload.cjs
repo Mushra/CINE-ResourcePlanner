@@ -13,3 +13,13 @@ contextBridge.exposeInMainWorld('mpp', {
    */
   pickAndParse: () => ipcRenderer.invoke('mpp:pick-and-parse'),
 });
+
+// Phase 5b live Jira sync. The PAT is write-only from the renderer's point of view: setToken sends
+// it once to be encrypted and stored (main.cjs, via safeStorage) and it is never read back —
+// hasToken only reports presence, search reads it server-side.
+contextBridge.exposeInMainWorld('jira', {
+  hasToken: (projectId) => ipcRenderer.invoke('jira:has-token', projectId),
+  setToken: (projectId, pat) => ipcRenderer.invoke('jira:set-token', projectId, pat),
+  clearToken: (projectId) => ipcRenderer.invoke('jira:clear-token', projectId),
+  search: (args) => ipcRenderer.invoke('jira:search', args),
+});

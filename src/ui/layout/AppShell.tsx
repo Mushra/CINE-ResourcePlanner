@@ -13,6 +13,7 @@ const NAV: { view: ViewName; label: string; icon: IconName }[] = [
   { view: 'projects', label: 'Projects', icon: 'projects' },
   { view: 'team', label: 'Teams', icon: 'team' },
   { view: 'people', label: 'People', icon: 'calendar' },
+  { view: 'settings', label: 'Settings', icon: 'settings' },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {

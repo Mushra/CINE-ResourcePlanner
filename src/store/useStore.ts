@@ -18,6 +18,7 @@ import {
   createLoqCommitmentEvent as repoCreateLoqCommitmentEvent,
   createVarianceEvent as repoCreateVarianceEvent,
   createLoqDependency as repoCreateLoqDependency, updateLoqDependency as repoUpdateLoqDependency, deleteLoqDependency as repoDeleteLoqDependency,
+  setJiraConfig as repoSetJiraConfig, listJiraConfigs as repoListJiraConfigs,
 } from '../db/repository';
 import { applyRpmImport, type ImportMode } from '../db/applyImport';
 import { applyMppImport, type MppApplyReport, type MppDisciplineResolution } from '../db/applyMppImport';
@@ -32,7 +33,7 @@ import { parseStaffingWorkbook } from '../import/staffingImport';
 import { parseMppJson, type NormalizedMppImport } from '../import/mppImport';
 import { parseJiraSearchResponse, defaultJiraFieldMapping, type JiraRawSearchResponse, type NormalizedJiraBatch } from '../import/jiraSync';
 import { PlanningEngine, round2 } from '../engine/planning';
-import type { Cinematic, Discipline, Loq, LoqDependency, LoqResource, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
+import type { Cinematic, Discipline, JiraProjectConfig, Loq, LoqDependency, LoqResource, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
 import { wouldCreateCycle } from '../domain/loqGraph';
 import { emptyPlanningData } from '../domain/types';
 import { applyStructureOverrides } from '../domain/overrides';
@@ -63,6 +64,9 @@ interface StoreState {
   db: PlannerDatabase | null;
   data: PlanningData;
   engine: PlanningEngine;
+  /** Non-secret per-Project Jira connection settings (Phase 5b) — the PAT itself lives only in
+   * Electron safeStorage (window.jira), never here or in the plan file. */
+  jiraConfigs: JiraProjectConfig[];
 
   fileName: string;
   fileHandle: FileSystemFileHandle | null;
@@ -100,6 +104,24 @@ interface StoreState {
   /** Writes confirmed Jira bindings into exactly one project — see applyJiraBindings for the
    * "never touch another project" guarantee and the signal-only (never overwrites status/dates). */
   applyJiraBindingsToProject: (projectId: string, batch: NormalizedJiraBatch, confirmed: ConfirmedJiraBindings) => JiraApplyReport;
+
+  /** Reads this project's saved connection config, or null when never configured (see Settings view). */
+  getJiraConfigForProject: (projectId: string) => JiraProjectConfig | null;
+  /** Non-secret config only — never carries the PAT. See jiraSetToken for the token itself. */
+  setJiraConfigForProject: (config: JiraProjectConfig) => void;
+  /** Whether a token is stored for this project (window.jira, desktop app only — always false in a browser tab). */
+  jiraHasToken: (projectId: string) => Promise<boolean>;
+  /** Sends the PAT once to be encrypted via Electron safeStorage; never stored here, never re-readable. */
+  jiraSetToken: (projectId: string, pat: string) => Promise<boolean>;
+  jiraClearToken: (projectId: string) => Promise<void>;
+  /** Live equivalent of loadJiraExportFile: builds a JQL search from this project's JiraProjectConfig,
+   * fetches it via window.jira.search (paginated, authenticated in the main process), and parses it
+   * through the same origin-agnostic parseJiraSearchResponse used by the file path. Returns null on
+   * missing config/token/desktop-app or a fetch failure it already toasted — never throws. */
+  syncJira: (projectId: string) => Promise<{ fileName: string | null; batch: NormalizedJiraBatch } | null>;
+  /** Settings screen's "Test connection" probe: fetches a single-issue page against this project's
+   * saved config/token and reports how many issues its JQL matched, without writing anything. */
+  testJiraConnection: (projectId: string) => Promise<{ ok: true; total: number } | { ok: false; error: string }>;
 
   createProject: (input: Omit<Project, 'id' | 'sortOrder'>) => Project;
   updateProject: (project: Project) => void;
@@ -185,6 +207,28 @@ function nextToastId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
+/** Jira's REST API (both Cloud and Server/DC) accepts a custom field id in JQL only via its numeric
+ * `cf[N]` form, not the raw `customfield_N` string used everywhere else in this app's Jira config. */
+function jqlFieldRef(fieldId: string): string {
+  const match = /^customfield_(\d+)$/.exec(fieldId);
+  return match ? `cf[${match[1]}]` : fieldId;
+}
+
+function buildJiraJql(config: JiraProjectConfig): string {
+  let jql = `project = "${config.jiraProjectKey}"`;
+  if (config.scopeField && config.scopeValue) jql += ` AND ${jqlFieldRef(config.scopeField)} = "${config.scopeValue}"`;
+  return jql;
+}
+
+/** Custom fields must be requested explicitly via `fields=` or Jira omits them from the response. */
+function buildJiraFields(config: JiraProjectConfig): string[] {
+  const fields = new Set(['summary', 'status', 'assignee', 'duedate', 'resolutiondate', 'parent', 'updated']);
+  for (const f of [config.startDateField, config.dueDateField, config.cinematicsListField, config.loqTargetField, config.epicLinkField, config.scopeField]) {
+    if (f) fields.add(f);
+  }
+  return [...fields];
+}
+
 const LEGACY_DISCIPLINE_COLOR = '#6b7280';
 
 /**
@@ -220,7 +264,7 @@ export const useStore = create<StoreState>((set, get) => {
     const raw = loadPlanningData(db);
     const data = applyStructureOverrides(raw, raw.structureOverrides);
     const engine = new PlanningEngine(data, BASE_SCENARIO_ID);
-    set({ data, engine });
+    set({ data, engine, jiraConfigs: repoListJiraConfigs(db) });
   }
 
   function persist(): void {
@@ -395,6 +439,7 @@ export const useStore = create<StoreState>((set, get) => {
     db: null,
     data: emptyPlanningData(),
     engine: new PlanningEngine(emptyPlanningData()),
+    jiraConfigs: [],
     fileName: 'Untitled plan',
     fileHandle: null,
     dirty: false,
@@ -557,6 +602,81 @@ export const useStore = create<StoreState>((set, get) => {
         `Jira sync: ${report.cinematicsLinked} cinematic${report.cinematicsLinked === 1 ? '' : 's'} linked, ${report.loqsLinked} LOQ${report.loqsLinked === 1 ? '' : 's'} linked`,
       );
       return report;
+    },
+
+    getJiraConfigForProject: (projectId) => get().jiraConfigs.find((c) => c.projectId === projectId) ?? null,
+    setJiraConfigForProject: (config) => {
+      const db = get().db!;
+      repoSetJiraConfig(db, config);
+      persist();
+      get().toast('success', 'Jira connection settings saved');
+    },
+    jiraHasToken: (projectId) => (window.jira ? window.jira.hasToken(projectId) : Promise.resolve(false)),
+    jiraSetToken: async (projectId, pat) => {
+      if (!window.jira) {
+        get().toast('error', 'Live Jira sync is only available in the desktop app.');
+        return false;
+      }
+      const result = await window.jira.setToken(projectId, pat);
+      if (!result.ok) {
+        get().toast('error', result.error);
+        return false;
+      }
+      get().toast('success', 'Jira token saved');
+      return true;
+    },
+    jiraClearToken: async (projectId) => {
+      if (!window.jira) return;
+      await window.jira.clearToken(projectId);
+      get().toast('info', 'Jira token cleared');
+    },
+    syncJira: async (projectId) => {
+      if (!window.jira) {
+        get().toast('error', 'Live Jira sync is only available in the desktop app.');
+        return null;
+      }
+      const config = get().jiraConfigs.find((c) => c.projectId === projectId);
+      if (!config) {
+        get().toast('error', 'No Jira connection configured for this project — set one up in Settings.');
+        return null;
+      }
+      const result = await window.jira.search({
+        projectId,
+        baseUrl: config.baseUrl,
+        authMode: config.authMode,
+        email: config.email,
+        jql: buildJiraJql(config),
+        fields: buildJiraFields(config),
+      });
+      if (!result.ok) {
+        get().toast('error', `Jira sync failed: ${result.error}`);
+        return null;
+      }
+      const mapping = defaultJiraFieldMapping({
+        startDateField: config.startDateField,
+        dueDateField: config.dueDateField,
+        cinematicsListField: config.cinematicsListField,
+        loqTargetField: config.loqTargetField,
+        epicLinkField: config.epicLinkField,
+        scopeField: config.scopeField,
+      });
+      const batch = parseJiraSearchResponse(result.raw, mapping);
+      return { fileName: null, batch };
+    },
+    testJiraConnection: async (projectId) => {
+      if (!window.jira) return { ok: false, error: 'Live Jira sync is only available in the desktop app.' };
+      const config = get().jiraConfigs.find((c) => c.projectId === projectId);
+      if (!config) return { ok: false, error: 'No Jira connection configured for this project yet.' };
+      const result = await window.jira.search({
+        projectId,
+        baseUrl: config.baseUrl,
+        authMode: config.authMode,
+        email: config.email,
+        jql: buildJiraJql(config),
+        fields: buildJiraFields(config),
+        testOnly: true,
+      });
+      return result.ok ? { ok: true, total: result.raw.total } : { ok: false, error: result.error };
     },
 
     createProject: (input) => {

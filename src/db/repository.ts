@@ -5,6 +5,7 @@ import type {
   DependencyTemplate,
   DependencyType,
   Discipline,
+  JiraProjectConfig,
   JiraSyncState,
   Loq,
   LoqCommitmentEvent,
@@ -796,4 +797,40 @@ export function upsertJiraSyncState(db: PlannerDatabase, state: JiraSyncState): 
 
 export function deleteJiraSyncState(db: PlannerDatabase, loqId: string): void {
   db.exec('DELETE FROM jira_sync_state WHERE loq_id = ?', [loqId]);
+}
+
+// ---------------------------------------------------------------------------
+// Jira project config — non-secret, per-Project connection settings (Phase 5b). The API token
+// itself never lives here; see docs/domain/types.ts's JiraProjectConfig doc comment. Stored as a
+// JSON blob under a `jira.config.<projectId>` key in the generic `settings` table (getSetting/
+// setSetting) rather than its own table, since it's a single small per-project blob.
+// ---------------------------------------------------------------------------
+
+const JIRA_CONFIG_KEY_PREFIX = 'jira.config.';
+
+export function getJiraConfig(db: PlannerDatabase, projectId: string): JiraProjectConfig | null {
+  const raw = db.getSetting(`${JIRA_CONFIG_KEY_PREFIX}${projectId}`);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as JiraProjectConfig;
+  } catch {
+    return null;
+  }
+}
+
+export function setJiraConfig(db: PlannerDatabase, config: JiraProjectConfig): void {
+  db.setSetting(`${JIRA_CONFIG_KEY_PREFIX}${config.projectId}`, JSON.stringify(config));
+}
+
+export function listJiraConfigs(db: PlannerDatabase): JiraProjectConfig[] {
+  return db
+    .query<{ key: string; value: string }>('SELECT key, value FROM settings WHERE key LIKE ?', [`${JIRA_CONFIG_KEY_PREFIX}%`])
+    .map((row) => {
+      try {
+        return JSON.parse(row.value) as JiraProjectConfig;
+      } catch {
+        return null;
+      }
+    })
+    .filter((config): config is JiraProjectConfig => config !== null);
 }

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
-import { getSanityChecks } from '../../engine/validation';
+import { buildJiraToleranceMap, getSanityChecks } from '../../engine/validation';
 import { periodRange, periodFromISODate } from '../../domain/periods';
 import { EmptyState } from '../components/EmptyState';
 import { Button } from '../components/Button';
@@ -17,12 +17,13 @@ const PRIORITY_ORDER: Record<Priority, number> = { critical: 0, high: 1, medium:
 export function Projects() {
   const projects = useStore((s) => s.data.projects);
   const engine = useStore((s) => s.engine);
+  const jiraConfigs = useStore((s) => s.jiraConfigs);
   const createProject = useStore((s) => s.createProject);
   const feedAllRequirementsFromAssignments = useStore((s) => s.feedAllRequirementsFromAssignments);
   const openProject = useUiStore((s) => s.openProject);
   const [showNew, setShowNew] = useState(false);
 
-  const checks = useMemo(() => getSanityChecks(engine), [engine]);
+  const checks = useMemo(() => getSanityChecks(engine, buildJiraToleranceMap(jiraConfigs)), [engine, jiraConfigs]);
   const checksByProject = useMemo(() => {
     const map = new Map<string, typeof checks>();
     for (const check of checks) {

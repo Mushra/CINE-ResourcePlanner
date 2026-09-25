@@ -28,7 +28,9 @@ export function JiraBindingDrawer({ projectId, projectName, onClose }: { project
   const allLoqs = useStore((s) => s.data.loqs);
   const disciplines = useStore((s) => s.data.disciplines);
   const loadJiraExportFile = useStore((s) => s.loadJiraExportFile);
+  const syncJira = useStore((s) => s.syncJira);
   const applyJiraBindingsToProject = useStore((s) => s.applyJiraBindingsToProject);
+  const jiraConfig = useStore((s) => s.getJiraConfigForProject(projectId));
 
   const projectCinematics = allCinematics.filter((c) => c.projectId === projectId);
   const projectCinematicIds = new Set(projectCinematics.map((c) => c.id));
@@ -41,12 +43,7 @@ export function JiraBindingDrawer({ projectId, projectName, onClose }: { project
   const [choices, setChoices] = useState<ConfirmedJiraBindings>({ cinematics: {}, loqs: {} });
   const [report, setReport] = useState<JiraApplyReport | null>(null);
 
-  async function pickFile(): Promise<void> {
-    setBusy(true);
-    const result = await loadJiraExportFile();
-    setBusy(false);
-    if (!result) return;
-
+  function applyFetchedBatch(result: { fileName: string | null; batch: NormalizedJiraBatch }): void {
     const suggested = suggestJiraBindings(projectCinematics, projectLoqs, disciplines, result.batch);
     setFileName(result.fileName);
     setBatch(result.batch);
@@ -54,6 +51,22 @@ export function JiraBindingDrawer({ projectId, projectName, onClose }: { project
     setChoices(toConfirmed(suggested));
 
     if (allExactMatched(suggested)) setReport(applyJiraBindingsToProject(projectId, result.batch, toConfirmed(suggested)));
+  }
+
+  async function pickFile(): Promise<void> {
+    setBusy(true);
+    const result = await loadJiraExportFile();
+    setBusy(false);
+    if (!result) return;
+    applyFetchedBatch(result);
+  }
+
+  async function syncLive(): Promise<void> {
+    setBusy(true);
+    const result = await syncJira(projectId);
+    setBusy(false);
+    if (!result) return;
+    applyFetchedBatch(result);
   }
 
   function runApply(): void {
@@ -90,10 +103,16 @@ export function JiraBindingDrawer({ projectId, projectName, onClose }: { project
             each one, then verify start/end dates match. Only this project is affected. Jira never
             silently overwrites the plan — mismatches surface as a "Jira inconsistency" check instead.
           </p>
+          {!jiraConfig && (
+            <p className="drawer-hint">No Jira connection configured for this project yet — set one up in Settings to sync live.</p>
+          )}
           <div className="drawer-footer" style={{ margin: '4px -20px -18px', width: 'calc(100% + 40px)' }}>
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button variant="primary" disabled={busy} onClick={() => void pickFile()}>
-              {busy ? 'Reading file…' : 'Choose Jira export…'}
+            <Button variant="secondary" disabled={busy} onClick={() => void pickFile()}>
+              {busy ? 'Reading…' : 'Choose Jira export…'}
+            </Button>
+            <Button variant="primary" disabled={busy || !jiraConfig} onClick={() => void syncLive()}>
+              {busy ? 'Syncing…' : 'Sync live'}
             </Button>
           </div>
         </>

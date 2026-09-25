@@ -5,7 +5,7 @@ export type IconName =
   | 'plus' | 'chevron-right' | 'chevron-down' | 'chevron-left' | 'close'
   | 'warning' | 'critical' | 'check' | 'info'
   | 'sun' | 'moon' | 'save' | 'folder-open' | 'file-plus' | 'download'
-  | 'search' | 'more' | 'arrow-left' | 'trash' | 'edit' | 'calendar' | 'zoom-in' | 'zoom-out' | 'structure' | 'filter' | 'table' | 'help' | 'user' | 'link';
+  | 'search' | 'more' | 'arrow-left' | 'trash' | 'edit' | 'calendar' | 'zoom-in' | 'zoom-out' | 'structure' | 'filter' | 'table' | 'help' | 'user' | 'link' | 'settings';
 
 const PATHS: Record<IconName, React.ReactNode> = {
   dashboard: <><rect x="3" y="3" width="7" height="9" rx="1.2" /><rect x="14" y="3" width="7" height="5" rx="1.2" /><rect x="14" y="12" width="7" height="9" rx="1.2" /><rect x="3" y="16" width="7" height="5" rx="1.2" /></>,
@@ -41,6 +41,7 @@ const PATHS: Record<IconName, React.ReactNode> = {
   help: <><circle cx="12" cy="12" r="9" /><path d="M9.3 9.3a2.7 2.7 0 1 1 3.9 2.4c-.9.5-1.2 1-1.2 2" /><circle cx="12" cy="17" r="0.6" fill="currentColor" /></>,
   user: <><circle cx="12" cy="8" r="4" /><path d="M4.5 20a7.5 7.5 0 0 1 15 0" /></>,
   link: <><path d="M9.5 14.5 14.5 9.5" /><path d="M11 6.5l1.5-1.5a3.5 3.5 0 0 1 5 5L16 11.5" /><path d="M13 17.5l-1.5 1.5a3.5 3.5 0 0 1-5-5L8 12.5" /></>,
+  settings: <><circle cx="12" cy="12" r="3" /><path d="M12 2.5v3M12 18.5v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2.5 12h3M18.5 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" /></>,
 };
 
 export function Icon({ name, size = 16, ...rest }: { name: IconName; size?: number } & SVGProps<SVGSVGElement>) {
