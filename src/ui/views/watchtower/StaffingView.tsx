@@ -3,21 +3,26 @@ import { addMonths, comparePeriod, periodFromISODate, periodRange, todayPeriod }
 import { UNASSIGNED_DISCIPLINE_ID } from '../../../engine/planning';
 import { BASE_SCENARIO_ID } from '../../../db/repository';
 import { isGenericPoolName } from '../../../domain/identity';
+import { attentionSource } from '../../../engine/watchtower';
 import { Button } from '../../components/Button';
 import { ConfirmButton } from '../../components/ConfirmButton';
+import { StatusPill } from '../../components/StatusPill';
 import { RequirementTimeline, type AssignmentPoolGroup, type RequirementGroup, type RequirementLane } from '../../components/RequirementTimeline';
 import type { Project } from '../../../domain/types';
+import type { SanityCheck } from '../../../engine/validation';
 
 const UNASSIGNED_COLOR = '#9ca3af';
 
 /**
- * The pre-existing "Staffing" card (RPM-style requirement-vs-assignment timeline), unchanged in
- * behavior — extracted verbatim out of ProjectDetail so it can live behind Watchtower's
- * Production/Staffing switch. See docs/WATCHTOWER.md — staffing % (this view) and planned
- * production (the Production view's LOQs) are deliberately not merged; that reconciliation is
- * future engine work, not something this view invents.
+ * The pre-existing "Staffing" card (RPM-style requirement-vs-assignment timeline), extracted
+ * verbatim out of ProjectDetail so it can live behind Watchtower's Production/Staffing switch,
+ * plus a staffing/FTE warnings section (checks whose source is 'Production Planning' — see
+ * engine/watchtower.ts::attentionSource). Planning/Jira issues live in the Control Room instead;
+ * see docs/WATCHTOWER.md. Staffing % (this view) and planned production (the Production view's
+ * LOQs) are deliberately not merged; that reconciliation is future engine work, not something this
+ * view invents.
  */
-export function StaffingView({ project }: { project: Project }) {
+export function StaffingView({ project, checks }: { project: Project; checks: SanityCheck[] }) {
   const disciplines = useStore((s) => s.data.disciplines);
   const pools = useStore((s) => s.data.pools);
   const people = useStore((s) => s.data.people);
@@ -163,43 +168,64 @@ export function StaffingView({ project }: { project: Project }) {
     .filter((d) => !disciplineIdsWithSignal.has(d.id))
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  const staffingChecks = checks.filter((c) => attentionSource(c.category) === 'Production Planning');
+
   return (
-    <div className="card requirements-card">
-      <div className="panel-header">
-        <h2>Staffing</h2>
-        <span className="panel-sub">Needs (by discipline) and who's actually assigned, by month</span>
-        <div className="panel-header-toggles">
-          <Button variant="ghost" size="sm" icon="download" onClick={() => feedRequirementsFromAssignments(project.id, 'fill-empty')}>Fill empty needs from assignments</Button>
-          <ConfirmButton
-            label="Overwrite needs from assignments"
-            confirmLabel="Overwrite"
-            icon="download"
-            onConfirm={() => feedRequirementsFromAssignments(project.id, 'overwrite')}
-          />
+    <>
+      {staffingChecks.length > 0 && (
+        <div className="card panel">
+          <div className="panel-header">
+            <h2>Staffing warnings</h2>
+            <span className="panel-sub">{staffingChecks.length} FTE/capacity issue{staffingChecks.length === 1 ? '' : 's'} for this project</span>
+          </div>
+          <div className="detail-checks">
+            {staffingChecks.map((c) => (
+              <div key={c.id} className="detail-check-row">
+                <StatusPill tone={c.severity}>{c.severity}</StatusPill>
+                <span>{c.message} — {c.impact}</span>
+              </div>
+            ))}
+          </div>
         </div>
+      )}
+
+      <div className="card requirements-card">
+        <div className="panel-header">
+          <h2>Staffing</h2>
+          <span className="panel-sub">Needs (by discipline) and who's actually assigned, by month</span>
+          <div className="panel-header-toggles">
+            <Button variant="ghost" size="sm" icon="download" onClick={() => feedRequirementsFromAssignments(project.id, 'fill-empty')}>Fill empty needs from assignments</Button>
+            <ConfirmButton
+              label="Overwrite needs from assignments"
+              confirmLabel="Overwrite"
+              icon="download"
+              onConfirm={() => feedRequirementsFromAssignments(project.id, 'overwrite')}
+            />
+          </div>
+        </div>
+
+        {timelineGroups.length === 0 ? (
+          <p className="empty-inline">No resource requirements yet. Add a discipline below to set a need.</p>
+        ) : (
+          <RequirementTimeline months={months} groups={timelineGroups} projectId={project.id} />
+        )}
+
+        {addableDisciplines.length > 0 && (
+          <div className="person-add-assignment">
+            <select
+              className="person-add-select"
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) setDisciplineRequirement(project.id, e.target.value, months[0] ?? todayPeriod(), 1);
+                e.target.value = '';
+              }}
+            >
+              <option value="" disabled>+ Add discipline…</option>
+              {addableDisciplines.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </div>
+        )}
       </div>
-
-      {timelineGroups.length === 0 ? (
-        <p className="empty-inline">No resource requirements yet. Add a discipline below to set a need.</p>
-      ) : (
-        <RequirementTimeline months={months} groups={timelineGroups} projectId={project.id} />
-      )}
-
-      {addableDisciplines.length > 0 && (
-        <div className="person-add-assignment">
-          <select
-            className="person-add-select"
-            defaultValue=""
-            onChange={(e) => {
-              if (e.target.value) setDisciplineRequirement(project.id, e.target.value, months[0] ?? todayPeriod(), 1);
-              e.target.value = '';
-            }}
-          >
-            <option value="" disabled>+ Add discipline…</option>
-            {addableDisciplines.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
-        </div>
-      )}
-    </div>
+    </>
   );
 }

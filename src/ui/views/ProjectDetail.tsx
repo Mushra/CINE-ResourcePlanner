@@ -4,9 +4,7 @@ import { useUiStore } from '../../store/useUiStore';
 import { getSanityChecks } from '../../engine/validation';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
-import { StatusPill } from '../components/StatusPill';
 import { ConfirmButton } from '../components/ConfirmButton';
-import { Collapsible } from '../components/Collapsible';
 import { ProjectFormDrawer, type ProjectFormValue } from '../components/ProjectFormDrawer';
 import { deriveProjectStatus, STATUS_LABEL } from '../../domain/projectStatus';
 import { ControlRoom } from './watchtower/ControlRoom';
@@ -16,10 +14,12 @@ import { StaffingView } from './watchtower/StaffingView';
 const CERTAINTY_LABEL: Record<string, string> = { confirmed: 'Confirmed', estimated: 'Estimated', tbd: 'TBD' };
 
 /**
- * Watchtower's per-project shell: header (unchanged) + the Production/Staffing switch. Production
- * reproduces the prototype's Control Room / Cinematics Matrix screens on real engine data; Staffing
- * is the pre-existing requirement/assignment timeline (StaffingView), unchanged in behavior. See
- * docs/WATCHTOWER.md.
+ * Watchtower's per-project shell: header + the Production/Staffing switch. Production reproduces
+ * the prototype's Control Room / Cinematics Matrix screens on real engine data; Staffing is the
+ * pre-existing requirement/assignment timeline (StaffingView) plus staffing-scoped warnings.
+ * Project-scoped `checks` are split by source (see engine/watchtower.ts::attentionSource) rather
+ * than shown together in one header panel — planning issues in Control Room, staffing/FTE issues
+ * in Staffing. See docs/WATCHTOWER.md.
  */
 export function ProjectDetail({ projectId }: { projectId: string }) {
   const project = useStore((s) => s.data.projects.find((p) => p.id === projectId));
@@ -78,19 +78,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
         {project.notes && <p className="detail-notes">{project.notes}</p>}
 
-        {checks.length > 0 && (
-          <Collapsible scopeKey={`projdetail:checks:${project.id}`} count={checks.length} summary={<span>Warnings</span>}>
-            <div className="detail-checks">
-              {checks.map((c) => (
-                <div key={c.id} className="detail-check-row">
-                  <StatusPill tone={c.severity}>{c.severity}</StatusPill>
-                  <span>{c.message} — {c.impact}</span>
-                </div>
-              ))}
-            </div>
-          </Collapsible>
-        )}
-
         <div className="detail-view-switch">
           <div className="segmented">
             <button type="button" className={projectView === 'production' ? 'active' : ''} onClick={() => setProjectView('production')}>Production</button>
@@ -106,7 +93,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       </div>
 
       {projectView === 'staffing' ? (
-        <StaffingView project={project} />
+        <StaffingView project={project} checks={checks} />
       ) : productionScreen === 'control' ? (
         <ControlRoom project={project} checks={checks} />
       ) : (

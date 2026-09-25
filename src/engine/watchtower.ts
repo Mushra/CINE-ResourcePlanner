@@ -3,7 +3,7 @@
 // on read, mirroring the app's existing "derive, never store" precedent (see
 // domain/projectStatus.ts::deriveProjectStatus and Projects.tsx::HealthBadge).
 
-import type { Cinematic, Loq } from '../domain/types';
+import type { Cinematic, Loq, LoqDependency } from '../domain/types';
 import type { LoqForecast } from './loqForecast';
 import type { CheckCategory, SanityCheck } from './validation';
 import type { PlanningEngine } from './planning';
@@ -204,10 +204,52 @@ const PRODUCTION_PLANNING_CATEGORIES = new Set<CheckCategory>([
   'over_allocated_person', 'capacity_conflict_cinematic',
 ]);
 
-function attentionSource(category: CheckCategory): AttentionSource {
+export function attentionSource(category: CheckCategory): AttentionSource {
   if (JIRA_CATEGORIES.has(category)) return 'Jira';
   if (PRODUCTION_PLANNING_CATEGORIES.has(category)) return 'Production Planning';
   return 'Watchtower'; // loq_at_risk / loq_root_cause / loq_early_opportunity / invalid_dates / tbd_dates
+}
+
+export interface DependencyEndpoint {
+  loq: Loq;
+  cinematicName: string;
+  disciplineName: string;
+}
+
+export interface DependencyEdge {
+  dependency: LoqDependency;
+  predecessor: DependencyEndpoint;
+  successor: DependencyEndpoint;
+}
+
+/**
+ * Every dependency edge whose two endpoints both resolve within the given (project-scoped) LOQs —
+ * unlike LoqDependencyEditor (which only shows edges within a single Cinematic), this resolves
+ * cross-Cinematic edges too, since the .mpp importer creates them with no such restriction. Read
+ * model only; authoring stays on LoqDependencyEditor.
+ */
+export function projectDependencyEdges(
+  loqs: Loq[],
+  cinematics: Cinematic[],
+  disciplines: { id: string; name: string }[],
+  dependencies: LoqDependency[],
+): DependencyEdge[] {
+  const loqById = new Map(loqs.map((l) => [l.id, l]));
+  const cinematicName = (id: string) => cinematics.find((c) => c.id === id)?.name ?? id;
+  const disciplineName = (id: string) => disciplines.find((d) => d.id === id)?.name ?? id;
+
+  function endpoint(loq: Loq): DependencyEndpoint {
+    return { loq, cinematicName: cinematicName(loq.cinematicId), disciplineName: disciplineName(loq.disciplineId) };
+  }
+
+  const edges: DependencyEdge[] = [];
+  for (const dependency of dependencies) {
+    const predecessorLoq = loqById.get(dependency.predecessorLoqId);
+    const successorLoq = loqById.get(dependency.successorLoqId);
+    if (!predecessorLoq || !successorLoq) continue;
+    edges.push({ dependency, predecessor: endpoint(predecessorLoq), successor: endpoint(successorLoq) });
+  }
+  return edges;
 }
 
 /** Every sanity check scoped to a project, re-shaped into the prototype's Attention item — the

@@ -82,4 +82,16 @@ describe('ProjectDetail', () => {
     expect(screen.getAllByText('1 FTE')).toHaveLength(2);
     expect(container.querySelector('.req-need-gap')).toBeNull();
   });
+
+  it('shows the understaffed FTE warning in the Staffing view, and no header "Warnings" section', async () => {
+    await seedStore();
+    const { project } = seedProjectWithStaffing();
+    useUiStore.getState().openProject(project.id);
+    useUiStore.getState().setProjectView('staffing');
+    renderView(<ProjectDetail projectId={project.id} />);
+
+    expect(await screen.findByText('Staffing warnings')).toBeInTheDocument();
+    expect(screen.getByText(/is understaffed on Animation/)).toBeInTheDocument();
+    expect(screen.queryByText('Warnings')).not.toBeInTheDocument();
+  });
 });
