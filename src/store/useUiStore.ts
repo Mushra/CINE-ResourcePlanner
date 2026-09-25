@@ -5,6 +5,12 @@ import type { Period } from '../domain/types';
 
 export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'people' | 'project-detail' | 'person-detail' | 'cinematic-detail';
 export type PeopleMode = 'availability' | 'assignments';
+/** Watchtower's Production/Staffing switch inside a Project — Production is the prototype's
+ * Control Room/Matrix, Staffing is the pre-existing requirement/assignment timeline. */
+export type ProjectView = 'production' | 'staffing';
+export type ProductionScreen = 'control' | 'matrix';
+/** "Mocap batch" grouping from the prototype has no backing data in this schema — omitted. */
+export type MatrixGroupBy = 'none' | 'health' | 'status' | 'discipline';
 /** Percentage zoom level, 10-800. 100 = the previous "Compact" scale (3px/day). Raised from 200 to
  * 800 (Phase 3) so day granularity (>=18px/day, i.e. zoom >= 600) is actually legible. */
 export type TimelineZoom = number;
@@ -17,6 +23,10 @@ const TIMELINE_FILTERS_KEY = 'cine-planner-timeline-filters';
 const GLOBAL_FILTER_KEY = 'cine-planner-global-filter';
 const PEOPLE_MODE_KEY = 'cine-planner-people-mode';
 const PRODUCER_NAME_KEY = 'cine-planner-producer-name';
+const PROJECT_VIEW_KEY = 'cine-planner-project-view';
+const PRODUCTION_SCREEN_KEY = 'cine-planner-production-screen';
+const MATRIX_GROUP_KEY = 'cine-planner-matrix-group';
+const MATRIX_COLS_KEY = 'cine-planner-matrix-hidden-cols';
 
 function loadCollapsed(): Record<string, boolean> {
   try {
@@ -107,6 +117,42 @@ function loadProducerName(): string {
   }
 }
 
+function loadProjectView(): ProjectView {
+  try {
+    return localStorage.getItem(PROJECT_VIEW_KEY) === 'staffing' ? 'staffing' : 'production';
+  } catch {
+    return 'production';
+  }
+}
+
+function loadProductionScreen(): ProductionScreen {
+  try {
+    return localStorage.getItem(PRODUCTION_SCREEN_KEY) === 'matrix' ? 'matrix' : 'control';
+  } catch {
+    return 'control';
+  }
+}
+
+function loadMatrixGroupBy(): MatrixGroupBy {
+  try {
+    const raw = localStorage.getItem(MATRIX_GROUP_KEY);
+    return raw === 'health' || raw === 'status' || raw === 'discipline' ? raw : 'none';
+  } catch {
+    return 'none';
+  }
+}
+
+function loadMatrixHiddenCols(): string[] {
+  try {
+    const raw = localStorage.getItem(MATRIX_COLS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v) => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 interface UiState {
   view: ViewName;
   selectedProjectId: string | null;
@@ -157,6 +203,19 @@ interface UiState {
   /** Ephemeral — not persisted. Global "jump to…" search opened with Ctrl/Cmd+K. */
   commandPaletteOpen: boolean;
   setCommandPaletteOpen: (open: boolean) => void;
+
+  /** Which of ProjectDetail's two top-level tabs is showing. */
+  projectView: ProjectView;
+  setProjectView: (view: ProjectView) => void;
+  /** Which Production sub-screen (only relevant when projectView === 'production'). */
+  productionScreen: ProductionScreen;
+  setProductionScreen: (screen: ProductionScreen) => void;
+  /** Cinematics Matrix grouping + column visibility — the only Matrix prefs the prototype itself
+   * persists (search/filters/sort reset per session, kept as local component state). */
+  matrixGroupBy: MatrixGroupBy;
+  setMatrixGroupBy: (groupBy: MatrixGroupBy) => void;
+  matrixHiddenDisciplineIds: string[];
+  setMatrixHiddenDisciplineIds: (ids: string[]) => void;
 }
 
 const initialTimelineFilters = loadTimelineFilters();
@@ -241,4 +300,25 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   commandPaletteOpen: false,
   setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
+
+  projectView: loadProjectView(),
+  setProjectView: (view) => {
+    localStorage.setItem(PROJECT_VIEW_KEY, view);
+    set({ projectView: view });
+  },
+  productionScreen: loadProductionScreen(),
+  setProductionScreen: (screen) => {
+    localStorage.setItem(PRODUCTION_SCREEN_KEY, screen);
+    set({ productionScreen: screen });
+  },
+  matrixGroupBy: loadMatrixGroupBy(),
+  setMatrixGroupBy: (groupBy) => {
+    localStorage.setItem(MATRIX_GROUP_KEY, groupBy);
+    set({ matrixGroupBy: groupBy });
+  },
+  matrixHiddenDisciplineIds: loadMatrixHiddenCols(),
+  setMatrixHiddenDisciplineIds: (ids) => {
+    localStorage.setItem(MATRIX_COLS_KEY, JSON.stringify(ids));
+    set({ matrixHiddenDisciplineIds: ids });
+  },
 }));

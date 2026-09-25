@@ -1,0 +1,154 @@
+/* Styles specific to the Watchtower Production views (Control Room + Cinematics Matrix). Everything
+ * reusable — .card/.panel-header, .segmented, .rank-*, .issue-*, .data-table, FilterMenu's own CSS —
+ * lives in its existing home and is used unchanged; only what those don't already cover is here. */
+
+/* ---------- Health strip (Control Room) ---------- */
+.health-strip { display: flex; gap: 10px; flex-wrap: wrap; }
+.health-tile {
+  flex: 1;
+  min-width: 92px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-0);
+  cursor: pointer;
+  text-align: left;
+}
+.health-tile:hover { background: var(--surface-1); }
+.health-tile.active { border-color: var(--accent); background: var(--accent-soft); }
+.health-tile-value { font-size: 21px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.health-tile-label { font-size: 11.5px; color: var(--text-secondary); }
+.health-clear {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.health-clear button {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.health-clear button:hover { text-decoration: underline; }
+
+/* Inline health dot/text — same idiom as .status-dot / .priority-badge, one class per health tone. */
+.health-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; flex-shrink: 0; }
+.health-dot-ahead { background: var(--wt-ahead); }
+.health-dot-on-track { background: var(--wt-on-track); }
+.health-dot-at-risk { background: var(--wt-at-risk); }
+.health-dot-late { background: var(--wt-late); }
+.health-dot-blocked { background: var(--wt-blocked); }
+
+.health-text { font-weight: 700; }
+.health-text-ahead { color: var(--wt-ahead); }
+.health-text-on-track { color: var(--wt-on-track); }
+.health-text-at-risk { color: var(--wt-at-risk); }
+.health-text-late { color: var(--wt-late); }
+.health-text-blocked { color: var(--wt-blocked); }
+
+/* ---------- LOQ Delivery Outlook ---------- */
+.outlook-scroll { max-height: 420px; overflow-y: auto; }
+.outlook-axis { display: flex; padding-left: 140px; justify-content: space-between; margin-bottom: 10px; }
+.outlook-axis span { font-size: 10.5px; color: var(--text-tertiary); }
+.outlook-cin + .outlook-cin { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
+.outlook-cin-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+.outlook-cin-title:hover { color: var(--accent); }
+.outlook-cin-target { font-size: 11px; font-weight: 400; color: var(--text-tertiary); }
+.outlook-row { display: grid; grid-template-columns: 132px 1fr; align-items: center; gap: 8px; padding: 3px 0; }
+.outlook-row-label { font-size: 11.5px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.outlook-track { position: relative; height: 6px; background: var(--surface-2); border-radius: 3px; }
+.outlook-target-mark {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 12px;
+  background: var(--border-strong);
+}
+.outlook-dot {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  border: 2px solid var(--surface-0);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.outlook-dot.dimmed { opacity: 0.25; }
+.outlook-empty { color: var(--text-tertiary); font-size: 12.5px; padding: 10px 0; }
+
+/* ---------- Cinematics Matrix ---------- */
+.matrix-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.matrix-toolbar input[type="text"] { max-width: 220px; }
+.matrix-toolbar-spacer { flex: 1; }
+.matrix-group-select { font-size: 12px; }
+
+.matrix-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); }
+table.mx-table { width: 100%; border-collapse: collapse; font-size: 12.5px; background: var(--surface-0); }
+table.mx-table th, table.mx-table td { padding: 9px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+table.mx-table th {
+  text-align: left;
+  background: var(--surface-1);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  user-select: none;
+}
+table.mx-table th:hover { color: var(--text-primary); }
+table.mx-table tbody tr:hover td { background: var(--surface-1); }
+table.mx-table .mx-cin-col {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface-0);
+  box-shadow: 1px 0 0 var(--border);
+}
+table.mx-table tbody tr:hover .mx-cin-col { background: var(--surface-1); }
+table.mx-table th.mx-cin-col { background: var(--surface-1); z-index: 2; }
+.mx-cin-name { font-weight: 600; color: var(--text-primary); cursor: pointer; background: none; border: none; padding: 0; font-size: inherit; text-align: left; }
+.mx-cin-name:hover { color: var(--accent); text-decoration: underline; }
+.mx-health-cell { display: flex; flex-direction: column; gap: 2px; }
+.mx-health-issues { font-size: 10.5px; color: var(--text-tertiary); }
+.mx-cell { cursor: pointer; }
+.mx-cell-level { font-weight: 600; }
+.mx-cell-status { font-size: 10.5px; color: var(--text-tertiary); margin-top: 1px; }
+.mx-na { color: var(--text-tertiary); }
+.mx-group-row { cursor: pointer; background: var(--surface-1); }
+.mx-group-row td { font-weight: 600; font-size: 11.5px; color: var(--text-secondary); }
+.mx-group-row:hover td { background: var(--surface-2); }
+.mx-empty-row td { color: var(--text-tertiary); text-align: center; padding: 20px; }
+
+/* ---------- Gap disclosure card (CinematicDetail — Not yet integrated) ---------- */
+.gap-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.gap-row { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.gap-row:last-child { border-bottom: none; }
+.gap-row-title { font-size: 12.5px; font-weight: 600; }
+.gap-row-need { font-size: 11.5px; color: var(--text-tertiary); }
+
+@media (max-width: 720px) {
+  .outlook-axis { display: none; }
+  .outlook-row { grid-template-columns: 90px 1fr; }
+}

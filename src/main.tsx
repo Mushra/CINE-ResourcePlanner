@@ -12,6 +12,7 @@ import './ui/views/dashboard.css';
 import './ui/views/project-detail.css';
 import './ui/views/people.css';
 import './ui/views/team.css';
+import './ui/views/watchtower/watchtower.css';
 import './ui/timeline/timeline.css';
 import App from './App.tsx';
 

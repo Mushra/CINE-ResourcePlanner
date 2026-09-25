@@ -46,6 +46,8 @@ describe('MppImportDrawer (via ProjectDetail)', () => {
     const otherProject = seedProject();
     const project = seedProject();
     useUiStore.getState().openProject(project.id);
+    useUiStore.getState().setProjectView('production');
+    useUiStore.getState().setProductionScreen('matrix'); // Import .mpp lives on the Cinematics Matrix screen
     window.mpp = { pickAndParse: async () => ({ canceled: false, fileName: 'sample.mpp', json: fixtureJson() }) };
 
     const { user } = renderView(<ProjectDetail projectId={project.id} />);
@@ -73,6 +75,8 @@ describe('MppImportDrawer (via ProjectDetail)', () => {
     const project = seedProject();
     useStore.getState().createDiscipline({ name: 'ANIM', color: '#4f7cff' });
     useUiStore.getState().openProject(project.id);
+    useUiStore.getState().setProjectView('production');
+    useUiStore.getState().setProductionScreen('matrix');
     window.mpp = { pickAndParse: async () => ({ canceled: false, fileName: 'sample.mpp', json: fixtureJson() }) };
 
     const { user } = renderView(<ProjectDetail projectId={project.id} />);
@@ -90,6 +94,8 @@ describe('MppImportDrawer (via ProjectDetail)', () => {
     await seedStore();
     const project = seedProject();
     useUiStore.getState().openProject(project.id);
+    useUiStore.getState().setProjectView('production');
+    useUiStore.getState().setProductionScreen('matrix');
     delete (window as { mpp?: unknown }).mpp;
 
     const { user } = renderView(<ProjectDetail projectId={project.id} />);

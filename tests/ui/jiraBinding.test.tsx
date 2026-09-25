@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { ProjectDetail } from '../../src/ui/views/ProjectDetail';
 import { useStore } from '../../src/store/useStore';
 import { useUiStore } from '../../src/store/useUiStore';
@@ -30,6 +30,8 @@ describe('JiraBindingDrawer (via ProjectDetail)', () => {
     const project = seedProject();
     const cinematic = useStore.getState().createCinematic({ projectId: project.id, name: 'Exodus Intro', jiraKey: null, targetDate: null, notes: '' });
     useUiStore.getState().openProject(project.id);
+    useUiStore.getState().setProjectView('production');
+    useUiStore.getState().setProductionScreen('matrix'); // Sync with Jira lives on the Cinematics Matrix screen
 
     mockExport({ issues: [{ key: 'OVR-1', fields: { summary: 'Exodus Intro', issuetype: { name: 'Epic' }, status: { name: 'To Do' } } }] });
 
@@ -53,6 +55,8 @@ describe('JiraBindingDrawer (via ProjectDetail)', () => {
     const project = seedProject();
     const cinematic = useStore.getState().createCinematic({ projectId: project.id, name: 'Exodus Intro', jiraKey: 'OVR-1', targetDate: null, notes: '' });
     useUiStore.getState().openProject(project.id);
+    useUiStore.getState().setProjectView('production');
+    useUiStore.getState().setProductionScreen('matrix');
 
     mockExport({ issues: [{ key: 'OVR-1', fields: { summary: 'Something unrelated', issuetype: { name: 'Epic' }, status: { name: 'Done' } } }] });
 
@@ -72,6 +76,8 @@ describe('JiraBindingDrawer (via ProjectDetail)', () => {
     const project = seedProject();
     const cinematic = useStore.getState().createCinematic({ projectId: project.id, name: 'Seq010 Opening', jiraKey: null, targetDate: null, notes: '' });
     useUiStore.getState().openProject(project.id);
+    useUiStore.getState().setProjectView('production');
+    useUiStore.getState().setProductionScreen('matrix');
 
     // The decoy has better name overlap but no Cinematics List value; the real match carries the
     // field (customfield_10420) instead — the cascade should prefer the field over name-similarity.
@@ -92,7 +98,8 @@ describe('JiraBindingDrawer (via ProjectDetail)', () => {
     await screen.findByText('Seq010 Opening', { selector: '.jira-binding-name' });
     expect(screen.getByText('via Cinematics List')).toBeInTheDocument();
 
-    const select = screen.getByRole('combobox') as HTMLSelectElement;
+    // Scoped: the Cinematics Matrix's own "Group by" <select> is also a combobox on this page.
+    const select = within(document.querySelector('.jira-binding-select')!).getByRole('combobox') as HTMLSelectElement;
     expect(select.value).toBe('OVR-2');
 
     // Override the proposed field match with the decoy.

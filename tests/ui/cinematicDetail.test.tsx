@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { screen, within } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import { ProjectDetail } from '../../src/ui/views/ProjectDetail';
 import { CinematicDetail } from '../../src/ui/views/CinematicDetail';
 import { useStore } from '../../src/store/useStore';
@@ -25,6 +25,8 @@ describe('ProjectDetail — Cinematics section', () => {
     await seedStore();
     const project = seedProject();
     useUiStore.getState().openProject(project.id);
+    useUiStore.getState().setProjectView('production');
+    useUiStore.getState().setProductionScreen('matrix'); // the cinematics list lives on the Matrix screen
     const { user } = renderView(<ProjectDetail projectId={project.id} />);
 
     expect(screen.getByText('No cinematics yet. Add one to start scheduling LOQs.')).toBeInTheDocument();
@@ -42,6 +44,8 @@ describe('ProjectDetail — Cinematics section', () => {
     const project = seedProject();
     const cinematic = useStore.getState().createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
     useUiStore.getState().openProject(project.id);
+    useUiStore.getState().setProjectView('production');
+    useUiStore.getState().setProductionScreen('matrix');
     const { user } = renderView(<ProjectDetail projectId={project.id} />);
 
     await user.click(screen.getByText('Seq01'));
@@ -50,24 +54,32 @@ describe('ProjectDetail — Cinematics section', () => {
     expect(useUiStore.getState().selectedProjectId).toBe(project.id);
   });
 
-  it('edits and deletes a cinematic from the list', async () => {
+  it('edits and deletes a cinematic via the matrix drill-in and Cinematic Detail', async () => {
+    // The Cinematics Matrix deliberately has no per-row Edit/Delete (dropped in the Watchtower
+    // rework — CinematicDetail's own header already exposes both, so nothing is lost, only
+    // relocated to the drill-in screen). Clicking the row's name is still how you get there.
     await seedStore();
     const project = seedProject();
-    useStore.getState().createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
+    const cinematic = useStore.getState().createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
     useUiStore.getState().openProject(project.id);
-    const { user } = renderView(<ProjectDetail projectId={project.id} />);
+    useUiStore.getState().setProjectView('production');
+    useUiStore.getState().setProductionScreen('matrix');
+    const { user, unmount } = renderView(<ProjectDetail projectId={project.id} />);
 
-    const row = screen.getByText('Seq01').closest('tr')!;
-    await user.click(within(row).getByRole('button', { name: 'Edit' }));
+    await user.click(screen.getByText('Seq01'));
+    expect(useUiStore.getState().view).toBe('cinematic-detail');
+    unmount(); // swap "screens" for real — the app shell would unmount ProjectDetail here too
+
+    const { user: detailUser } = renderView(<CinematicDetail cinematicId={cinematic.id} />);
+    await detailUser.click(screen.getByRole('button', { name: 'Edit' }));
     const nameInput = screen.getByLabelText('Name');
-    await user.clear(nameInput);
-    await user.type(nameInput, 'Seq01 Renamed');
-    await user.click(screen.getByRole('button', { name: 'Save changes' }));
-    const renamedRow = await screen.findByText('Seq01 Renamed');
+    await detailUser.clear(nameInput);
+    await detailUser.type(nameInput, 'Seq01 Renamed');
+    await detailUser.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByRole('heading', { name: 'Seq01 Renamed' })).toBeInTheDocument();
 
-    await user.click(within(renamedRow.closest('tr')!).getByRole('button', { name: 'Delete' }));
-    await user.click(within(renamedRow.closest('tr')!).getByRole('button', { name: 'Confirm?' }));
-    expect(screen.queryByText('Seq01 Renamed')).not.toBeInTheDocument();
+    await detailUser.click(screen.getByRole('button', { name: 'Delete' }));
+    await detailUser.click(screen.getByRole('button', { name: 'Confirm?' }));
     expect(useStore.getState().data.cinematics).toHaveLength(0);
   });
 });

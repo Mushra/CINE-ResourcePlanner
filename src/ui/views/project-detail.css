@@ -60,6 +60,9 @@
 .detail-checks { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); padding-top: 12px; }
 .detail-check-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); }
 
+/* Watchtower's Production/Staffing (+ Control Room/Matrix) switch, bottom of the header card. */
+.detail-view-switch { display: flex; align-items: center; gap: 10px; margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; flex-wrap: wrap; }
+
 .panel-header-toggles { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 
 .dependency-list { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 8px; }

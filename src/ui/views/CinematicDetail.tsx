@@ -10,9 +10,22 @@ import { LoqTimeline } from '../components/LoqTimeline';
 import { RecommitDialog } from '../components/RecommitDialog';
 import { VarianceDialog } from '../components/VarianceDialog';
 import { LoqDependencyEditor } from '../components/LoqDependencyEditor';
+import { Collapsible } from '../components/Collapsible';
 import type { Loq } from '../../domain/types';
 
 const LOQ_STATUS_LABEL: Record<Loq['status'], string> = { TODO: 'To do', IN_PROGRESS: 'In progress', DONE: 'Done' };
+
+/**
+ * Capabilities the prototype's Cinematic Detail shows that have no backing integration in this
+ * app yet — per the audit's "never mock, disclose the gap" rule (docs/WATCHTOWER.md §E). Each
+ * names the specific system/API that would need to be wired up.
+ */
+const INTEGRATION_GAPS: { title: string; need: string }[] = [
+  { title: 'Version player', need: 'Needs a ShotGrid/Flow connector to fetch and stream published review versions.' },
+  { title: 'Version push history', need: 'Needs a ShotGrid/Flow connector exposing the publish/push event log for this cinematic.' },
+  { title: 'QA bugs', need: 'Needs a QA bug tracker integration (e.g. ShotGrid Notes/Tickets or a dedicated bug DB) — no domain model exists yet.' },
+  { title: 'Hotlines', need: 'Needs a Hotline/escalation feed integration — no domain model exists yet.' },
+];
 
 export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const cinematic = useStore((s) => s.data.cinematics.find((c) => c.id === cinematicId));
@@ -134,6 +147,19 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
       {cinematicLoqs.length > 1 && (
         <LoqDependencyEditor loqs={cinematicLoqs} disciplines={disciplines} />
       )}
+
+      <div className="card">
+        <Collapsible scopeKey={`cinematicdetail:gaps:${cinematic.id}`} defaultOpen={false} summary={<span>Not yet integrated</span>} count={INTEGRATION_GAPS.length}>
+          <ul className="gap-list">
+            {INTEGRATION_GAPS.map((gap) => (
+              <li key={gap.title} className="gap-row">
+                <span className="gap-row-title">{gap.title}</span>
+                <span className="gap-row-need">{gap.need}</span>
+              </li>
+            ))}
+          </ul>
+        </Collapsible>
+      </div>
 
       {editing && (
         <CinematicFormDrawer

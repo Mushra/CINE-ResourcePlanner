@@ -31,6 +31,7 @@ describe('ProjectDetail', () => {
     await seedStore();
     const { project } = seedProjectWithStaffing();
     useUiStore.getState().openProject(project.id);
+    useUiStore.getState().setProjectView('staffing');
 
     const { user } = renderView(<ProjectDetail projectId={project.id} />);
 
@@ -62,6 +63,7 @@ describe('ProjectDetail', () => {
     await seedStore();
     const { project, discipline } = seedProjectWithStaffing();
     useUiStore.getState().openProject(project.id);
+    useUiStore.getState().setProjectView('staffing');
     const { user, container } = renderView(<ProjectDetail projectId={project.id} />);
 
     // Seeded need (2 FTE) doesn't match the 1 FTE assigned — the gap badge is showing.
