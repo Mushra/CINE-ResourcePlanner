@@ -4,7 +4,7 @@ import { useUiStore } from '../../../store/useUiStore';
 import { isoDiffDays } from '../../timeline/timelineMath';
 import {
   HEALTH_LABEL, HEALTH_ORDER, cinematicHealth, deriveLoqHealth, healthCounts, loqLevelDistribution,
-  projectAttention, projectDependencyEdges, representativeLoq, type AttentionItem, type WatchtowerHealth,
+  projectAttention, representativeLoq, type AttentionItem, type WatchtowerHealth,
 } from '../../../engine/watchtower';
 import { Collapsible } from '../../components/Collapsible';
 import { EmptyState } from '../../components/EmptyState';
@@ -27,7 +27,6 @@ export function ControlRoom({ project, checks }: { project: Project; checks: San
   const disciplines = useStore((s) => s.data.disciplines);
   const allCinematics = useStore((s) => s.data.cinematics);
   const allLoqs = useStore((s) => s.data.loqs);
-  const allDependencies = useStore((s) => s.data.loqDependencies);
   const openCinematic = useUiStore((s) => s.openCinematic);
   const [healthFilter, setHealthFilter] = useState<WatchtowerHealth | null>(null);
   const [distDiscipline, setDistDiscipline] = useState<string>('all');
@@ -66,8 +65,6 @@ export function ControlRoom({ project, checks }: { project: Project; checks: San
     }
     attentionGroups.push(...byId.values());
   }
-
-  const dependencyEdges = projectDependencyEdges(loqs, cinematics, disciplines, allDependencies);
 
   const outlookCinematics = healthFilter
     ? cinematics.filter((c) => cinematicHealth(c.id, disciplineIds, loqs, forecasts) === healthFilter)
@@ -110,7 +107,7 @@ export function ControlRoom({ project, checks }: { project: Project; checks: San
           <span className="panel-sub">Top {visibleAttention.length} of {filteredAttention.length} planning issue{filteredAttention.length === 1 ? '' : 's'}</span>
         </div>
         {attentionGroups.length === 0 ? (
-          <EmptyState icon="check" title="All clear" description="No issues match this filter." />
+          <EmptyState icon="check" title="All clear" description="No issues match this filter." compact />
         ) : (
           <div className="issue-groups">
             {attentionGroups.map((group, idx) => (
@@ -145,33 +142,6 @@ export function ControlRoom({ project, checks }: { project: Project; checks: San
           </div>
         )}
       </div>
-
-      {dependencyEdges.length > 0 && (
-        <div className="card panel">
-          <div className="panel-header">
-            <h2>Dependencies</h2>
-            <span className="panel-sub">Finish-to-start edges across this project's cinematics, incl. cross-cinematic</span>
-          </div>
-          <ul className="dependency-list">
-            {dependencyEdges.map((edge) => (
-              <li key={edge.dependency.id} className="dependency-row">
-                <div className="dependency-edge">
-                  <button type="button" className="issue-message" onClick={() => openCinematic(edge.predecessor.loq.cinematicId)}>
-                    {edge.predecessor.cinematicName} · {edge.predecessor.disciplineName} · {edge.predecessor.loq.type}
-                  </button>
-                  {' → '}
-                  <button type="button" className="issue-message" onClick={() => openCinematic(edge.successor.loq.cinematicId)}>
-                    {edge.successor.cinematicName} · {edge.successor.disciplineName} · {edge.successor.loq.type}
-                  </button>
-                </div>
-                {edge.dependency.lagDays !== 0 && (
-                  <span className="dependency-lag">Lag {edge.dependency.lagDays}d</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       <div className="card panel">
         <div className="panel-header">

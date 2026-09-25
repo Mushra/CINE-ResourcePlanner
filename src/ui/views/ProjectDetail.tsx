@@ -51,7 +51,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
       <div className="card detail-header">
         <div className="detail-header-top">
-          <div>
+          <div className="detail-header-line">
             <h1>{project.name}</h1>
             <div className="detail-meta">
               <span className={`status-dot status-${deriveProjectStatus(project)}`} />
@@ -65,16 +65,14 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 </>
               )}
             </div>
+            <span className="meta-sep">·</span>
+            <DateChip label="Start" date={project.startDate} certainty={project.startCertainty} />
+            <DateChip label="End" date={project.endDate} certainty={project.endCertainty} />
           </div>
           <div className="detail-header-actions">
             <Button variant="secondary" icon="edit" size="sm" onClick={() => setEditing(true)}>Edit</Button>
             <ConfirmButton label="Delete" onConfirm={() => { deleteProject(project.id); backToProjects(); }} />
           </div>
-        </div>
-
-        <div className="detail-dates">
-          <DateChip label="Start" date={project.startDate} certainty={project.startCertainty} />
-          <DateChip label="End" date={project.endDate} certainty={project.endCertainty} />
         </div>
 
         {project.notes && <p className="detail-notes">{project.notes}</p>}

@@ -5,13 +5,12 @@ import { useStore } from '../../src/store/useStore';
 import { useUiStore } from '../../src/store/useUiStore';
 import { renderView, seedStore } from './harness';
 
-/** 6 at-risk LOQs (more than the Attention panel's top-5 cap) split across two cinematics, a
- * cross-cinematic dependency edge between them, and an unrelated FTE/staffing gap that must never
- * surface in Attention Required. */
+/** 6 at-risk LOQs (more than the Attention panel's top-5 cap) split across two cinematics, and an
+ * unrelated FTE/staffing gap that must never surface in Attention Required. */
 function seedProjectWithPlanningAndStaffingIssues() {
   const {
     createDiscipline, createPool, createPerson, createProject, createCinematic, createLoq,
-    declareVariance, setDisciplineRequirement, setPersonAssignment, createLoqDependency,
+    declareVariance, setDisciplineRequirement, setPersonAssignment,
   } = useStore.getState();
 
   const discipline = createDiscipline({ name: 'Animation', color: '#4f7cff' });
@@ -53,16 +52,6 @@ function seedProjectWithPlanningAndStaffingIssues() {
   setDisciplineRequirement(project.id, discipline.id, '2026-09', 2);
   setPersonAssignment(person.id, project.id, '2026-09', 1);
 
-  // Cross-cinematic edge — invisible to LoqDependencyEditor, which only shows edges within one cinematic.
-  createLoqDependency({
-    predecessorLoqId: loqs[0].id,
-    successorLoqId: loqs[3].id,
-    type: 'finish_to_start',
-    lagDays: 2,
-    source: 'override',
-    templateId: null,
-  });
-
   return { project, cinA, cinB, loqs };
 }
 
@@ -80,20 +69,15 @@ describe('ControlRoom', () => {
     expect(screen.queryByText(/is understaffed on Animation/)).not.toBeInTheDocument();
   });
 
-  it('lists a cross-cinematic dependency edge and opens the right cinematic on click', async () => {
+  it('does not show a Dependencies panel — authoring stays on LoqDependencyEditor', async () => {
     await seedStore();
-    const { project, cinA, cinB } = seedProjectWithPlanningAndStaffingIssues();
+    const { project } = seedProjectWithPlanningAndStaffingIssues();
     useUiStore.getState().openProject(project.id);
     useUiStore.getState().setProjectView('production');
     useUiStore.getState().setProductionScreen('control');
-    const { user } = renderView(<ProjectDetail projectId={project.id} />);
+    renderView(<ProjectDetail projectId={project.id} />);
 
-    expect(await screen.findByText('Dependencies')).toBeInTheDocument();
-    const predecessorButton = screen.getByText(`${cinA.name} · Animation · L1`);
-    expect(screen.getByText(`${cinB.name} · Animation · L4`)).toBeInTheDocument();
-
-    await user.click(predecessorButton);
-    expect(useUiStore.getState().view).toBe('cinematic-detail');
-    expect(useUiStore.getState().selectedCinematicId).toBe(cinA.id);
+    await screen.findByText('Top 5 of 6 planning issues');
+    expect(screen.queryByText('Dependencies')).not.toBeInTheDocument();
   });
 });

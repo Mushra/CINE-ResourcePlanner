@@ -204,6 +204,10 @@
 }
 .empty-state h3 { margin: 0; font-size: 14px; color: var(--text-primary); }
 .empty-state p { margin: 0 0 6px; font-size: 12.5px; }
+.empty-state-compact { padding: 14px 20px; gap: 4px; }
+.empty-state-compact .empty-state-icon { width: 30px; height: 30px; margin-bottom: 2px; }
+.empty-state-compact h3 { font-size: 12.5px; }
+.empty-state-compact p { font-size: 11.5px; margin: 0; }
 
 /* Cards / sections */
 .card {

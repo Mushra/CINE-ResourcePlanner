@@ -3,7 +3,7 @@
 // on read, mirroring the app's existing "derive, never store" precedent (see
 // domain/projectStatus.ts::deriveProjectStatus and Projects.tsx::HealthBadge).
 
-import type { Cinematic, Loq, LoqDependency } from '../domain/types';
+import type { Cinematic, Loq } from '../domain/types';
 import type { LoqForecast } from './loqForecast';
 import type { CheckCategory, SanityCheck } from './validation';
 import type { PlanningEngine } from './planning';
@@ -144,8 +144,9 @@ export function worstDiscipline(
   return worstId;
 }
 
-/** Counts every (Cinematic, Discipline) cell with a representative LOQ, bucketed by health — feeds
- * the Control Room's health strip. */
+/** Counts each Cinematic once, bucketed by its overall health (the worst-of-its-disciplines rollup
+ * from cinematicHealth) — feeds the Control Room's health strip. A Cinematic with no LOQs yet
+ * anywhere isn't counted in any bucket. */
 export function healthCounts(
   cinematics: Cinematic[],
   disciplineIds: string[],
@@ -154,11 +155,8 @@ export function healthCounts(
 ): Record<WatchtowerHealth, number> {
   const counts: Record<WatchtowerHealth, number> = { ahead: 0, 'on-track': 0, 'at-risk': 0, late: 0, blocked: 0 };
   for (const cinematic of cinematics) {
-    for (const disciplineId of disciplineIds) {
-      const loq = representativeLoq(loqs, cinematic.id, disciplineId);
-      if (!loq) continue;
-      counts[deriveLoqHealth(loq, forecasts.get(loq.id))] += 1;
-    }
+    const health = cinematicHealth(cinematic.id, disciplineIds, loqs, forecasts);
+    if (health) counts[health] += 1;
   }
   return counts;
 }
@@ -208,48 +206,6 @@ export function attentionSource(category: CheckCategory): AttentionSource {
   if (JIRA_CATEGORIES.has(category)) return 'Jira';
   if (PRODUCTION_PLANNING_CATEGORIES.has(category)) return 'Production Planning';
   return 'Watchtower'; // loq_at_risk / loq_root_cause / loq_early_opportunity / invalid_dates / tbd_dates
-}
-
-export interface DependencyEndpoint {
-  loq: Loq;
-  cinematicName: string;
-  disciplineName: string;
-}
-
-export interface DependencyEdge {
-  dependency: LoqDependency;
-  predecessor: DependencyEndpoint;
-  successor: DependencyEndpoint;
-}
-
-/**
- * Every dependency edge whose two endpoints both resolve within the given (project-scoped) LOQs —
- * unlike LoqDependencyEditor (which only shows edges within a single Cinematic), this resolves
- * cross-Cinematic edges too, since the .mpp importer creates them with no such restriction. Read
- * model only; authoring stays on LoqDependencyEditor.
- */
-export function projectDependencyEdges(
-  loqs: Loq[],
-  cinematics: Cinematic[],
-  disciplines: { id: string; name: string }[],
-  dependencies: LoqDependency[],
-): DependencyEdge[] {
-  const loqById = new Map(loqs.map((l) => [l.id, l]));
-  const cinematicName = (id: string) => cinematics.find((c) => c.id === id)?.name ?? id;
-  const disciplineName = (id: string) => disciplines.find((d) => d.id === id)?.name ?? id;
-
-  function endpoint(loq: Loq): DependencyEndpoint {
-    return { loq, cinematicName: cinematicName(loq.cinematicId), disciplineName: disciplineName(loq.disciplineId) };
-  }
-
-  const edges: DependencyEdge[] = [];
-  for (const dependency of dependencies) {
-    const predecessorLoq = loqById.get(dependency.predecessorLoqId);
-    const successorLoq = loqById.get(dependency.successorLoqId);
-    if (!predecessorLoq || !successorLoq) continue;
-    edges.push({ dependency, predecessor: endpoint(predecessorLoq), successor: endpoint(successorLoq) });
-  }
-  return edges;
 }
 
 /** Every sanity check scoped to a project, re-shaped into the prototype's Attention item — the
