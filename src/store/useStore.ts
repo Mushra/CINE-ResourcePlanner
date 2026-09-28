@@ -215,15 +215,26 @@ function jqlFieldRef(fieldId: string): string {
 }
 
 /** Narrows the search to only the issues that can actually bind to this project's Cinematics/LOQs,
- * instead of pulling the whole Jira project (OVR alone is ~200k issues). The anchor is the
- * "Cinematics List" field every bindable issue carries (docs/INTEGRATIONS.md §3.2); `linkedKeys`
- * (issues already linked in the plan) are OR'd back in unconditionally, since an explicit prior
- * key link is always honored and is never scope-filtered. Falls back to the whole project only
- * when no anchor field is configured and nothing is linked yet. */
+ * instead of pulling the whole Jira project (OVR alone is ~200k issues). Scope comes from the
+ * config's free-text `scopeJql` when set (preferred — the user writes bracket-free JQL their
+ * instance accepts, e.g. `"Cinematics List" is not EMPTY`); otherwise it's built from the
+ * "Cinematics List" anchor field every bindable issue carries (docs/INTEGRATIONS.md §3.2) plus any
+ * scopeField/value, in `cf[id]` form. `linkedKeys` (issues already linked in the plan) are OR'd
+ * back in unconditionally, since an explicit prior key link is always honored and is never
+ * scope-filtered. Falls back to the whole project only when nothing is configured or linked.
+ *
+ * The `cf[id]` bracket form is a last resort: some corporate reverse-proxies reject the
+ * percent-encoded brackets with a container-level 400 before the request reaches Jira, so prefer
+ * naming the field in `scopeJql`. */
 function buildJiraJql(config: JiraProjectConfig, linkedKeys: string[] = []): string {
+  const rawScope = config.scopeJql?.trim();
   const scoped: string[] = [];
-  if (config.cinematicsListField) scoped.push(`${jqlFieldRef(config.cinematicsListField)} IS NOT EMPTY`);
-  if (config.scopeField && config.scopeValue) scoped.push(`${jqlFieldRef(config.scopeField)} = "${config.scopeValue}"`);
+  if (rawScope) {
+    scoped.push(rawScope);
+  } else {
+    if (config.cinematicsListField) scoped.push(`${jqlFieldRef(config.cinematicsListField)} IS NOT EMPTY`);
+    if (config.scopeField && config.scopeValue) scoped.push(`${jqlFieldRef(config.scopeField)} = "${config.scopeValue}"`);
+  }
   const scopedClause = scoped.join(' AND ');
 
   const uniqueKeys = [...new Set(linkedKeys)].filter((k) => /^[A-Z][A-Z0-9]*-\d+$/.test(k));

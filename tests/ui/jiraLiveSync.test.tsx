@@ -26,6 +26,7 @@ function configFor(projectId: string): JiraProjectConfig {
     epicLinkField: null,
     scopeField: null,
     scopeValue: null,
+    scopeJql: null,
   };
 }
 
@@ -91,6 +92,42 @@ describe('useStore.syncJira / testJiraConnection (Phase 5b live sync)', () => {
     }));
     expect(result!.batch).toEqual(expectedBatch);
     expect(result!.fileName).toBeNull();
+  });
+
+  it('scopes with the free-text scopeJql verbatim and emits no cf[id] brackets when set', async () => {
+    await seedStore();
+    const project = seedProject();
+    useStore.getState().setJiraConfigForProject({ ...configFor(project.id), scopeJql: '"Cinematics List" is not EMPTY' });
+
+    let sentJql = '';
+    window.jira = {
+      hasToken: async () => true,
+      setToken: async () => ({ ok: true }),
+      clearToken: async () => ({ ok: true }),
+      search: async (args) => { sentJql = args.jql; return { ok: true, raw: { ...SAMPLE_RAW, total: 1 } }; },
+    };
+
+    await useStore.getState().syncJira(project.id);
+    expect(sentJql).toContain('"Cinematics List" is not EMPTY');
+    expect(sentJql).toContain('project = "OVR"');
+    expect(sentJql).not.toContain('cf[');
+  });
+
+  it('falls back to the cf[id] field form when scopeJql is blank', async () => {
+    await seedStore();
+    const project = seedProject();
+    useStore.getState().setJiraConfigForProject({ ...configFor(project.id), scopeJql: null });
+
+    let sentJql = '';
+    window.jira = {
+      hasToken: async () => true,
+      setToken: async () => ({ ok: true }),
+      clearToken: async () => ({ ok: true }),
+      search: async (args) => { sentJql = args.jql; return { ok: true, raw: { ...SAMPLE_RAW, total: 1 } }; },
+    };
+
+    await useStore.getState().syncJira(project.id);
+    expect(sentJql).toContain('cf[10420] IS NOT EMPTY');
   });
 
   it('toasts and returns null when window.jira.search reports a failure', async () => {

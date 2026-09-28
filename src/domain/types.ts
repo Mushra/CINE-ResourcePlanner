@@ -320,6 +320,13 @@ export interface JiraProjectConfig {
    * Both null = no filtering. */
   scopeField: string | null;
   scopeValue: string | null;
+  /** Free-text JQL fragment AND-ed onto `project = KEY` to scope the fetch to bindable issues,
+   * e.g. `"Cinematics List" is not EMPTY`. Preferred over the `cf[id]` bracket form built from
+   * cinematicsListField/scopeField, because some corporate reverse-proxies reject the encoded
+   * brackets (`%5B`/`%5D`) with a container-level 400 before the request reaches Jira. Reference
+   * custom fields by their quoted display name here to stay bracket-free. null/empty = fall back
+   * to the field-id form (or the whole project when nothing is configured). */
+  scopeJql: string | null;
 }
 
 /** Full snapshot of persisted data the engine operates on. Pure — no DB or UI concerns. */

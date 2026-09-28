@@ -8,6 +8,9 @@ const DEFAULT_CINEMATICS_LIST_FIELD = 'customfield_10420';
 const DEFAULT_LOQ_TARGET_FIELD = 'customfield_12338';
 const DEFAULT_DUE_DATE_FIELD = 'duedate';
 const DEFAULT_TOLERANCE_DAYS = 1;
+/** Bracket-free scope so new configs don't emit `cf[id]` (rejected by some proxies) — see
+ * JiraProjectConfig.scopeJql. References the Cinematics List field by its display name. */
+const DEFAULT_SCOPE_JQL = '"Cinematics List" is not EMPTY';
 
 function emptyConfig(projectId: string): JiraProjectConfig {
   return {
@@ -24,6 +27,7 @@ function emptyConfig(projectId: string): JiraProjectConfig {
     epicLinkField: null,
     scopeField: null,
     scopeValue: null,
+    scopeJql: DEFAULT_SCOPE_JQL,
   };
 }
 
@@ -182,6 +186,21 @@ export function SettingsView() {
             </p>
           </div>
 
+          <div className="field">
+            <label htmlFor="jira-scope-jql">JQL scope (optional)</label>
+            <input
+              id="jira-scope-jql"
+              value={value.scopeJql ?? ''}
+              onChange={(e) => set('scopeJql', e.target.value || null)}
+              placeholder={DEFAULT_SCOPE_JQL}
+            />
+            <p className="field-hint">
+              AND-ed onto <code>project = {value.jiraProjectKey || 'KEY'}</code> to scope the fetch to bindable issues. Reference custom
+              fields by their quoted display name (e.g. <code>"Cinematics List" is not EMPTY</code>) rather than <code>cf[id]</code> —
+              some proxies reject the brackets with a 400. Leave blank to fetch the whole project.
+            </p>
+          </div>
+
           <div className="field-row">
             <div className="field">
               <label htmlFor="jira-scope-field">Scope field (optional)</label>
@@ -192,7 +211,7 @@ export function SettingsView() {
               <input id="jira-scope-value" value={value.scopeValue ?? ''} onChange={(e) => set('scopeValue', e.target.value || null)} placeholder="e.g. Cinematics" />
             </div>
           </div>
-          <p className="field-hint">Restricts the JQL search to issues matching this field/value, in addition to the project key.</p>
+          <p className="field-hint">Field/value scope used only when JQL scope above is blank (built in <code>cf[id]</code> form).</p>
 
           <Collapsible scopeKey="settings.jira.advanced" summary="Advanced — field mapping" defaultOpen={false} className="settings-advanced">
             <div className="field-row">

@@ -214,6 +214,7 @@ describe('Jira project config (Phase 5b — non-secret settings only, no token)'
       startDateField: 'customfield_10015',
       dueDateField: 'duedate',
       dateToleranceDays: 3,
+      scopeJql: '"Cinematics List" is not EMPTY',
       cinematicsListField: 'customfield_10420',
       loqTargetField: 'customfield_12338',
       epicLinkField: 'customfield_10101',
