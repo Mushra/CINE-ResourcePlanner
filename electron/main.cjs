@@ -244,6 +244,32 @@ function getJiraTokenPlaintext(projectId) {
 // origin-agnostic — it never knows whether `raw` came from a file or a live paginated fetch.
 // testOnly (the Settings screen's "Test connection" probe) fetches a single maxResults=1 page —
 // enough to confirm auth + JQL are valid and report a total, without pulling the whole project.
+// Extracts the human-readable reason from a failed Jira response so a 400 says *which* JQL
+// clause/field it rejected instead of a bare status code. Jira error bodies carry
+// `{ errorMessages: [...], errors: {...} }`; we join both, falling back to a trimmed slice of the
+// raw text. The body contains only JQL/field diagnostics — the PAT lives in a request header and is
+// never echoed back — so this is safe to surface to the renderer. Returns "" when nothing useful is
+// found (or on a read error), so the caller can always append it. Bounded to keep toasts sane.
+async function describeJiraError(res) {
+  try {
+    const text = (await res.text()).trim();
+    if (!text) return '';
+    let detail = text;
+    try {
+      const body = JSON.parse(text);
+      const parts = [...(body.errorMessages ?? []), ...Object.values(body.errors ?? {})];
+      if (parts.length) detail = parts.join('; ');
+    } catch {
+      // not JSON — use the raw text
+    }
+    detail = detail.replace(/\s+/g, ' ').trim();
+    if (!detail) return '';
+    return `: ${detail.length > 300 ? `${detail.slice(0, 300)}…` : detail}`;
+  } catch {
+    return '';
+  }
+}
+
 async function fetchJiraSearch({ baseUrl, authMode, email, pat, jql, fields, testOnly }, onProgress) {
   const maxResults = testOnly ? 1 : 100;
   const authHeader = authMode === 'cloud'
@@ -260,7 +286,7 @@ async function fetchJiraSearch({ baseUrl, authMode, email, pat, jql, fields, tes
     if (fields?.length) url.searchParams.set('fields', fields.join(','));
 
     const res = await net.fetch(url.toString(), { headers: { Authorization: authHeader, Accept: 'application/json' } });
-    if (!res.ok) throw new Error(`Jira returned ${res.status} ${res.statusText}`);
+    if (!res.ok) throw new Error(`Jira returned ${res.status} ${res.statusText}${await describeJiraError(res)}`);
     const body = await res.json();
     const page = body.issues ?? [];
     issues.push(...page);
