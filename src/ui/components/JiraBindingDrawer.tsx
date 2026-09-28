@@ -37,6 +37,7 @@ export function JiraBindingDrawer({ projectId, projectName, onClose }: { project
   const projectLoqs = allLoqs.filter((l) => projectCinematicIds.has(l.cinematicId));
 
   const [busy, setBusy] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<{ stage: 'connecting' | 'fetching' | 'matching'; fetched: number; total: number } | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [batch, setBatch] = useState<NormalizedJiraBatch | null>(null);
   const [proposals, setProposals] = useState<JiraBindingProposals | null>(null);
@@ -63,10 +64,19 @@ export function JiraBindingDrawer({ projectId, projectName, onClose }: { project
 
   async function syncLive(): Promise<void> {
     setBusy(true);
-    const result = await syncJira(projectId);
-    setBusy(false);
-    if (!result) return;
+    setSyncProgress({ stage: 'connecting', fetched: 0, total: 0 });
+    const result = await syncJira(projectId, ({ fetched, total }) => {
+      setSyncProgress({ stage: 'fetching', fetched, total });
+    });
+    if (!result) {
+      setSyncProgress(null);
+      setBusy(false);
+      return;
+    }
+    setSyncProgress({ stage: 'matching', fetched: 0, total: 0 });
     applyFetchedBatch(result);
+    setSyncProgress(null);
+    setBusy(false);
   }
 
   function runApply(): void {
@@ -95,6 +105,8 @@ export function JiraBindingDrawer({ projectId, projectName, onClose }: { project
             <Button variant="primary" onClick={runApply}>Apply bindings</Button>
           </div>
         </BindingMappingStep>
+      ) : syncProgress ? (
+        <SyncProgressView progress={syncProgress} />
       ) : (
         <>
           <p className="drawer-hint">
@@ -118,6 +130,25 @@ export function JiraBindingDrawer({ projectId, projectName, onClose }: { project
         </>
       )}
     </Drawer>
+  );
+}
+
+function SyncProgressView({ progress }: { progress: { stage: 'connecting' | 'fetching' | 'matching'; fetched: number; total: number } }) {
+  const { stage, fetched, total } = progress;
+  const label =
+    stage === 'connecting' ? 'Connecting to Jira…'
+    : stage === 'matching' ? 'Matching issues to Cinematics and LOQs…'
+    : total > 0 ? `Fetching issues from Jira — ${fetched} of ${total}…` : `Fetching issues from Jira — ${fetched}…`;
+  const determinate = stage === 'fetching' && total > 0;
+  const pct = determinate ? Math.min(100, Math.round((fetched / total) * 100)) : 0;
+
+  return (
+    <div className="jira-sync-progress">
+      <p className="drawer-hint">{label}</p>
+      <div className={`jira-progress-track${determinate ? '' : ' jira-progress-indeterminate'}`}>
+        <div className="jira-progress-bar" style={determinate ? { width: `${pct}%` } : undefined} />
+      </div>
+    </div>
   );
 }
 

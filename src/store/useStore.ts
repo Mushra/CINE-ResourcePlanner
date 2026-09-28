@@ -118,7 +118,7 @@ interface StoreState {
    * fetches it via window.jira.search (paginated, authenticated in the main process), and parses it
    * through the same origin-agnostic parseJiraSearchResponse used by the file path. Returns null on
    * missing config/token/desktop-app or a fetch failure it already toasted — never throws. */
-  syncJira: (projectId: string) => Promise<{ fileName: string | null; batch: NormalizedJiraBatch } | null>;
+  syncJira: (projectId: string, onProgress?: (progress: { fetched: number; total: number }) => void) => Promise<{ fileName: string | null; batch: NormalizedJiraBatch } | null>;
   /** Settings screen's "Test connection" probe: fetches a single-issue page against this project's
    * saved config/token and reports how many issues its JQL matched, without writing anything. */
   testJiraConnection: (projectId: string) => Promise<{ ok: true; total: number } | { ok: false; error: string }>;
@@ -630,7 +630,7 @@ export const useStore = create<StoreState>((set, get) => {
       await window.jira.clearToken(projectId);
       get().toast('info', 'Jira token cleared');
     },
-    syncJira: async (projectId) => {
+    syncJira: async (projectId, onProgress) => {
       if (!window.jira) {
         get().toast('error', 'Live Jira sync is only available in the desktop app.');
         return null;
@@ -640,14 +640,22 @@ export const useStore = create<StoreState>((set, get) => {
         get().toast('error', 'No Jira connection configured for this project — set one up in Settings.');
         return null;
       }
-      const result = await window.jira.search({
-        projectId,
-        baseUrl: config.baseUrl,
-        authMode: config.authMode,
-        email: config.email,
-        jql: buildJiraJql(config),
-        fields: buildJiraFields(config),
-      });
+      const unsubscribe = onProgress
+        ? window.jira.onSearchProgress((p) => { if (p.projectId === projectId) onProgress({ fetched: p.fetched, total: p.total }); })
+        : undefined;
+      let result;
+      try {
+        result = await window.jira.search({
+          projectId,
+          baseUrl: config.baseUrl,
+          authMode: config.authMode,
+          email: config.email,
+          jql: buildJiraJql(config),
+          fields: buildJiraFields(config),
+        });
+      } finally {
+        unsubscribe?.();
+      }
       if (!result.ok) {
         get().toast('error', `Jira sync failed: ${result.error}`);
         return null;

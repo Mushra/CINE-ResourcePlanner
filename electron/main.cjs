@@ -244,7 +244,7 @@ function getJiraTokenPlaintext(projectId) {
 // origin-agnostic — it never knows whether `raw` came from a file or a live paginated fetch.
 // testOnly (the Settings screen's "Test connection" probe) fetches a single maxResults=1 page —
 // enough to confirm auth + JQL are valid and report a total, without pulling the whole project.
-async function fetchJiraSearch({ baseUrl, authMode, email, pat, jql, fields, testOnly }) {
+async function fetchJiraSearch({ baseUrl, authMode, email, pat, jql, fields, testOnly }, onProgress) {
   const maxResults = testOnly ? 1 : 100;
   const authHeader = authMode === 'cloud'
     ? `Basic ${Buffer.from(`${email}:${pat}`).toString('base64')}`
@@ -265,6 +265,7 @@ async function fetchJiraSearch({ baseUrl, authMode, email, pat, jql, fields, tes
     const page = body.issues ?? [];
     issues.push(...page);
     total = typeof body.total === 'number' ? body.total : issues.length;
+    onProgress?.({ fetched: issues.length, total });
     if (testOnly || page.length === 0 || issues.length >= total) break;
     startAt += page.length;
   }
@@ -291,11 +292,16 @@ function registerJiraHandlers() {
     return { ok: true };
   });
 
-  ipcMain.handle('jira:search', async (_event, { projectId, baseUrl, authMode, email, jql, fields, testOnly }) => {
+  ipcMain.handle('jira:search', async (event, { projectId, baseUrl, authMode, email, jql, fields, testOnly }) => {
     const pat = getJiraTokenPlaintext(projectId);
     if (!pat) return { ok: false, error: 'No Jira token stored for this project — set one in Settings.' };
     try {
-      const raw = await fetchJiraSearch({ baseUrl, authMode, email, pat, jql, fields, testOnly });
+      const onProgress = testOnly
+        ? undefined
+        : ({ fetched, total }) => {
+            if (!event.sender.isDestroyed()) event.sender.send('jira:search-progress', { projectId, fetched, total });
+          };
+      const raw = await fetchJiraSearch({ baseUrl, authMode, email, pat, jql, fields, testOnly }, onProgress);
       return { ok: true, raw };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : 'Jira request failed' };

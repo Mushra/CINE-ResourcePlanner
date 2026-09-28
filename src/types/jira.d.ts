@@ -6,6 +6,7 @@ import type { JiraRawSearchResponse } from '../import/jiraSync';
 
 export type JiraTokenResult = { ok: true } | { ok: false; error: string };
 export type JiraSearchResult = { ok: true; raw: JiraRawSearchResponse & { total: number } } | { ok: false; error: string };
+export interface JiraSearchProgress { projectId: string; fetched: number; total: number; }
 
 export interface JiraSearchArgs {
   projectId: string;
@@ -26,6 +27,7 @@ declare global {
       setToken: (projectId: string, pat: string) => Promise<JiraTokenResult>;
       clearToken: (projectId: string) => Promise<JiraTokenResult>;
       search: (args: JiraSearchArgs) => Promise<JiraSearchResult>;
+      onSearchProgress: (cb: (progress: JiraSearchProgress) => void) => () => void;
     };
   }
 }

@@ -22,4 +22,11 @@ contextBridge.exposeInMainWorld('jira', {
   setToken: (projectId, pat) => ipcRenderer.invoke('jira:set-token', projectId, pat),
   clearToken: (projectId) => ipcRenderer.invoke('jira:clear-token', projectId),
   search: (args) => ipcRenderer.invoke('jira:search', args),
+  // Live pagination progress for search (main emits one per fetched page). Returns an unsubscribe;
+  // callers subscribe just before search and unsubscribe when it resolves.
+  onSearchProgress: (cb) => {
+    const listener = (_e, payload) => cb(payload);
+    ipcRenderer.on('jira:search-progress', listener);
+    return () => ipcRenderer.removeListener('jira:search-progress', listener);
+  },
 });
