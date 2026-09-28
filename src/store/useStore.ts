@@ -207,6 +207,11 @@ function nextToastId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
+/** Max already-linked issue keys inlined into a `key IN (...)` JQL clause. Chosen so the encoded
+ * GET URL stays well under the ~8 KB request-line limit typical of Jira's servlet container (a
+ * long list otherwise triggers a silent container-level 400). ~150 keys ≈ 2 KB of query. */
+const MAX_INLINE_JQL_KEYS = 150;
+
 /** Jira's REST API (both Cloud and Server/DC) accepts a custom field id in JQL only via its numeric
  * `cf[N]` form, not the raw `customfield_N` string used everywhere else in this app's Jira config. */
 function jqlFieldRef(fieldId: string): string {
@@ -220,13 +225,17 @@ function jqlFieldRef(fieldId: string): string {
  * instance accepts, e.g. `"Cinematics List" is not EMPTY`); otherwise it's built from the
  * "Cinematics List" anchor field every bindable issue carries (docs/INTEGRATIONS.md §3.2) plus any
  * scopeField/value, in `cf[id]` form. `linkedKeys` (issues already linked in the plan) are OR'd
- * back in unconditionally, since an explicit prior key link is always honored and is never
- * scope-filtered. Falls back to the whole project only when nothing is configured or linked.
+ * back in when the list is small, since an explicit prior key link should be honored even if the
+ * issue no longer matches the scope. Falls back to the whole project only when nothing is
+ * configured or linked.
  *
  * The `cf[id]` bracket form is a last resort: some corporate reverse-proxies reject the
  * percent-encoded brackets with a container-level 400 before the request reaches Jira, so prefer
- * naming the field in `scopeJql`. */
-function buildJiraJql(config: JiraProjectConfig, linkedKeys: string[] = []): string {
+ * naming the field in `scopeJql`. Likewise the inline `key IN (...)` safety-net is capped: a long
+ * list balloons the GET URL past the servlet container's request-line limit (another silent 400),
+ * so once a scope clause is present we drop the keys past MAX_INLINE_JQL_KEYS — those issues are
+ * almost always already covered by the scope clause anyway. */
+export function buildJiraJql(config: JiraProjectConfig, linkedKeys: string[] = []): string {
   const rawScope = config.scopeJql?.trim();
   const scoped: string[] = [];
   if (rawScope) {
@@ -238,7 +247,10 @@ function buildJiraJql(config: JiraProjectConfig, linkedKeys: string[] = []): str
   const scopedClause = scoped.join(' AND ');
 
   const uniqueKeys = [...new Set(linkedKeys)].filter((k) => /^[A-Z][A-Z0-9]*-\d+$/.test(k));
-  const keyClause = uniqueKeys.length ? `key IN (${uniqueKeys.join(', ')})` : '';
+  // Only inline the key list when it stays short, or when it's the sole scope (no scope clause to
+  // fall back on). With a scope clause present, an over-long list is dropped to keep the URL safe.
+  const includeKeys = uniqueKeys.length > 0 && (!scopedClause || uniqueKeys.length <= MAX_INLINE_JQL_KEYS);
+  const keyClause = includeKeys ? `key IN (${uniqueKeys.join(', ')})` : '';
 
   let narrow = '';
   if (scopedClause && keyClause) narrow = `(${scopedClause} OR ${keyClause})`;

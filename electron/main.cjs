@@ -254,6 +254,12 @@ async function describeJiraError(res) {
   try {
     const text = (await res.text()).trim();
     if (!text) return '';
+    // HTML error page (Tomcat/proxy) rather than Jira's JSON — the request was rejected before it
+    // reached Jira. Dumping the CSS-laden body is useless; surface the <title> + a pointed hint.
+    if (/^<(?:!doctype|html)/i.test(text)) {
+      const title = /<title>([^<]*)<\/title>/i.exec(text)?.[1]?.trim();
+      return `: ${title || 'server returned an HTML error page'} — the request was rejected by a proxy or servlet container before reaching Jira (the query may be too long, or contain characters the proxy blocks such as cf[...] brackets).`;
+    }
     let detail = text;
     try {
       const body = JSON.parse(text);

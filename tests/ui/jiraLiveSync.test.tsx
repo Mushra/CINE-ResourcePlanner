@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { useStore } from '../../src/store/useStore';
+import { useStore, buildJiraJql } from '../../src/store/useStore';
 import { seedStore } from './harness';
 import { parseJiraSearchResponse, defaultJiraFieldMapping, type JiraRawSearchResponse } from '../../src/import/jiraSync';
 import type { JiraProjectConfig } from '../../src/domain/types';
@@ -29,6 +29,32 @@ function configFor(projectId: string): JiraProjectConfig {
     scopeJql: null,
   };
 }
+
+describe('buildJiraJql', () => {
+  const base = configFor('p1');
+
+  it('ORs a small linked-key list into the scope clause', () => {
+    const jql = buildJiraJql({ ...base, scopeJql: '"Cinematics List" is not EMPTY' }, ['OVR-1', 'OVR-2']);
+    expect(jql).toBe('project = "OVR" AND ("Cinematics List" is not EMPTY OR key IN (OVR-1, OVR-2))');
+  });
+
+  it('drops an over-long linked-key list when a scope clause is present (avoids the URL-length 400)', () => {
+    const many = Array.from({ length: 400 }, (_, i) => `OVR-${i + 1}`);
+    const jql = buildJiraJql({ ...base, scopeJql: '"Cinematics List" is not EMPTY' }, many);
+    expect(jql).toBe('project = "OVR" AND "Cinematics List" is not EMPTY');
+    expect(jql).not.toContain('key IN');
+  });
+
+  it('still inlines keys when there is no scope clause to fall back on', () => {
+    const jql = buildJiraJql({ ...base, scopeJql: null, cinematicsListField: null, scopeField: null }, ['OVR-9']);
+    expect(jql).toBe('project = "OVR" AND key IN (OVR-9)');
+  });
+
+  it('ignores malformed keys', () => {
+    const jql = buildJiraJql({ ...base, scopeJql: null, cinematicsListField: null, scopeField: null }, ['OVR-1', 'not a key', '']);
+    expect(jql).toBe('project = "OVR" AND key IN (OVR-1)');
+  });
+});
 
 const SAMPLE_RAW: JiraRawSearchResponse = {
   issues: [
