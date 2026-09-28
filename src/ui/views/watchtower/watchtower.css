@@ -45,6 +45,7 @@
 .health-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; flex-shrink: 0; }
 .health-dot-ahead { background: var(--wt-ahead); }
 .health-dot-on-track { background: var(--wt-on-track); }
+.health-dot-on-hold { background: var(--wt-on-hold); }
 .health-dot-at-risk { background: var(--wt-at-risk); }
 .health-dot-late { background: var(--wt-late); }
 .health-dot-blocked { background: var(--wt-blocked); }
@@ -52,6 +53,7 @@
 .health-text { font-weight: 700; }
 .health-text-ahead { color: var(--wt-ahead); }
 .health-text-on-track { color: var(--wt-on-track); }
+.health-text-on-hold { color: var(--wt-on-hold); }
 .health-text-at-risk { color: var(--wt-at-risk); }
 .health-text-late { color: var(--wt-late); }
 .health-text-blocked { color: var(--wt-blocked); }

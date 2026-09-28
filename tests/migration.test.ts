@@ -218,7 +218,7 @@ describe('v6 -> v7 migration', () => {
   it('a fresh database has all 8 new tables and the current schema_version', async () => {
     const db = await PlannerDatabase.createNew();
     expect(db.getSetting('schema_version')).toBe(SCHEMA_VERSION);
-    expect(SCHEMA_VERSION).toBe('11');
+    expect(SCHEMA_VERSION).toBe('12');
 
     const tables = new Set(db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table'").map((r) => r.name));
     for (const t of V7_TABLES) expect(tables.has(t)).toBe(true);
@@ -234,6 +234,14 @@ describe('v6 -> v7 migration', () => {
 
     const jiraColumns = db.query<{ name: string; pk: number }>('PRAGMA table_info(jira_sync_state)');
     expect(jiraColumns.find((c) => c.name === 'loq_id')?.pk).toBe(1);
+
+    // v12: the epic-level Cinematic Jira snapshot table (cinematicId PK).
+    expect(tables.has('cinematic_jira_sync')).toBe(true);
+    const cinSyncColumns = db.query<{ name: string; pk: number }>('PRAGMA table_info(cinematic_jira_sync)');
+    expect(cinSyncColumns.find((c) => c.name === 'cinematic_id')?.pk).toBe(1);
+    expect(cinSyncColumns.map((c) => c.name)).toEqual(
+      expect.arrayContaining(['cinematic_id', 'jira_status', 'jira_updated_at', 'last_synced_at', 'raw_snapshot']),
+    );
 
     const indexes = new Set(db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='index'").map((r) => r.name));
     expect(indexes.has('idx_loqs_jira_key')).toBe(true);
@@ -587,5 +595,22 @@ describe('v10 -> v11 migration', () => {
     const engine = new PlanningEngine(data, BASE_SCENARIO_ID);
     expect(engine.getRequiredCapacity(poolId, '2026-04')).toBe(2.5);
     expect(engine.getRequiredCapacity(poolId, '2026-05')).toBe(4);
+  });
+});
+
+describe('v11 -> v12 migration', () => {
+  it('adds the empty cinematic_jira_sync table to a legacy (pre-v12) database without losing data', async () => {
+    // A v10-shaped legacy DB predates cinematic_jira_sync entirely; opening it should heal the table in.
+    const { bytes, poolId } = await buildV10Bytes();
+    const db = await PlannerDatabase.openFromBytes(bytes);
+
+    expect(db.getSetting('schema_version')).toBe(SCHEMA_VERSION);
+    const tables = new Set(db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table'").map((r) => r.name));
+    expect(tables.has('cinematic_jira_sync')).toBe(true);
+    expect(db.query('SELECT COUNT(*) as c FROM cinematic_jira_sync')[0]).toMatchObject({ c: 0 });
+
+    // Existing data survives the version bump.
+    const engine = new PlanningEngine(loadPlanningData(db), BASE_SCENARIO_ID);
+    expect(engine.getRequiredCapacity(poolId, '2026-04')).toBe(2.5);
   });
 });

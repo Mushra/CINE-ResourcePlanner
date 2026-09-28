@@ -1,9 +1,11 @@
-import type { JiraProjectConfig, Period, Severity } from '../domain/types';
+import type { JiraProjectConfig, LoqStatus, Period, Severity } from '../domain/types';
 import { PlanningEngine, UNASSIGNED_DISCIPLINE_ID, round2 } from './planning';
 import { getForecastWindowPeriods } from './forecast';
 import { impactedLoqIds } from './loqForecast';
 import { comparePeriod, formatPeriodLabel, periodFromISODate, periodRange } from '../domain/periods';
 import { deriveProjectStatus } from '../domain/projectStatus';
+import { buildEffectiveStatusMap, cinematicStatus, statusResolverFrom, isTerminalStatus, type StatusResolver } from './watchtower';
+import { CANONICAL_STATUS_LABEL, resolveJiraStatus } from '../domain/jiraStatusMap';
 
 export type CheckCategory =
   | 'over_capacity'
@@ -37,29 +39,36 @@ export interface SanityCheck {
   personName?: string;
   period?: Period;
   loqId?: string;
+  /** Set by checks that key on a Cinematic rather than a single LOQ (e.g. the Cinematic↔epic
+   * divergence check) so the Attention panel can still resolve/open the right Cinematic. */
+  cinematicId?: string;
   impacted?: { loqId: string; label: string; deltaDays: number }[];
   message: string;
   impact: string;
+}
+
+/** Builds the `jiraToleranceDaysByProjectId` map from the store's saved JiraProjectConfig list
+ * (Settings screen, Phase 5b) — a project with no saved config is simply absent from the map, so it
+ * falls back to DEFAULT_JIRA_TOLERANCE_DAYS as before. */
+export function buildJiraToleranceMap(configs: JiraProjectConfig[]): Map<string, number> {
+  return new Map(configs.map((c) => [c.projectId, c.dateToleranceDays]));
 }
 
 /**
  * Runs every V1 sanity check over the current scenario. Deterministic — no heuristics beyond
  * simple threshold comparisons, per the "no predictive AI" requirement.
  *
- * `jiraToleranceDaysByProjectId` is an optional per-Project override for the jira_inconsistency
- * date tolerance (from that Project's JiraProjectConfig, see docs/INTEGRATIONS.md §3) — omitted
- * callers get DEFAULT_JIRA_TOLERANCE_DAYS, which keeps every pre-Jira call site unchanged.
+ * `jiraConfigs` are the store's saved per-Project JiraProjectConfigs — used to derive both the
+ * per-project date tolerance and the effective (Jira-mirrored) LOQ status that gates the at-risk /
+ * inconsistency checks (see docs/INTEGRATIONS.md §3). Omitted callers (exports, non-Jira views) get
+ * defaults, keeping every pre-Jira call site unchanged.
  */
-/** Builds the `jiraToleranceDaysByProjectId` map getSanityChecks accepts from the store's saved
- * JiraProjectConfig list (Settings screen, Phase 5b) — a project with no saved config is simply
- * absent from the map, so it falls back to DEFAULT_JIRA_TOLERANCE_DAYS as before. */
-export function buildJiraToleranceMap(configs: JiraProjectConfig[]): Map<string, number> {
-  return new Map(configs.map((c) => [c.projectId, c.dateToleranceDays]));
-}
-
-export function getSanityChecks(engine: PlanningEngine, jiraToleranceDaysByProjectId?: Map<string, number>): SanityCheck[] {
+export function getSanityChecks(engine: PlanningEngine, jiraConfigs: JiraProjectConfig[] = []): SanityCheck[] {
   const checks: SanityCheck[] = [];
   const periods = engine.allKnownPeriods();
+  const toleranceDaysByProjectId = buildJiraToleranceMap(jiraConfigs);
+  const statusResolver = statusResolverFrom(buildEffectiveStatusMap(engine, jiraConfigs));
+  const statusMappingByProjectId = new Map(jiraConfigs.map((c) => [c.projectId, c.statusMapping ?? null]));
 
   checks.push(...checkOverCapacity(engine, periods));
   checks.push(...checkProjectStaffing(engine));
@@ -69,10 +78,11 @@ export function getSanityChecks(engine: PlanningEngine, jiraToleranceDaysByProje
   checks.push(...checkUnstaffedPeople(engine));
   checks.push(...checkOverAllocatedPeople(engine));
   checks.push(...checkCinematicCapacityConflict(engine));
-  checks.push(...checkLoqAtRisk(engine));
+  checks.push(...checkLoqAtRisk(engine, statusResolver));
   checks.push(...checkLoqRootCause(engine));
   checks.push(...checkLoqEarlyOpportunity(engine));
-  checks.push(...checkJiraInconsistency(engine, jiraToleranceDaysByProjectId));
+  checks.push(...checkJiraInconsistency(engine, toleranceDaysByProjectId, statusMappingByProjectId));
+  checks.push(...checkCinematicEpicDivergence(engine, statusMappingByProjectId, statusResolver));
 
   for (const check of checks) {
     if (check.disciplineId) continue;
@@ -285,13 +295,15 @@ function loqLabel(engine: PlanningEngine, loqId: string): string {
 }
 
 /** loq_at_risk (PLANNING_ENGINE.md §8): a LOQ whose forecast has slipped past its committed date and
- * is not yet DONE. Severity escalates to critical past a 5-calendar-day slip — a simple deterministic
- * threshold, not a heuristic. */
-function checkLoqAtRisk(engine: PlanningEngine): SanityCheck[] {
+ * is not yet finished. "Finished" is the *effective* (Jira-mirrored) status being terminal (DONE or
+ * CUT) — a Cut LOQ is never "at risk" — and a voluntary pause also silences the alarm. Severity
+ * escalates to critical past a 5-calendar-day slip — a simple deterministic threshold, not a
+ * heuristic. */
+function checkLoqAtRisk(engine: PlanningEngine, statusOf: StatusResolver): SanityCheck[] {
   const checks: SanityCheck[] = [];
   for (const [loqId, forecast] of engine.getLoqForecasts()) {
     const loq = engine.loq(loqId);
-    if (!loq || loq.status === 'DONE' || loq.paused || forecast.deltaDays <= 0) continue;
+    if (!loq || isTerminalStatus(statusOf(loq)) || loq.paused || forecast.deltaDays <= 0) continue;
     const project = engine.loqProject(loqId);
     const severity: Severity = forecast.deltaDays >= 5 ? 'critical' : 'warning';
     checks.push({
@@ -367,42 +379,6 @@ function checkLoqEarlyOpportunity(engine: PlanningEngine): SanityCheck[] {
 
 export const DEFAULT_JIRA_TOLERANCE_DAYS = 1;
 
-/** Statuses observed in the instance-wide vocabulary (689 statuses, `/rest/api/2/status`) that read
- * as a Cinematic/LOQ being paused rather than actively worked — see docs/INTEGRATIONS.md §3.3. No
- * single confirmed real-world "paused Cinematic" example was inspected during the discovery spike,
- * so this set is built generically from the vocabulary rather than from a pinned real case; it's
- * intentionally conservative (only genuinely pause-shaped strings), never guessed from surrounding
- * context. */
-const PAUSED_STATUSES = new Set(['on hold', 'blocked', 'paused', 'waiting for', 'qa paused', 'on hold / blocked']);
-
-/** Conservative, explicit-only mapping onto the planning status model — an unrecognized raw Jira
- * status is deliberately left 'unknown' rather than guessed, per docs/INTEGRATIONS.md §3.1 ("any
- * status this mapping can't confidently place should surface as a jira_inconsistency warning rather
- * than being silently forced into one of the buckets"). Confirmed against real OVR Task statuses
- * (Resolved/Open/Ready for Review/Waiting For/Closed) during the discovery spike; 'PAUSED' is
- * signal-only (see checkJiraInconsistency) — it never overwrites the plan's own `paused` flag. */
-function mapJiraStatus(raw: string): 'TODO' | 'IN_PROGRESS' | 'DONE' | 'PAUSED' | 'unknown' {
-  const normalized = raw.trim().toLowerCase();
-  if (PAUSED_STATUSES.has(normalized)) return 'PAUSED';
-  switch (normalized) {
-    case 'to do':
-    case 'todo':
-    case 'open':
-    case 'backlog':
-      return 'TODO';
-    case 'in progress':
-    case 'in review':
-    case 'ready for review':
-      return 'IN_PROGRESS';
-    case 'done':
-    case 'closed':
-    case 'resolved':
-      return 'DONE';
-    default:
-      return 'unknown';
-  }
-}
-
 /** jira_sync_state.raw_snapshot is a JSON-serialized NormalizedJiraIssue (see applyJiraSync.ts) —
  * parsed defensively since it's just a blob, not a typed column. */
 function parseJiraSnapshotDates(rawSnapshot: string): { startDate: string | null; dueDate: string | null } {
@@ -423,11 +399,22 @@ function daysBetween(isoA: string, isoB: string): number {
 
 /**
  * jira_inconsistency (docs/INTEGRATIONS.md §3.3, PLANNING_ENGINE.md §8): compares each synced LOQ's
- * own committed dates and planning status against its latest Jira pull. Signal only — never writes
- * back, never adopts Jira's dates, per the app's "never silently adapt to reality" principle
- * (applyJiraSync.ts enforces the write side of this; this check is purely the comparison side).
+ * own committed dates against its latest Jira pull, and flags a bound Jira status the project's
+ * mapping doesn't cover ("À mapper"). Signal only — never writes back, never adopts Jira's dates,
+ * per the app's "never silently adapt to reality" principle (applyJiraSync.ts enforces the write
+ * side; this check is purely the comparison side).
+ *
+ * Status *mismatch* warnings are gone by design: a bound LOQ's effective status now *is* the mapped
+ * Jira status (derived on read, see buildEffectiveStatusMap), so there is nothing to reconcile —
+ * only an unmapped raw status needs surfacing. Pause is a manual, voluntary flag Jira never drives
+ * (a Jira "on hold/blocked" maps to the BLOCKED *status*, not to `paused`), so the old paused-signal
+ * comparison is gone too.
  */
-function checkJiraInconsistency(engine: PlanningEngine, toleranceDaysByProjectId?: Map<string, number>): SanityCheck[] {
+function checkJiraInconsistency(
+  engine: PlanningEngine,
+  toleranceDaysByProjectId?: Map<string, number>,
+  statusMappingByProjectId?: Map<string, Record<string, LoqStatus> | null>,
+): SanityCheck[] {
   const checks: SanityCheck[] = [];
 
   for (const { loq, state } of engine.loqsWithJiraSync()) {
@@ -442,66 +429,15 @@ function checkJiraInconsistency(engine: PlanningEngine, toleranceDaysByProjectId
     };
 
     if (state.jiraStatus) {
-      const bucket = mapJiraStatus(state.jiraStatus);
-      if (bucket === 'unknown') {
+      const mapping = project ? statusMappingByProjectId?.get(project.id) ?? null : null;
+      if (resolveJiraStatus(state.jiraStatus, mapping) === null) {
         checks.push({
           id: `jira-inconsistency-status:${loq.id}`,
           severity: 'warning',
           category: 'jira_inconsistency',
           ...base,
-          message: `${loqLabel(engine, loq.id)} has an unrecognized Jira status ("${state.jiraStatus}")`,
-          impact: 'This status is not mapped to TODO/IN PROGRESS/DONE — confirm the mapping before trusting this LOQ\'s Jira signal',
-        });
-      } else if (bucket === 'DONE' && loq.status === 'TODO') {
-        checks.push({
-          id: `jira-inconsistency-status:${loq.id}`,
-          severity: 'critical',
-          category: 'jira_inconsistency',
-          ...base,
-          message: `${loqLabel(engine, loq.id)} is planned as TODO but Jira reports it DONE`,
-          impact: 'Work appears to have happened without planning knowing — confirm before treating this as the actual finish',
-        });
-      } else if (bucket === 'DONE' && loq.status === 'IN_PROGRESS') {
-        const { dueDate } = parseJiraSnapshotDates(state.rawSnapshot);
-        const early = dueDate && loq.committedFinish ? dueDate < loq.committedFinish : false;
-        checks.push({
-          id: `jira-inconsistency-status:${loq.id}`,
-          severity: 'info',
-          category: 'jira_inconsistency',
-          ...base,
-          message: early
-            ? `${loqLabel(engine, loq.id)} could finish early — Jira already reports it DONE`
-            : `${loqLabel(engine, loq.id)} is planned as IN PROGRESS but Jira reports it DONE`,
-          impact: `Jira due date ${dueDate ?? '—'} vs. committed finish ${loq.committedFinish ?? '—'}`,
-        });
-      } else if (bucket === 'TODO' && loq.status === 'IN_PROGRESS') {
-        checks.push({
-          id: `jira-inconsistency-status:${loq.id}`,
-          severity: 'warning',
-          category: 'jira_inconsistency',
-          ...base,
-          message: `${loqLabel(engine, loq.id)} is planned as IN PROGRESS but Jira reports it TODO`,
-          impact: 'Could be a planning lag, or a Jira regression — worth confirming',
-        });
-      } else if (bucket === 'PAUSED' && !loq.paused) {
-        // Signal-only, like every other jira_inconsistency comparison: Jira's status is never
-        // adopted into loq.paused automatically — see Cinematic.paused/Loq.paused in types.ts.
-        checks.push({
-          id: `jira-inconsistency-pause:${loq.id}`,
-          severity: 'info',
-          category: 'jira_inconsistency',
-          ...base,
-          message: `${loqLabel(engine, loq.id)} looks paused in Jira ("${state.jiraStatus}") but isn't marked paused in the plan`,
-          impact: 'Jira never auto-pauses the plan — confirm and toggle "Paused" on this LOQ if the work has genuinely stopped',
-        });
-      } else if ((bucket === 'TODO' || bucket === 'IN_PROGRESS') && loq.paused) {
-        checks.push({
-          id: `jira-inconsistency-pause:${loq.id}`,
-          severity: 'info',
-          category: 'jira_inconsistency',
-          ...base,
-          message: `${loqLabel(engine, loq.id)} is marked paused in the plan but Jira reports active work ("${state.jiraStatus}")`,
-          impact: 'Confirm whether the pause still applies, or update the LOQ if work has resumed',
+          message: `${loqLabel(engine, loq.id)} has an unmapped Jira status ("${state.jiraStatus}")`,
+          impact: 'This Jira status isn\'t in the project\'s status mapping — it shows as "À mapper"; add it in Settings → Status mapping so this LOQ mirrors Jira',
         });
       }
     }
@@ -535,6 +471,87 @@ function checkJiraInconsistency(engine: PlanningEngine, toleranceDaysByProjectId
           impact: `Jira start date ${startDate} vs. committed start ${loq.committedStart} — ${Math.abs(delta)}d apart`,
         });
       }
+    }
+  }
+
+  return checks;
+}
+
+/**
+ * jira_inconsistency, Cinematic ↔ epic level (Phase 2): a Cinematic bound to a Jira epic carries the
+ * epic's own status snapshot (cinematic_jira_sync, written by applyJiraSync). This flags when that
+ * epic status diverges from the Cinematic's LOQ-status rollup — the epic and its LOQs telling two
+ * different stories. Signal only: like every jira_inconsistency check it never writes back.
+ *
+ * Graded:
+ *  - epic terminal (Done/Cut) but the LOQs aren't all finished  → critical (epic claims done, work isn't)
+ *  - LOQs all finished but the epic is still open               → warning  (epic left dangling)
+ *  - epic Blocked but no LOQ is blocked (or vice-versa)         → warning  (block state disagrees)
+ *  - epic status not covered by the mapping                     → warning  ("À mapper")
+ */
+function checkCinematicEpicDivergence(
+  engine: PlanningEngine,
+  statusMappingByProjectId?: Map<string, Record<string, LoqStatus> | null>,
+  statusResolver: StatusResolver = (loq) => loq.status,
+): SanityCheck[] {
+  const checks: SanityCheck[] = [];
+
+  for (const { cinematic, state, loqs } of engine.cinematicsWithJiraSync()) {
+    if (!cinematic.jiraKey || !state.jiraStatus) continue;
+    const base = {
+      projectId: cinematic.projectId,
+      projectName: engine.project(cinematic.projectId)?.name,
+      cinematicId: cinematic.id,
+    };
+    const mapping = statusMappingByProjectId?.get(cinematic.projectId) ?? null;
+    const epicStatus = resolveJiraStatus(state.jiraStatus, mapping);
+
+    if (epicStatus === null) {
+      checks.push({
+        id: `cinematic-epic-divergence-unmapped:${cinematic.id}`,
+        severity: 'warning',
+        category: 'jira_inconsistency',
+        ...base,
+        message: `"${cinematic.name}"'s linked epic has an unmapped Jira status ("${state.jiraStatus}")`,
+        impact: 'This epic status isn\'t in the project\'s status mapping — add it in Settings → Status mapping so the Cinematic can be compared to its epic',
+      });
+      continue;
+    }
+
+    const disciplineIds = [...new Set(loqs.map((l) => l.disciplineId))];
+    const rollup = cinematicStatus(cinematic.id, disciplineIds, loqs, statusResolver);
+    if (!rollup) continue; // no active LOQs to compare against
+
+    const epicTerminal = isTerminalStatus(epicStatus);
+    const rollupTerminal = rollup === 'DONE' || rollup === 'CUT';
+
+    if (epicTerminal && !rollupTerminal) {
+      checks.push({
+        id: `cinematic-epic-divergence:${cinematic.id}`,
+        severity: 'critical',
+        category: 'jira_inconsistency',
+        ...base,
+        message: `"${cinematic.name}"'s epic is ${CANONICAL_STATUS_LABEL[epicStatus]} in Jira, but its LOQs aren't all complete`,
+        impact: `Linked epic reads ${CANONICAL_STATUS_LABEL[epicStatus]} while the Cinematic rolls up to ${rollup} — the epic and its shots disagree`,
+      });
+    } else if (!epicTerminal && rollupTerminal) {
+      checks.push({
+        id: `cinematic-epic-divergence:${cinematic.id}`,
+        severity: 'warning',
+        category: 'jira_inconsistency',
+        ...base,
+        message: `"${cinematic.name}"'s LOQs are all complete, but its epic is still ${CANONICAL_STATUS_LABEL[epicStatus]} in Jira`,
+        impact: `Cinematic rolls up to ${rollup} while its linked epic reads ${CANONICAL_STATUS_LABEL[epicStatus]} — the epic may need closing`,
+      });
+    } else if (epicStatus === 'BLOCKED' && rollup !== 'BLOCKED') {
+      checks.push({
+        id: `cinematic-epic-divergence:${cinematic.id}`,
+        severity: 'warning',
+        category: 'jira_inconsistency',
+        ...base,
+        message: `"${cinematic.name}"'s epic is Blocked in Jira, but none of its LOQs are`,
+        impact: `Linked epic reads Blocked while the Cinematic rolls up to ${rollup} — the block isn't reflected on any shot`,
+      });
     }
   }
 

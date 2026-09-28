@@ -68,8 +68,18 @@
   color: var(--text-secondary);
   white-space: nowrap;
 }
+.loq-status-todo { background: var(--surface-2); color: var(--text-secondary); }
 .loq-status-in_progress { background: var(--status-info-bg); color: var(--status-info); }
+.loq-status-to_review { background: var(--wt-late-bg); color: var(--wt-late); }
+.loq-status-blocked { background: var(--status-critical-bg); color: var(--status-critical); }
 .loq-status-done { background: var(--status-healthy-bg); color: var(--status-healthy); }
+/* Cut is terminal like Done, but deliberately muted + struck-through so it's never read as a
+ * delivered Done at a glance. */
+.loq-status-cut { background: var(--status-neutral-bg); color: var(--status-neutral); text-decoration: line-through; }
+/* On hold = voluntary pause; neutral, calm — not an alarm. */
+.loq-status-on-hold { background: var(--status-neutral-bg); color: var(--status-neutral); }
+/* Bound Jira status not yet mapped — surfaced explicitly, warning-toned so it prompts action. */
+.loq-status-unmapped { background: var(--status-warning-bg); color: var(--status-warning); }
 
 .health-cell { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
 .tbd-inline { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; color: var(--text-tertiary); }

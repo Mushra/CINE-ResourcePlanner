@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
-import { buildJiraToleranceMap, getSanityChecks } from '../../engine/validation';
+import { getSanityChecks } from '../../engine/validation';
 import { periodRange, periodFromISODate } from '../../domain/periods';
 import { EmptyState } from '../components/EmptyState';
 import { Button } from '../components/Button';
@@ -23,7 +23,7 @@ export function Projects() {
   const openProject = useUiStore((s) => s.openProject);
   const [showNew, setShowNew] = useState(false);
 
-  const checks = useMemo(() => getSanityChecks(engine, buildJiraToleranceMap(jiraConfigs)), [engine, jiraConfigs]);
+  const checks = useMemo(() => getSanityChecks(engine, jiraConfigs), [engine, jiraConfigs]);
   const checksByProject = useMemo(() => {
     const map = new Map<string, typeof checks>();
     for (const check of checks) {

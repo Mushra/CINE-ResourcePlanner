@@ -1,6 +1,8 @@
 import type {
   Cinematic,
+  CinematicJiraSyncState,
   Discipline,
+  JiraProjectConfig,
   JiraSyncState,
   Loq,
   LoqDependency,
@@ -18,6 +20,7 @@ import type {
   VarianceEvent,
 } from '../src/domain/types';
 import { isoFirstDayOfPeriod, isoLastDayOfPeriod } from '../src/domain/periods';
+import { DEFAULT_JIRA_STATUS_MAPPING } from '../src/domain/jiraStatusMap';
 
 export const BASE_SCENARIO: Scenario = { id: 'base', name: 'Current Plan', isBase: true };
 
@@ -141,6 +144,7 @@ export function planningData(partial: Partial<PlanningData> = {}): PlanningData 
     dependencyTemplates: partial.dependencyTemplates ?? [],
     varianceEvents: partial.varianceEvents ?? [],
     jiraSyncStates: partial.jiraSyncStates ?? [],
+    cinematicJiraSyncStates: partial.cinematicJiraSyncStates ?? [],
   };
 }
 
@@ -225,6 +229,38 @@ export function jiraSyncState(overrides: Partial<JiraSyncState> = {}): JiraSyncS
     jiraUpdatedAt: null,
     lastSyncedAt: '2026-09-01T00:00:00.000Z',
     rawSnapshot: '{}',
+    ...overrides,
+  };
+}
+
+export function cinematicJiraSyncState(overrides: Partial<CinematicJiraSyncState> = {}): CinematicJiraSyncState {
+  return {
+    cinematicId: '',
+    jiraStatus: 'In Progress',
+    jiraUpdatedAt: null,
+    lastSyncedAt: '2026-09-01T00:00:00.000Z',
+    rawSnapshot: '{}',
+    ...overrides,
+  };
+}
+
+export function jiraConfig(overrides: Partial<JiraProjectConfig> = {}): JiraProjectConfig {
+  return {
+    projectId: '',
+    baseUrl: 'https://jira.example.com',
+    jiraProjectKey: 'OVR',
+    authMode: 'cloud',
+    email: 'producer@studio.com',
+    startDateField: 'customfield_10015',
+    dueDateField: 'duedate',
+    dateToleranceDays: 3,
+    scopeJql: '',
+    cinematicsListField: 'customfield_10420',
+    loqTargetField: 'customfield_12338',
+    epicLinkField: 'customfield_10101',
+    scopeField: 'customfield_57706',
+    scopeValue: 'CIN 2',
+    statusMapping: { ...DEFAULT_JIRA_STATUS_MAPPING },
     ...overrides,
   };
 }

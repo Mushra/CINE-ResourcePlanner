@@ -126,7 +126,10 @@ CREATE TABLE IF NOT EXISTS loqs (
   type              TEXT NOT NULL,      -- e.g. "L1", "L2", "Final" — free text initially,
                                           -- validate against real Jira issue types before
                                           -- constraining to an enum (see INTEGRATIONS.md)
-  status            TEXT NOT NULL DEFAULT 'TODO',  -- 'TODO' | 'IN_PROGRESS' | 'DONE'
+  status            TEXT NOT NULL DEFAULT 'TODO',  -- canonical LoqStatus (types.ts): 'TODO' |
+                                          -- 'IN_PROGRESS' | 'TO_REVIEW' | 'BLOCKED' | 'DONE' | 'CUT'.
+                                          -- Free text (no CHECK); only the unbound value — a
+                                          -- Jira-bound row's effective status is derived on read.
   estimate_days     REAL,               -- planned effort; nullable
   committed_start   TEXT,               -- ISO date, nullable (TBD) — derived from the newest
   committed_finish  TEXT,               -- loq_commitment_events row, cached here for read speed
@@ -197,6 +200,18 @@ CREATE TABLE IF NOT EXISTS jira_sync_state (
   loq_id           TEXT PRIMARY KEY REFERENCES loqs(id) ON DELETE CASCADE,
   jira_status      TEXT,            -- raw Jira status string, unmapped
   jira_assignee    TEXT,
+  jira_updated_at  TEXT,            -- Jira's own last-updated timestamp
+  last_synced_at   TEXT NOT NULL,
+  raw_snapshot     TEXT NOT NULL DEFAULT '{}'  -- JSON blob of whatever fields the adapter cared about
+);
+
+-- Epic-level Jira snapshot for a Cinematic (parallel to jira_sync_state, keyed by cinematic): the
+-- status of the issue the Cinematic itself is bound to, captured on sync so the plan can diff the
+-- Cinematic's LOQ-rollup status against what its epic reports. Signal-only — never overwrites the
+-- plan. Added in the v11->v12 migration (database.ts).
+CREATE TABLE IF NOT EXISTS cinematic_jira_sync (
+  cinematic_id     TEXT PRIMARY KEY REFERENCES cinematics(id) ON DELETE CASCADE,
+  jira_status      TEXT,            -- raw Jira status string, unmapped
   jira_updated_at  TEXT,            -- Jira's own last-updated timestamp
   last_synced_at   TEXT NOT NULL,
   raw_snapshot     TEXT NOT NULL DEFAULT '{}'  -- JSON blob of whatever fields the adapter cared about

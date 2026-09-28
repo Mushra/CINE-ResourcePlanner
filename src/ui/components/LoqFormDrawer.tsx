@@ -2,12 +2,11 @@ import { useState } from 'react';
 import { Drawer } from './Drawer';
 import { Button } from './Button';
 import type { Discipline, Loq, LoqStatus } from '../../domain/types';
+import { CANONICAL_STATUSES, CANONICAL_STATUS_LABEL, UNMAPPED, type EffectiveStatus } from '../../domain/jiraStatusMap';
 
-const STATUS_OPTIONS: { value: LoqStatus; label: string }[] = [
-  { value: 'TODO', label: 'To do' },
-  { value: 'IN_PROGRESS', label: 'In progress' },
-  { value: 'DONE', label: 'Done' },
-];
+const STATUS_OPTIONS: { value: LoqStatus; label: string }[] = CANONICAL_STATUSES.map((value) => ({
+  value, label: CANONICAL_STATUS_LABEL[value],
+}));
 
 export interface LoqFormValue {
   disciplineId: string;
@@ -43,7 +42,7 @@ function fromLoq(disciplines: Discipline[], loq?: Loq): LoqFormValue {
 }
 
 export function LoqFormDrawer({
-  loq, disciplines, onClose, onSave, onRecommit,
+  loq, disciplines, onClose, onSave, onRecommit, effectiveStatus,
 }: {
   loq?: Loq;
   disciplines: Discipline[];
@@ -52,6 +51,10 @@ export function LoqFormDrawer({
   /** Only relevant when editing an existing LOQ — committed dates are changed via a separate,
    * justified re-commit action (PLANNING_ENGINE.md §3), never through this generic form. */
   onRecommit?: () => void;
+  /** When the LOQ is Jira-bound and synced, its effective status is mirrored from Jira and shown
+   * read-only here (the manual select is only for unbound rows). `UNMAPPED` = the Jira status isn't
+   * in the mapping yet ("À mapper"). Undefined/null = not Jira-driven, keep the editable select. */
+  effectiveStatus?: EffectiveStatus | null;
 }) {
   const [value, setValue] = useState<LoqFormValue>(() => fromLoq(disciplines, loq));
   const [initialSnapshot] = useState(() => JSON.stringify(value));
@@ -81,9 +84,25 @@ export function LoqFormDrawer({
       <div className="field-row">
         <div className="field">
           <label htmlFor="loq-status">Status</label>
-          <select id="loq-status" value={value.status} onChange={(e) => set('status', e.target.value as LoqStatus)}>
-            {STATUS_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-          </select>
+          {effectiveStatus != null ? (
+            <div className="loq-status-piloted">
+              {effectiveStatus === UNMAPPED ? (
+                <>
+                  <span className="loq-status loq-status-unmapped">À mapper</span>
+                  <p className="field-hint">This Jira status isn’t mapped yet — add it in Settings → Status mapping.</p>
+                </>
+              ) : (
+                <>
+                  <span className={`loq-status loq-status-${effectiveStatus.toLowerCase()}`}>{CANONICAL_STATUS_LABEL[effectiveStatus]}</span>
+                  <p className="field-hint">Piloté par Jira — mirrored from the bound issue’s status.</p>
+                </>
+              )}
+            </div>
+          ) : (
+            <select id="loq-status" value={value.status} onChange={(e) => set('status', e.target.value as LoqStatus)}>
+              {STATUS_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          )}
         </div>
         <div className="field">
           <label htmlFor="loq-estimate">Estimate (days)</label>

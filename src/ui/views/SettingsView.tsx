@@ -3,6 +3,8 @@ import { useStore } from '../../store/useStore';
 import { Button } from '../components/Button';
 import { Collapsible } from '../components/Collapsible';
 import type { JiraProjectConfig } from '../../domain/types';
+import { DEFAULT_JIRA_STATUS_MAPPING } from '../../domain/jiraStatusMap';
+import { JiraStatusMappingEditor } from '../components/JiraStatusMappingEditor';
 
 const DEFAULT_CINEMATICS_LIST_FIELD = 'customfield_10420';
 const DEFAULT_LOQ_TARGET_FIELD = 'customfield_12338';
@@ -28,6 +30,7 @@ function emptyConfig(projectId: string): JiraProjectConfig {
     scopeField: null,
     scopeValue: null,
     scopeJql: DEFAULT_SCOPE_JQL,
+    statusMapping: { ...DEFAULT_JIRA_STATUS_MAPPING },
   };
 }
 
@@ -238,6 +241,17 @@ export function SettingsView() {
               <label htmlFor="jira-epic-link-field">Epic Link field</label>
               <input id="jira-epic-link-field" value={value.epicLinkField ?? ''} onChange={(e) => set('epicLinkField', e.target.value || null)} placeholder="customfield_XXXXX" />
             </div>
+          </Collapsible>
+
+          <Collapsible scopeKey="settings.jira.statusMapping" summary="Status mapping — Jira → planner" defaultOpen={false} className="settings-advanced">
+            <p className="field-hint">
+              Maps each raw Jira status onto the planner's own vocabulary so a bound LOQ mirrors Jira in one language.
+              A Jira status not listed here shows as <strong>À mapper</strong> until you add it. Matching is case-insensitive.
+            </p>
+            <JiraStatusMappingEditor
+              value={value.statusMapping ?? {}}
+              onChange={(next) => set('statusMapping', next)}
+            />
           </Collapsible>
 
           {testResult && (

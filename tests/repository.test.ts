@@ -32,6 +32,7 @@ import {
   upsertJiraSyncState,
 } from '../src/db/repository';
 import type { JiraProjectConfig } from '../src/domain/types';
+import { DEFAULT_JIRA_STATUS_MAPPING } from '../src/domain/jiraStatusMap';
 
 async function seedDisciplineAndProject(db: PlannerDatabase) {
   const discipline = createDiscipline(db, { name: 'Animation', color: '#4f7cff' });
@@ -220,6 +221,7 @@ describe('Jira project config (Phase 5b — non-secret settings only, no token)'
       epicLinkField: 'customfield_10101',
       scopeField: 'customfield_57706',
       scopeValue: 'CIN 2',
+      statusMapping: { ...DEFAULT_JIRA_STATUS_MAPPING },
     };
   }
 

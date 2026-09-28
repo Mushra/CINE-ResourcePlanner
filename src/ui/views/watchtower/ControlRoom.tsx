@@ -3,8 +3,9 @@ import { useStore } from '../../../store/useStore';
 import { useUiStore } from '../../../store/useUiStore';
 import { isoDiffDays } from '../../timeline/timelineMath';
 import {
-  HEALTH_LABEL, HEALTH_ORDER, cinematicHealth, deriveLoqHealth, healthCounts, loqLevelDistribution,
-  projectAttention, representativeLoq, type AttentionItem, type WatchtowerHealth,
+  HEALTH_LABEL, HEALTH_ORDER, buildEffectiveStatusMap, cinematicHealth, deriveLoqHealth, healthCounts,
+  loqLevelDistribution, loqStatusLabel, projectAttention, representativeLoq, statusResolverFrom,
+  type AttentionItem, type StatusResolver, type WatchtowerHealth,
 } from '../../../engine/watchtower';
 import { Collapsible } from '../../components/Collapsible';
 import { EmptyState } from '../../components/EmptyState';
@@ -24,6 +25,7 @@ const ATTENTION_LIMIT = 5;
  */
 export function ControlRoom({ project, checks }: { project: Project; checks: SanityCheck[] }) {
   const engine = useStore((s) => s.engine);
+  const jiraConfigs = useStore((s) => s.jiraConfigs);
   const disciplines = useStore((s) => s.data.disciplines);
   const allCinematics = useStore((s) => s.data.cinematics);
   const allLoqs = useStore((s) => s.data.loqs);
@@ -37,14 +39,15 @@ export function ControlRoom({ project, checks }: { project: Project; checks: San
   const disciplineIds = disciplines.filter((d) => loqs.some((l) => l.disciplineId === d.id)).map((d) => d.id);
   const disciplineName = (id: string) => disciplines.find((d) => d.id === id)?.name ?? id;
   const forecasts = engine.getLoqForecasts();
+  const statusOf = statusResolverFrom(buildEffectiveStatusMap(engine, jiraConfigs));
 
-  const counts = healthCounts(cinematics, disciplineIds, loqs, forecasts);
+  const counts = healthCounts(cinematics, disciplineIds, loqs, forecasts, statusOf);
 
   function itemHealth(item: AttentionItem): WatchtowerHealth | null {
     const disciplineId = item.check.disciplineId;
     if (!item.cinematicId || !disciplineId) return null;
-    const loq = representativeLoq(loqs, item.cinematicId, disciplineId);
-    return loq ? deriveLoqHealth(loq, forecasts.get(loq.id)) : null;
+    const loq = representativeLoq(loqs, item.cinematicId, disciplineId, statusOf);
+    return loq ? deriveLoqHealth(loq, forecasts.get(loq.id), statusOf(loq)) : null;
   }
 
   // Attention Required is planning/Jira issues only — FTE/staffing/capacity issues (source
@@ -67,7 +70,7 @@ export function ControlRoom({ project, checks }: { project: Project; checks: San
   }
 
   const outlookCinematics = healthFilter
-    ? cinematics.filter((c) => cinematicHealth(c.id, disciplineIds, loqs, forecasts) === healthFilter)
+    ? cinematics.filter((c) => cinematicHealth(c.id, disciplineIds, loqs, forecasts, statusOf) === healthFilter)
     : cinematics;
 
   const distribution = loqLevelDistribution(cinematics, disciplineIds, loqs, distDiscipline === 'all' ? null : distDiscipline);
@@ -154,6 +157,7 @@ export function ControlRoom({ project, checks }: { project: Project; checks: San
           disciplineName={disciplineName}
           loqs={loqs}
           forecasts={forecasts}
+          statusOf={statusOf}
           healthFilter={healthFilter}
           onOpenCinematic={openCinematic}
         />
@@ -190,13 +194,14 @@ export function ControlRoom({ project, checks }: { project: Project; checks: San
 }
 
 function LoqOutlook({
-  cinematics, disciplineIds, disciplineName, loqs, forecasts, healthFilter, onOpenCinematic,
+  cinematics, disciplineIds, disciplineName, loqs, forecasts, statusOf, healthFilter, onOpenCinematic,
 }: {
   cinematics: Cinematic[];
   disciplineIds: string[];
   disciplineName: (id: string) => string;
   loqs: Loq[];
   forecasts: ReadonlyMap<string, LoqForecast>;
+  statusOf: StatusResolver;
   healthFilter: WatchtowerHealth | null;
   onOpenCinematic: (id: string) => void;
 }) {
@@ -204,12 +209,12 @@ function LoqOutlook({
     cinematic,
     cells: disciplineIds
       .map((disciplineId) => {
-        const loq = representativeLoq(loqs, cinematic.id, disciplineId);
+        const loq = representativeLoq(loqs, cinematic.id, disciplineId, statusOf);
         if (!loq) return null;
         const forecast = forecasts.get(loq.id);
         const date = forecast?.forecastFinish ?? loq.committedFinish ?? loq.actualFinish ?? null;
         if (!date) return null;
-        return { disciplineId, loq, date, health: deriveLoqHealth(loq, forecast) };
+        return { disciplineId, loq, date, health: deriveLoqHealth(loq, forecast, statusOf(loq)) };
       })
       .filter((c): c is { disciplineId: string; loq: Loq; date: string; health: WatchtowerHealth } => c !== null),
   })).filter((row) => row.cells.length > 0);
@@ -263,7 +268,7 @@ function LoqOutlook({
                 <div
                   className={`outlook-dot ${healthFilter && cell.health !== healthFilter ? 'dimmed' : ''}`}
                   style={{ left: `${pct(cell.date)}%`, background: `var(--wt-${cell.health})` }}
-                  title={`${row.cinematic.name} · ${disciplineName(cell.disciplineId)}\nStatus: ${cell.loq.status}\nHealth: ${HEALTH_LABEL[cell.health]}\nForecast finish: ${cell.date}`}
+                  title={`${row.cinematic.name} · ${disciplineName(cell.disciplineId)}\nStatus: ${loqStatusLabel(cell.loq, statusOf(cell.loq))}\nHealth: ${HEALTH_LABEL[cell.health]}\nForecast finish: ${cell.date}`}
                   onClick={() => onOpenCinematic(row.cinematic.id)}
                 />
               </div>

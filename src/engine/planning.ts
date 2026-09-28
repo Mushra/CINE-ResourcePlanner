@@ -1,5 +1,6 @@
 import type {
   Cinematic,
+  CinematicJiraSyncState,
   Discipline,
   JiraSyncState,
   Loq,
@@ -96,6 +97,8 @@ export class PlanningEngine {
   private readonly cinematicsById: Map<string, Cinematic>;
   private readonly loqsById: Map<string, Loq>;
   private readonly jiraSyncStatesByLoqId: Map<string, JiraSyncState>;
+  private readonly cinematicJiraSyncStatesByCinematicId: Map<string, CinematicJiraSyncState>;
+  private readonly loqsByCinematicId: Map<string, Loq[]>;
   private readonly dependenciesByPredecessor: Map<string, LoqDependency[]>;
   private loqForecastsCache: Map<string, LoqForecast> | null = null;
   private loqForecastsByCinematicCache: Map<string, Map<string, LoqForecast>> | null = null;
@@ -164,6 +167,14 @@ export class PlanningEngine {
 
     this.loqsById = new Map(data.loqs.map((l) => [l.id, l]));
     this.jiraSyncStatesByLoqId = new Map(data.jiraSyncStates.map((s) => [s.loqId, s]));
+    this.cinematicJiraSyncStatesByCinematicId = new Map(data.cinematicJiraSyncStates.map((s) => [s.cinematicId, s]));
+
+    this.loqsByCinematicId = new Map();
+    for (const loq of data.loqs) {
+      const list = this.loqsByCinematicId.get(loq.cinematicId) ?? [];
+      list.push(loq);
+      this.loqsByCinematicId.set(loq.cinematicId, list);
+    }
 
     this.dependenciesByPredecessor = new Map();
     for (const dep of data.loqDependencies) {
@@ -483,6 +494,17 @@ export class PlanningEngine {
     for (const [loqId, state] of this.jiraSyncStatesByLoqId) {
       const loq = this.loqsById.get(loqId);
       if (loq) result.push({ loq, state });
+    }
+    return result;
+  }
+
+  /** Every Cinematic whose linked Jira epic has been synced at least once, paired with its latest
+   * epic snapshot and its own LOQs — feeds checkCinematicEpicDivergence (Phase 2). */
+  cinematicsWithJiraSync(): { cinematic: Cinematic; state: CinematicJiraSyncState; loqs: Loq[] }[] {
+    const result: { cinematic: Cinematic; state: CinematicJiraSyncState; loqs: Loq[] }[] = [];
+    for (const [cinematicId, state] of this.cinematicJiraSyncStatesByCinematicId) {
+      const cinematic = this.cinematicsById.get(cinematicId);
+      if (cinematic) result.push({ cinematic, state, loqs: this.loqsByCinematicId.get(cinematicId) ?? [] });
     }
     return result;
   }

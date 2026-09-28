@@ -31,7 +31,11 @@ async function getSqlJs(): Promise<SqlJsStatic> {
 // v11 replaces both allocation tables' monthly-bucket shape (parent_id, period) with day-precise
 // interval rows (id, parent_id, start_date, finish_date, fte) — see RequirementAllocation in
 // types.ts and migrateV10toV11() below.
-export const SCHEMA_VERSION = '11';
+// v12 adds the cinematic_jira_sync table (epic-level Jira snapshot per Cinematic, parallel to
+// jira_sync_state) — a plain additive table, created by schemaSql's CREATE TABLE IF NOT EXISTS on
+// every applySchema; migrateV11toV12() just records the version bump. See CinematicJiraSyncState in
+// types.ts and checkCinematicEpicDivergence in validation.ts.
+export const SCHEMA_VERSION = '12';
 
 /** Thin wrapper around a sql.js Database: schema bootstrap, typed helpers, byte export. */
 export class PlannerDatabase {
@@ -186,6 +190,7 @@ export class PlannerDatabase {
     if (Number(from) < 9) this.migrateV8toV9();
     if (Number(from) < 10) this.migrateV9toV10();
     if (Number(from) < 11) this.migrateV10toV11();
+    if (Number(from) < 12) this.migrateV11toV12();
   }
 
   /**
@@ -489,6 +494,25 @@ export class PlannerDatabase {
         CREATE INDEX IF NOT EXISTS idx_pasn_alloc ON person_assignment_allocations(person_assignment_id);
       `);
     }
+  }
+
+  /**
+   * v12 adds the cinematic_jira_sync table (epic-level Jira snapshot per Cinematic). It's a plain
+   * additive table already created by schemaSql's CREATE TABLE IF NOT EXISTS, which runs before
+   * migrate() on every applySchema — so a legacy DB is healed there and this step only needs to
+   * exist for the version dispatch/record (kept as an explicit idempotent guard for symmetry with
+   * the other additive-table migrations, e.g. migrateV8toV9).
+   */
+  private migrateV11toV12(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS cinematic_jira_sync (
+        cinematic_id     TEXT PRIMARY KEY REFERENCES cinematics(id) ON DELETE CASCADE,
+        jira_status      TEXT,
+        jira_updated_at  TEXT,
+        last_synced_at   TEXT NOT NULL,
+        raw_snapshot     TEXT NOT NULL DEFAULT '{}'
+      );
+    `);
   }
 
   exec(sql: string, params: unknown[] = []): void {

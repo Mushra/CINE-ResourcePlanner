@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
-import { buildJiraToleranceMap, getSanityChecks, type SanityCheck } from '../../engine/validation';
+import { getSanityChecks, type SanityCheck } from '../../engine/validation';
 import {
-  HEALTH_LABEL, deriveLoqHealth, loqStatusLabel, projectAttention, representativeLoq, worstDiscipline,
+  HEALTH_LABEL, buildEffectiveStatusMap, deriveLoqHealth, projectAttention,
+  representativeLoq, statusResolverFrom, worstDiscipline,
   type AttentionItem, type WatchtowerHealth,
 } from '../../engine/watchtower';
+import { CANONICAL_STATUS_LABEL, UNMAPPED, type EffectiveStatus } from '../../domain/jiraStatusMap';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
 import { ConfirmButton } from '../components/ConfirmButton';
@@ -17,8 +19,17 @@ import { RecommitDialog } from '../components/RecommitDialog';
 import { VarianceDialog } from '../components/VarianceDialog';
 import type { Loq } from '../../domain/types';
 
-const LOQ_STATUS_LABEL: Record<Loq['status'], string> = { TODO: 'To do', IN_PROGRESS: 'In progress', DONE: 'Done' };
 const SEVERITY_RANK: Record<SanityCheck['severity'], number> = { critical: 2, warning: 1, info: 0 };
+
+/** Status cell for a LOQ row, honouring its effective (Jira-mirrored) status. A voluntary pause
+ * reads "On hold"; a bound row whose Jira status isn't mapped reads "À mapper" (never a silent
+ * default); everything else shows the canonical label. */
+function loqStatusCell(loq: Loq, effective: EffectiveStatus | undefined): { className: string; label: string } {
+  if (loq.paused) return { className: 'loq-status-on-hold', label: 'On hold' };
+  const eff = effective ?? loq.status;
+  if (eff === UNMAPPED) return { className: 'loq-status-unmapped', label: 'À mapper' };
+  return { className: `loq-status-${eff.toLowerCase()}`, label: CANONICAL_STATUS_LABEL[eff] };
+}
 
 const VERSION_PLAYER_GAP = "Needs a ShotGrid/Flow connector to fetch and stream published review versions, and to expose the publish/push event log.";
 const HOTLINES_GAP = "Needs a Hotline/escalation feed integration — no domain model exists yet.";
@@ -56,8 +67,10 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const cinematicLoqs = loqs.filter((l) => l.cinematicId === cinematic.id).sort((a, b) => a.sortOrder - b.sortOrder);
   const disciplineIds = disciplines.map((d) => d.id);
   const forecasts = engine.getLoqForecasts();
+  const effectiveStatusMap = buildEffectiveStatusMap(engine, jiraConfigs);
+  const statusOf = statusResolverFrom(effectiveStatusMap);
 
-  const checks = project ? getSanityChecks(engine, buildJiraToleranceMap(jiraConfigs)).filter((c) => c.projectId === project.id) : [];
+  const checks = project ? getSanityChecks(engine, jiraConfigs).filter((c) => c.projectId === project.id) : [];
   const cinematicAttention: AttentionItem[] = project
     ? projectAttention(engine, checks, project.id)
       .filter((item) => item.cinematicId === cinematic.id && item.source !== 'Production Planning')
@@ -65,10 +78,10 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
       .sort((a, b) => SEVERITY_RANK[b.check.severity] - SEVERITY_RANK[a.check.severity])
     : [];
 
-  const focusDisciplineId = focus !== 'ALL' ? focus : worstDiscipline(cinematic.id, disciplineIds, loqs, forecasts);
+  const focusDisciplineId = focus !== 'ALL' ? focus : worstDiscipline(cinematic.id, disciplineIds, loqs, forecasts, statusOf);
   const focusDisciplineName = focusDisciplineId ? disciplines.find((d) => d.id === focusDisciplineId)?.name ?? focusDisciplineId : null;
-  const focusLoq = focusDisciplineId ? representativeLoq(loqs, cinematic.id, focusDisciplineId) : null;
-  const focusHealth: WatchtowerHealth | null = focusLoq ? deriveLoqHealth(focusLoq, forecasts.get(focusLoq.id)) : null;
+  const focusLoq = focusDisciplineId ? representativeLoq(loqs, cinematic.id, focusDisciplineId, statusOf) : null;
+  const focusHealth: WatchtowerHealth | null = focusLoq ? deriveLoqHealth(focusLoq, forecasts.get(focusLoq.id), statusOf(focusLoq)) : null;
   const focusForecastFinish = focusLoq ? forecasts.get(focusLoq.id)?.forecastFinish ?? focusLoq.actualFinish ?? null : null;
 
   return (
@@ -146,7 +159,7 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
           {focusLoq ? (
             <div className="kv-rows">
               <div className="kv-row"><span className="k">Current LOQ</span><span className="v">{focusLoq.type}</span></div>
-              <div className="kv-row"><span className="k">Status</span><span className="v">{loqStatusLabel(focusLoq)}</span></div>
+              <div className="kv-row"><span className="k">Status</span><span className="v">{loqStatusCell(focusLoq, effectiveStatusMap.get(focusLoq.id)).label}</span></div>
               {focusHealth && (
                 <div className="kv-row"><span className="k">Health</span><span className={`v health-text health-text-${focusHealth}`}>{HEALTH_LABEL[focusHealth]}</span></div>
               )}
@@ -204,11 +217,12 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
               <tbody>
                 {cinematicLoqs.map((loq) => {
                   const discipline = disciplines.find((d) => d.id === loq.disciplineId);
+                  const statusCell = loqStatusCell(loq, effectiveStatusMap.get(loq.id));
                   return (
                     <tr key={loq.id}>
                       <td>{discipline?.name ?? 'Unassigned'}</td>
                       <td className="cell-name">{loq.type}</td>
-                      <td><span className={`loq-status loq-status-${loq.status.toLowerCase()}`}>{LOQ_STATUS_LABEL[loq.status]}</span></td>
+                      <td><span className={`loq-status ${statusCell.className}`}>{statusCell.label}</span></td>
                       <td>{loq.estimateDays ?? <span className="tbd-text">—</span>}</td>
                       <td>
                         {loq.committedStart
@@ -270,6 +284,7 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
         <LoqFormDrawer
           loq={editingLoq}
           disciplines={disciplines}
+          effectiveStatus={effectiveStatusMap.get(editingLoq.id) ?? null}
           onClose={() => setEditingLoq(null)}
           onSave={(value: LoqFormValue) => {
             updateLoq({ ...editingLoq, ...value });

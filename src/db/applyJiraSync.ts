@@ -5,7 +5,7 @@
 // silently overwrites the plan (see docs/INTEGRATIONS.md §3). Date/status comparison lives in the
 // jira_inconsistency sanity check instead.
 import type { PlannerDatabase } from './database';
-import { loadPlanningData, updateCinematic, updateLoq, upsertJiraSyncState } from './repository';
+import { loadPlanningData, updateCinematic, updateLoq, upsertCinematicJiraSyncState, upsertJiraSyncState } from './repository';
 import type { NormalizedJiraBatch } from '../import/jiraSync';
 
 /** cinematicId/loqId -> confirmed Jira key, or null for "don't link" (a proposal the user rejected). */
@@ -63,11 +63,21 @@ export function applyJiraBindings(
       warnings.push(`Skipped ${jiraKey} — it is already linked to a different Cinematic.`);
       continue;
     }
-    if (!issueByKey.has(jiraKey)) {
+    const cinematicIssue = issueByKey.get(jiraKey);
+    if (!cinematicIssue) {
       warnings.push(`Skipped ${jiraKey} — it was not found in the fetched Jira batch.`);
       continue;
     }
     if (cinematic.jiraKey !== jiraKey) updateCinematic(db, { ...cinematic, jiraKey });
+    // Snapshot the linked epic's status so checkCinematicEpicDivergence can compare it against the
+    // LOQ status rollup. Signal-only, same as the LOQ sync state — never written back to the plan.
+    upsertCinematicJiraSyncState(db, {
+      cinematicId,
+      jiraStatus: cinematicIssue.status,
+      jiraUpdatedAt: cinematicIssue.updatedAt,
+      lastSyncedAt: new Date().toISOString(),
+      rawSnapshot: JSON.stringify(cinematicIssue),
+    });
     report.cinematicsLinked++;
   }
 

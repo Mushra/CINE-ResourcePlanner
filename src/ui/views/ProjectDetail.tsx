@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
-import { buildJiraToleranceMap, getSanityChecks } from '../../engine/validation';
+import { getSanityChecks } from '../../engine/validation';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
 import { ConfirmButton } from '../components/ConfirmButton';
@@ -34,7 +34,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const setProductionScreen = useUiStore((s) => s.setProductionScreen);
   const [editing, setEditing] = useState(false);
 
-  const checks = project ? getSanityChecks(engine, buildJiraToleranceMap(jiraConfigs)).filter((c) => c.projectId === project.id) : [];
+  const checks = project ? getSanityChecks(engine, jiraConfigs).filter((c) => c.projectId === project.id) : [];
 
   if (!project) {
     return (

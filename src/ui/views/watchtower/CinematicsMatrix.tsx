@@ -2,20 +2,32 @@ import { useState } from 'react';
 import { useStore } from '../../../store/useStore';
 import { useUiStore, type MatrixGroupBy } from '../../../store/useUiStore';
 import {
-  CINEMATIC_STATUS_LABEL, HEALTH_LABEL, HEALTH_ORDER, cinematicHealth, cinematicStatus, loqStatusLabel,
-  representativeLoq, worstDiscipline, type CinematicOverallStatus,
+  CINEMATIC_STATUS_LABEL, HEALTH_LABEL, HEALTH_ORDER, buildEffectiveStatusMap, cinematicHealth,
+  cinematicStatus, representativeLoq, statusResolverFrom, worstDiscipline, type CinematicOverallStatus,
 } from '../../../engine/watchtower';
+import { CANONICAL_STATUS_LABEL, UNMAPPED, type EffectiveStatus } from '../../../domain/jiraStatusMap';
 import { Button } from '../../components/Button';
 import { Icon } from '../../components/Icon';
 import { FilterMenu, type FilterOption } from '../../components/FilterMenu';
 import { CinematicFormDrawer, type CinematicFormValue } from '../../components/CinematicFormDrawer';
 import { MppImportDrawer } from '../../components/MppImportDrawer';
 import { JiraBindingDrawer } from '../../components/JiraBindingDrawer';
-import type { Cinematic, Project } from '../../../domain/types';
+import type { Cinematic, Loq, Project } from '../../../domain/types';
 import type { SanityCheck } from '../../../engine/validation';
 
-const STATUS_ORDER: CinematicOverallStatus[] = ['TODO', 'IN_PROGRESS', 'ON_HOLD', 'DONE'];
+/** Priority order (highest attention first) — matches the Cinematic-status rollup precedence in
+ * watchtower.ts::cinematicStatus so "Group by: Status" reads the same way. */
+const STATUS_ORDER: CinematicOverallStatus[] = ['BLOCKED', 'IN_PROGRESS', 'TO_REVIEW', 'TODO', 'ON_HOLD', 'DONE', 'CUT'];
 const NO_LOQS_KEY = '__none__';
+
+/** Status cell for a representative LOQ, honouring its effective (Jira-mirrored) status: a voluntary
+ * pause reads "On hold", a bound-but-unmapped Jira status reads "À mapper". */
+function loqStatusCell(loq: Loq, effective: EffectiveStatus | undefined): { className: string; label: string } {
+  if (loq.paused) return { className: 'loq-status-on-hold', label: 'On hold' };
+  const eff = effective ?? loq.status;
+  if (eff === UNMAPPED) return { className: 'loq-status-unmapped', label: 'À mapper' };
+  return { className: `loq-status-${eff.toLowerCase()}`, label: CANONICAL_STATUS_LABEL[eff] };
+}
 
 type SortCol = 'name' | 'health' | string;
 
@@ -27,6 +39,7 @@ type SortCol = 'name' | 'health' | string;
  */
 export function CinematicsMatrix({ project, checks }: { project: Project; checks: SanityCheck[] }) {
   const engine = useStore((s) => s.engine);
+  const jiraConfigs = useStore((s) => s.jiraConfigs);
   const disciplines = useStore((s) => s.data.disciplines);
   const allCinematics = useStore((s) => s.data.cinematics);
   const allLoqs = useStore((s) => s.data.loqs);
@@ -55,31 +68,32 @@ export function CinematicsMatrix({ project, checks }: { project: Project; checks
   const visibleDisciplineIds = usedDisciplineIds.filter((id) => !hiddenDisciplineIds.includes(id));
   const disciplineName = (id: string) => disciplines.find((d) => d.id === id)?.name ?? id;
   const forecasts = engine.getLoqForecasts();
+  const effectiveStatusMap = buildEffectiveStatusMap(engine, jiraConfigs);
+  const statusOf = statusResolverFrom(effectiveStatusMap);
   const levels = [...new Set(loqs.map((l) => l.type))].sort();
   const attentionCountByCinematic = new Map<string, number>();
   for (const check of checks) {
-    if (!check.loqId) continue;
-    const loq = engine.loq(check.loqId);
-    if (loq) attentionCountByCinematic.set(loq.cinematicId, (attentionCountByCinematic.get(loq.cinematicId) ?? 0) + 1);
+    const cinematicId = check.cinematicId ?? (check.loqId ? engine.loq(check.loqId)?.cinematicId : undefined);
+    if (cinematicId) attentionCountByCinematic.set(cinematicId, (attentionCountByCinematic.get(cinematicId) ?? 0) + 1);
   }
 
   function passesFilters(cinematic: Cinematic): boolean {
     if (search && !cinematic.name.toLowerCase().includes(search.toLowerCase())) return false;
-    const health = cinematicHealth(cinematic.id, usedDisciplineIds, loqs, forecasts);
+    const health = cinematicHealth(cinematic.id, usedDisciplineIds, loqs, forecasts, statusOf);
     if (healthFilter && !(health && healthFilter.has(health))) return false;
     if (disciplineFilter) {
-      const hasAny = usedDisciplineIds.some((id) => disciplineFilter.has(id) && representativeLoq(loqs, cinematic.id, id));
+      const hasAny = usedDisciplineIds.some((id) => disciplineFilter.has(id) && representativeLoq(loqs, cinematic.id, id, statusOf));
       if (!hasAny) return false;
     }
     if (levelFilter) {
       const hasAny = usedDisciplineIds.some((id) => {
-        const loq = representativeLoq(loqs, cinematic.id, id);
+        const loq = representativeLoq(loqs, cinematic.id, id, statusOf);
         return loq && levelFilter.has(loq.type);
       });
       if (!hasAny) return false;
     }
     if (statusFilter) {
-      const status = cinematicStatus(cinematic.id, usedDisciplineIds, loqs);
+      const status = cinematicStatus(cinematic.id, usedDisciplineIds, loqs, statusOf);
       if (!(status && statusFilter.has(status))) return false;
     }
     return true;
@@ -90,17 +104,17 @@ export function CinematicsMatrix({ project, checks }: { project: Project; checks
     if (sort.col === 'name') return [...rows].sort((a, b) => mul * a.name.localeCompare(b.name));
     if (sort.col === 'health') {
       return [...rows].sort((a, b) => {
-        const ah = cinematicHealth(a.id, usedDisciplineIds, loqs, forecasts);
-        const bh = cinematicHealth(b.id, usedDisciplineIds, loqs, forecasts);
+        const ah = cinematicHealth(a.id, usedDisciplineIds, loqs, forecasts, statusOf);
+        const bh = cinematicHealth(b.id, usedDisciplineIds, loqs, forecasts, statusOf);
         const ai = ah ? HEALTH_ORDER.indexOf(ah) : HEALTH_ORDER.length;
         const bi = bh ? HEALTH_ORDER.indexOf(bh) : HEALTH_ORDER.length;
         return mul * (ai - bi);
       });
     }
     const disciplineId = sort.col;
-    const withLoq = rows.filter((c) => representativeLoq(loqs, c.id, disciplineId));
-    const withoutLoq = rows.filter((c) => !representativeLoq(loqs, c.id, disciplineId));
-    withLoq.sort((a, b) => mul * (representativeLoq(loqs, a.id, disciplineId)!.type.localeCompare(representativeLoq(loqs, b.id, disciplineId)!.type)));
+    const withLoq = rows.filter((c) => representativeLoq(loqs, c.id, disciplineId, statusOf));
+    const withoutLoq = rows.filter((c) => !representativeLoq(loqs, c.id, disciplineId, statusOf));
+    withLoq.sort((a, b) => mul * (representativeLoq(loqs, a.id, disciplineId, statusOf)!.type.localeCompare(representativeLoq(loqs, b.id, disciplineId, statusOf)!.type)));
     return [...withLoq, ...withoutLoq];
   }
 
@@ -112,15 +126,15 @@ export function CinematicsMatrix({ project, checks }: { project: Project; checks
 
   function groupKeyAndLabel(cinematic: Cinematic): { key: string; label: string } {
     if (groupBy === 'health') {
-      const h = cinematicHealth(cinematic.id, usedDisciplineIds, loqs, forecasts);
+      const h = cinematicHealth(cinematic.id, usedDisciplineIds, loqs, forecasts, statusOf);
       return h ? { key: h, label: HEALTH_LABEL[h] } : { key: NO_LOQS_KEY, label: 'No LOQs yet' };
     }
     if (groupBy === 'status') {
-      const s = cinematicStatus(cinematic.id, usedDisciplineIds, loqs);
+      const s = cinematicStatus(cinematic.id, usedDisciplineIds, loqs, statusOf);
       return s ? { key: s, label: CINEMATIC_STATUS_LABEL[s] } : { key: NO_LOQS_KEY, label: 'No LOQs yet' };
     }
     // discipline
-    const worst = worstDiscipline(cinematic.id, usedDisciplineIds, loqs, forecasts);
+    const worst = worstDiscipline(cinematic.id, usedDisciplineIds, loqs, forecasts, statusOf);
     return worst ? { key: worst, label: disciplineName(worst) } : { key: NO_LOQS_KEY, label: 'No LOQs yet' };
   }
 
@@ -159,7 +173,7 @@ export function CinematicsMatrix({ project, checks }: { project: Project; checks
   }
 
   function renderRow(cinematic: Cinematic) {
-    const health = cinematicHealth(cinematic.id, usedDisciplineIds, loqs, forecasts);
+    const health = cinematicHealth(cinematic.id, usedDisciplineIds, loqs, forecasts, statusOf);
     const issueCount = attentionCountByCinematic.get(cinematic.id) ?? 0;
     return (
       <tr key={cinematic.id}>
@@ -173,12 +187,13 @@ export function CinematicsMatrix({ project, checks }: { project: Project; checks
           </div>
         </td>
         {visibleDisciplineIds.map((disciplineId) => {
-          const loq = representativeLoq(loqs, cinematic.id, disciplineId);
+          const loq = representativeLoq(loqs, cinematic.id, disciplineId, statusOf);
           if (!loq) return <td key={disciplineId} className="mx-na">N/A</td>;
+          const statusCell = loqStatusCell(loq, effectiveStatusMap.get(loq.id));
           return (
             <td key={disciplineId} className="mx-cell" onClick={() => openCinematic(cinematic.id)}>
               <div className="mx-cell-level">{loq.type}</div>
-              <div className={`mx-cell-status loq-status loq-status-${loq.status.toLowerCase()}`}>{loqStatusLabel(loq)}</div>
+              <div className={`mx-cell-status loq-status ${statusCell.className}`}>{statusCell.label}</div>
             </td>
           );
         })}

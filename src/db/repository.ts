@@ -1,5 +1,6 @@
 import type {
   Cinematic,
+  CinematicJiraSyncState,
   DateCertainty,
   DependencySource,
   DependencyTemplate,
@@ -30,6 +31,7 @@ import type {
 } from '../domain/types';
 import type { PlannerDatabase } from './database';
 import { isoFirstDayOfPeriod, isoLastDayOfPeriod } from '../domain/periods';
+import { withJiraConfigDefaults } from '../domain/jiraStatusMap';
 
 export const BASE_SCENARIO_ID = 'base';
 
@@ -190,6 +192,15 @@ export function loadPlanningData(db: PlannerDatabase): PlanningData {
       lastSyncedAt: r.last_synced_at, rawSnapshot: r.raw_snapshot,
     }));
 
+  const cinematicJiraSyncStates = db
+    .query<{ cinematic_id: string; jira_status: string | null; jira_updated_at: string | null; last_synced_at: string; raw_snapshot: string }>(
+      'SELECT * FROM cinematic_jira_sync',
+    )
+    .map((r): CinematicJiraSyncState => ({
+      cinematicId: r.cinematic_id, jiraStatus: r.jira_status, jiraUpdatedAt: r.jira_updated_at,
+      lastSyncedAt: r.last_synced_at, rawSnapshot: r.raw_snapshot,
+    }));
+
   return {
     projects,
     pools,
@@ -209,6 +220,7 @@ export function loadPlanningData(db: PlannerDatabase): PlanningData {
     dependencyTemplates,
     varianceEvents,
     jiraSyncStates,
+    cinematicJiraSyncStates,
   };
 }
 
@@ -799,6 +811,20 @@ export function deleteJiraSyncState(db: PlannerDatabase, loqId: string): void {
   db.exec('DELETE FROM jira_sync_state WHERE loq_id = ?', [loqId]);
 }
 
+/** Upserts a Cinematic's linked-epic Jira snapshot (Phase 2 — feeds the epic↔LOQ divergence check). */
+export function upsertCinematicJiraSyncState(db: PlannerDatabase, state: CinematicJiraSyncState): void {
+  db.exec(
+    `INSERT INTO cinematic_jira_sync (cinematic_id, jira_status, jira_updated_at, last_synced_at, raw_snapshot) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(cinematic_id) DO UPDATE SET jira_status = excluded.jira_status,
+       jira_updated_at = excluded.jira_updated_at, last_synced_at = excluded.last_synced_at, raw_snapshot = excluded.raw_snapshot`,
+    [state.cinematicId, state.jiraStatus, state.jiraUpdatedAt, state.lastSyncedAt, state.rawSnapshot],
+  );
+}
+
+export function deleteCinematicJiraSyncState(db: PlannerDatabase, cinematicId: string): void {
+  db.exec('DELETE FROM cinematic_jira_sync WHERE cinematic_id = ?', [cinematicId]);
+}
+
 // ---------------------------------------------------------------------------
 // Jira project config — non-secret, per-Project connection settings (Phase 5b). The API token
 // itself never lives here; see docs/domain/types.ts's JiraProjectConfig doc comment. Stored as a
@@ -812,7 +838,7 @@ export function getJiraConfig(db: PlannerDatabase, projectId: string): JiraProje
   const raw = db.getSetting(`${JIRA_CONFIG_KEY_PREFIX}${projectId}`);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as JiraProjectConfig;
+    return withJiraConfigDefaults(JSON.parse(raw) as JiraProjectConfig);
   } catch {
     return null;
   }
@@ -827,7 +853,7 @@ export function listJiraConfigs(db: PlannerDatabase): JiraProjectConfig[] {
     .query<{ key: string; value: string }>('SELECT key, value FROM settings WHERE key LIKE ?', [`${JIRA_CONFIG_KEY_PREFIX}%`])
     .map((row) => {
       try {
-        return JSON.parse(row.value) as JiraProjectConfig;
+        return withJiraConfigDefaults(JSON.parse(row.value) as JiraProjectConfig);
       } catch {
         return null;
       }

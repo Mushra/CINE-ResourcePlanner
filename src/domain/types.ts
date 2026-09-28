@@ -152,9 +152,15 @@ export interface StructureOverride {
 // self-referential dependencies materialized from dependency_templates.
 // ---------------------------------------------------------------------------
 
-/** Closed 3-value enum — see docs/DATA_MODEL.md §4 ("no percentage-complete field, status is the
- * three-value enum only"). */
-export type LoqStatus = 'TODO' | 'IN_PROGRESS' | 'DONE';
+/**
+ * Canonical 6-value status vocabulary — the plan's single status language, which a Jira-bound
+ * LOQ/Cinematic mirrors via the configurable mapping (see domain/jiraStatusMap.ts). `BLOCKED` is the
+ * *involuntary* stuck state (Jira can drive it); the *voluntary* hold is the separate manual
+ * `Loq.paused`/`Cinematic.paused` boolean, never a status value. `CUT` is terminal like `DONE` for
+ * all scheduling/health logic but is shown distinctly so it's never confused with a delivered `DONE`.
+ * Literals stay UPPER_SNAKE because the status CSS class is `loq-status-${status.toLowerCase()}`.
+ */
+export type LoqStatus = 'TODO' | 'IN_PROGRESS' | 'TO_REVIEW' | 'BLOCKED' | 'DONE' | 'CUT';
 
 /** Free text initially (e.g. "L1", "L2", "Final") — validate against real Jira issue types before
  * constraining to a union, see docs/DATA_MODEL.md and INTEGRATIONS.md. */
@@ -327,6 +333,28 @@ export interface JiraProjectConfig {
    * custom fields by their quoted display name here to stay bracket-free. null/empty = fall back
    * to the field-id form (or the whole project when nothing is configured). */
   scopeJql: string | null;
+  /** Per-project mapping from a raw Jira status string to a canonical LoqStatus, so a bound row's
+   * status mirrors Jira in the plan's own 6-value language (Jira workflows use custom, per-project
+   * status names). Seeded from DEFAULT_JIRA_STATUS_MAPPING and user-editable in Settings; keys are
+   * matched case-insensitively (see domain/jiraStatusMap.ts::resolveJiraStatus). A status not in the
+   * map surfaces explicitly as "À mapper", never a silent default. null on legacy configs that
+   * predate this field — backfilled by withJiraConfigDefaults at load. */
+  statusMapping: Record<string, LoqStatus> | null;
+}
+
+/**
+ * Epic-level Jira snapshot for a Cinematic, parallel to JiraSyncState but keyed by cinematicId — the
+ * status of the Jira issue a Cinematic is bound to (its epic), captured on sync so the plan can diff
+ * the Cinematic's LOQ-rollup status against what the epic itself reports (see
+ * checkCinematicEpicDivergence). Signal-only, like JiraSyncState — never overwrites the plan.
+ */
+export interface CinematicJiraSyncState {
+  cinematicId: string;
+  /** Raw Jira status string, unmapped. */
+  jiraStatus: string | null;
+  jiraUpdatedAt: string | null;
+  lastSyncedAt: string;
+  rawSnapshot: string;
 }
 
 /** Full snapshot of persisted data the engine operates on. Pure — no DB or UI concerns. */
@@ -349,6 +377,7 @@ export interface PlanningData {
   dependencyTemplates: DependencyTemplate[];
   varianceEvents: VarianceEvent[];
   jiraSyncStates: JiraSyncState[];
+  cinematicJiraSyncStates: CinematicJiraSyncState[];
 }
 
 export function emptyPlanningData(): PlanningData {
@@ -371,5 +400,6 @@ export function emptyPlanningData(): PlanningData {
     dependencyTemplates: [],
     varianceEvents: [],
     jiraSyncStates: [],
+    cinematicJiraSyncStates: [],
   };
 }

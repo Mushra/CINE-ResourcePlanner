@@ -27,7 +27,7 @@ describe('applyJiraBindings', () => {
       estimateDays: 5, committedStart: '2026-09-01', committedFinish: '2026-09-15', actualFinish: null, dodRef: '',
     });
 
-    const epic = issue({ key: 'PROD-100', summary: 'Seq010' });
+    const epic = issue({ key: 'PROD-100', summary: 'Seq010', status: 'In Progress' });
     const childIssue = issue({ key: 'PROD-101', summary: 'Animation L1', parentKey: 'PROD-100', status: 'Done' });
     const batch: NormalizedJiraBatch = { issues: [epic, childIssue], warnings: [] };
     const confirmed: ConfirmedJiraBindings = { cinematics: { [cine.id]: 'PROD-100' }, loqs: { [l1.id]: 'PROD-101' } };
@@ -48,6 +48,11 @@ describe('applyJiraBindings', () => {
     const syncState = data.jiraSyncStates.find((s) => s.loqId === l1.id)!;
     expect(syncState).toMatchObject({ jiraStatus: 'Done', jiraAssignee: 'Alice' });
     expect(JSON.parse(syncState.rawSnapshot)).toMatchObject({ key: 'PROD-101', dueDate: '2026-10-01' });
+
+    // The linked epic's own status is snapshot into cinematic_jira_sync (Phase 2), signal-only.
+    const epicState = data.cinematicJiraSyncStates.find((s) => s.cinematicId === cine.id)!;
+    expect(epicState).toMatchObject({ jiraStatus: 'In Progress' });
+    expect(JSON.parse(epicState.rawSnapshot)).toMatchObject({ key: 'PROD-100' });
   });
 
   it('skips + warns when a confirmed binding belongs to a different project, and leaves it untouched', async () => {
