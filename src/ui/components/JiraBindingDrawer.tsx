@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Drawer } from './Drawer';
 import { Button } from './Button';
 import { useStore } from '../../store/useStore';
-import { suggestJiraBindings, type JiraBindingProposals, type BindingKind } from '../../domain/jiraBinding';
+import { suggestJiraBindings, rankIssuesByRelevance, type JiraBindingProposals, type BindingKind } from '../../domain/jiraBinding';
 import type { ConfirmedJiraBindings, JiraApplyReport } from '../../db/applyJiraSync';
 import type { NormalizedJiraBatch } from '../../import/jiraSync';
 import type { Cinematic, Loq } from '../../domain/types';
@@ -17,6 +17,12 @@ function toConfirmed(proposals: JiraBindingProposals): ConfirmedJiraBindings {
 
 function allExactMatched(proposals: JiraBindingProposals): boolean {
   return proposals.cinematics.every((p) => p.via === 'exact-key') && proposals.loqs.every((p) => p.via === 'exact-key');
+}
+
+/** Rows already carrying a Jira key from the Blockplan (via 'exact-key') are trusted and bound
+ * automatically — they never need manual review, so only the rest are shown in the mapping step. */
+function needsReview(p: { via: BindingKind }): boolean {
+  return p.via !== 'exact-key';
 }
 
 /** Opens scoped to one project, same guarantee as MppImportDrawer: bindings are only ever written
@@ -170,52 +176,72 @@ function BindingMappingStep({
   const loqById = new Map(loqs.map((l) => [l.id, l]));
   const disciplineNameById = new Map(disciplines.map((d) => [d.id, d.name]));
 
+  const reviewCinematics = proposals.cinematics.filter(needsReview);
+  const reviewLoqs = proposals.loqs.filter(needsReview);
+  const autoCinematics = proposals.cinematics.length - reviewCinematics.length;
+  const autoLoqs = proposals.loqs.length - reviewLoqs.length;
+  const autoBound = autoCinematics + autoLoqs;
+
   return (
     <>
       <p className="drawer-hint">
         {fileName ? `${fileName} — ` : ''}review the proposed bindings below, override any of them, or
         pick "Don't link" to leave a row unbound.
       </p>
-      <div className="jira-binding-section">
-        <h3>Cinematics</h3>
-        {proposals.cinematics.map((p) => {
-          const cinematic = cinematicById.get(p.cinematicId);
-          if (!cinematic) return null;
-          return (
-            <div key={p.cinematicId} className="jira-binding-row">
-              <div className="jira-binding-name">{cinematic.name}</div>
-              <BindingSelect
-                batch={batch}
-                via={p.via}
-                score={p.score}
-                value={choices.cinematics[p.cinematicId] ?? null}
-                onChange={(key) => onChangeCinematic(p.cinematicId, key)}
-              />
-            </div>
-          );
-        })}
-      </div>
-      <div className="jira-binding-section">
-        <h3>LOQs</h3>
-        {proposals.loqs.map((p) => {
-          const loq = loqById.get(p.loqId);
-          if (!loq) return null;
-          const cinematicName = cinematicById.get(loq.cinematicId)?.name ?? '';
-          const disciplineName = disciplineNameById.get(loq.disciplineId) ?? 'Unassigned';
-          return (
-            <div key={p.loqId} className="jira-binding-row">
-              <div className="jira-binding-name">{disciplineName} · {loq.type} ({cinematicName})</div>
-              <BindingSelect
-                batch={batch}
-                via={p.via}
-                score={p.score}
-                value={choices.loqs[p.loqId] ?? null}
-                onChange={(key) => onChangeLoq(p.loqId, key)}
-              />
-            </div>
-          );
-        })}
-      </div>
+      {autoBound > 0 && (
+        <p className="jira-binding-auto">
+          {autoCinematics > 0 && `${autoCinematics} cinematic${autoCinematics === 1 ? '' : 's'}`}
+          {autoCinematics > 0 && autoLoqs > 0 && ' and '}
+          {autoLoqs > 0 && `${autoLoqs} LOQ${autoLoqs === 1 ? '' : 's'}`}
+          {' '}already referenced in the Blockplan will be linked automatically.
+        </p>
+      )}
+      {reviewCinematics.length > 0 && (
+        <div className="jira-binding-section">
+          <h3>Cinematics to review</h3>
+          {reviewCinematics.map((p) => {
+            const cinematic = cinematicById.get(p.cinematicId);
+            if (!cinematic) return null;
+            return (
+              <div key={p.cinematicId} className="jira-binding-row">
+                <div className="jira-binding-name">{cinematic.name}</div>
+                <BindingSelect
+                  batch={batch}
+                  relevanceText={cinematic.name}
+                  via={p.via}
+                  score={p.score}
+                  value={choices.cinematics[p.cinematicId] ?? null}
+                  onChange={(key) => onChangeCinematic(p.cinematicId, key)}
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {reviewLoqs.length > 0 && (
+        <div className="jira-binding-section">
+          <h3>LOQs to review</h3>
+          {reviewLoqs.map((p) => {
+            const loq = loqById.get(p.loqId);
+            if (!loq) return null;
+            const cinematicName = cinematicById.get(loq.cinematicId)?.name ?? '';
+            const disciplineName = disciplineNameById.get(loq.disciplineId) ?? 'Unassigned';
+            return (
+              <div key={p.loqId} className="jira-binding-row">
+                <div className="jira-binding-name">{disciplineName} · {loq.type} ({cinematicName})</div>
+                <BindingSelect
+                  batch={batch}
+                  relevanceText={`${cinematicName} ${disciplineName} ${loq.type}`}
+                  via={p.via}
+                  score={p.score}
+                  value={choices.loqs[p.loqId] ?? null}
+                  onChange={(key) => onChangeLoq(p.loqId, key)}
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
       {children}
     </>
   );
@@ -229,33 +255,55 @@ const SIGNAL_LABEL: Record<Exclude<BindingKind, 'name' | 'unmatched'>, string> =
   'epic-link': 'Epic link',
 };
 
+/** How many relevance-ranked candidates to show before collapsing the rest behind "Show all". */
+const CANDIDATE_LIMIT = 20;
+
 function BindingSelect({
-  batch, via, score, value, onChange,
+  batch, relevanceText, via, score, value, onChange,
 }: {
   batch: NormalizedJiraBatch;
+  /** Row text (Cinematic/LOQ name) used to rank the batch's issues by relevance for this row. */
+  relevanceText: string;
   via: BindingKind;
   score: number | null;
   value: string | null;
   onChange: (key: string | null) => void;
 }) {
+  const [showAll, setShowAll] = useState(false);
+  const ranked = useMemo(() => rankIssuesByRelevance(relevanceText, batch.issues), [relevanceText, batch]);
+  const overflow = ranked.length > CANDIDATE_LIMIT;
+  const top = overflow && !showAll ? ranked.slice(0, CANDIDATE_LIMIT) : ranked;
+  // Always keep the currently-selected issue in the list, even when it ranks below the cutoff, so
+  // the <select> can display an override the user already made.
+  const shown = value && !top.some((i) => i.key === value)
+    ? [...top, ...ranked.filter((i) => i.key === value)]
+    : top;
+
   return (
-    <div className="jira-binding-select">
-      <select value={value ?? ''} onChange={(e) => onChange(e.target.value || null)}>
-        <option value="">Don't link</option>
-        {batch.issues.map((issue) => (
-          <option key={issue.key} value={issue.key}>{issue.key} — {issue.summary}</option>
-        ))}
-      </select>
-      {via === 'unmatched' ? (
-        <span className="jira-binding-badge jira-binding-badge-unmatched">unmatched</span>
-      ) : via === 'name' ? (
-        <span className="jira-binding-badge">{score != null ? `match ${Math.round(score * 100)}%` : 'match'}</span>
-      ) : (
-        <span className={`jira-binding-badge${via === 'exact-key' ? ' jira-binding-badge-exact' : ''}`}>
-          via {SIGNAL_LABEL[via]}
-        </span>
+    <>
+      <div className="jira-binding-select">
+        <select value={value ?? ''} onChange={(e) => onChange(e.target.value || null)}>
+          <option value="">Don't link</option>
+          {shown.map((issue) => (
+            <option key={issue.key} value={issue.key}>{issue.key} — {issue.summary}</option>
+          ))}
+        </select>
+        {via === 'unmatched' ? (
+          <span className="jira-binding-badge jira-binding-badge-unmatched">unmatched</span>
+        ) : via === 'name' ? (
+          <span className="jira-binding-badge">{score != null ? `match ${Math.round(score * 100)}%` : 'match'}</span>
+        ) : (
+          <span className={`jira-binding-badge${via === 'exact-key' ? ' jira-binding-badge-exact' : ''}`}>
+            via {SIGNAL_LABEL[via]}
+          </span>
+        )}
+      </div>
+      {overflow && (
+        <button type="button" className="jira-binding-showall" onClick={() => setShowAll((v) => !v)}>
+          {showAll ? 'Show fewer' : `Showing ${CANDIDATE_LIMIT} best matches — show all ${ranked.length} issues`}
+        </button>
       )}
-    </div>
+    </>
   );
 }
 

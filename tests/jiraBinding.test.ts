@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { jiraMatchKey, suggestJiraBindings } from '../src/domain/jiraBinding';
+import { jiraMatchKey, suggestJiraBindings, rankIssuesByRelevance } from '../src/domain/jiraBinding';
 import { cinematic, discipline, loq } from './fixtures';
 import type { NormalizedJiraBatch, NormalizedJiraIssue } from '../src/import/jiraSync';
 
@@ -185,5 +185,33 @@ describe('suggestJiraBindings — LOQs', () => {
 
     const proposals = suggestJiraBindings([cine], [l1], [animation], batch([unrelatedEpic]));
     expect(proposals.loqs).toEqual([{ via: 'unmatched', loqId: l1.id, proposedKey: null, score: 0 }]);
+  });
+});
+
+describe('rankIssuesByRelevance', () => {
+  it('orders issues most-relevant-first by summary token overlap', () => {
+    const strong = issue({ key: 'PROD-1', summary: 'Seq010 Opening sequence' });
+    const weak = issue({ key: 'PROD-2', summary: 'Seq010 unrelated' });
+    const none = issue({ key: 'PROD-3', summary: 'Completely different thing' });
+
+    const ranked = rankIssuesByRelevance('Seq010 Opening', [none, weak, strong]);
+    expect(ranked.map((i) => i.key)).toEqual(['PROD-1', 'PROD-2', 'PROD-3']);
+  });
+
+  it('breaks ties deterministically by key so equal-scoring issues keep a stable order', () => {
+    const b = issue({ key: 'PROD-2', summary: 'Seq010 Opening' });
+    const a = issue({ key: 'PROD-1', summary: 'Seq010 Opening' });
+    const c = issue({ key: 'PROD-3', summary: 'Seq010 Opening' });
+
+    const ranked = rankIssuesByRelevance('Seq010 Opening', [c, b, a]);
+    expect(ranked.map((i) => i.key)).toEqual(['PROD-1', 'PROD-2', 'PROD-3']);
+  });
+
+  it('keeps every issue (a zero-overlap batch stays present, just ordered by key)', () => {
+    const x = issue({ key: 'PROD-9', summary: 'nothing shared' });
+    const y = issue({ key: 'PROD-4', summary: 'also nothing' });
+
+    const ranked = rankIssuesByRelevance('Seq010 Opening', [x, y]);
+    expect(ranked.map((i) => i.key)).toEqual(['PROD-4', 'PROD-9']);
   });
 });

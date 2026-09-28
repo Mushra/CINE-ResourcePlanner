@@ -81,6 +81,20 @@ function tokenize(s: string): Set<string> {
   return new Set(stripped.split(/[^a-z0-9]+/).filter(Boolean));
 }
 
+/**
+ * Ranks a batch's issues by summary relevance to `text` (same tokenization/Jaccard as the
+ * suggester), most relevant first, deterministic tie-break by key. The binding drawer uses this to
+ * surface the likeliest candidates for a row instead of dumping the entire batch (thousands of
+ * issues) into every dropdown. Pure.
+ */
+export function rankIssuesByRelevance(text: string, issues: NormalizedJiraIssue[]): NormalizedJiraIssue[] {
+  const tokens = tokenize(text);
+  return issues
+    .map((issue) => ({ issue, score: jaccard(tokens, tokenize(issue.summary)) }))
+    .sort((a, b) => b.score - a.score || a.issue.key.localeCompare(b.issue.key))
+    .map((entry) => entry.issue);
+}
+
 function jaccard(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 || b.size === 0) return 0;
   let intersection = 0;
