@@ -214,10 +214,36 @@ function jqlFieldRef(fieldId: string): string {
   return match ? `cf[${match[1]}]` : fieldId;
 }
 
-function buildJiraJql(config: JiraProjectConfig): string {
-  let jql = `project = "${config.jiraProjectKey}"`;
-  if (config.scopeField && config.scopeValue) jql += ` AND ${jqlFieldRef(config.scopeField)} = "${config.scopeValue}"`;
-  return jql;
+/** Narrows the search to only the issues that can actually bind to this project's Cinematics/LOQs,
+ * instead of pulling the whole Jira project (OVR alone is ~200k issues). The anchor is the
+ * "Cinematics List" field every bindable issue carries (docs/INTEGRATIONS.md §3.2); `linkedKeys`
+ * (issues already linked in the plan) are OR'd back in unconditionally, since an explicit prior
+ * key link is always honored and is never scope-filtered. Falls back to the whole project only
+ * when no anchor field is configured and nothing is linked yet. */
+function buildJiraJql(config: JiraProjectConfig, linkedKeys: string[] = []): string {
+  const scoped: string[] = [];
+  if (config.cinematicsListField) scoped.push(`${jqlFieldRef(config.cinematicsListField)} IS NOT EMPTY`);
+  if (config.scopeField && config.scopeValue) scoped.push(`${jqlFieldRef(config.scopeField)} = "${config.scopeValue}"`);
+  const scopedClause = scoped.join(' AND ');
+
+  const uniqueKeys = [...new Set(linkedKeys)].filter((k) => /^[A-Z][A-Z0-9]*-\d+$/.test(k));
+  const keyClause = uniqueKeys.length ? `key IN (${uniqueKeys.join(', ')})` : '';
+
+  let narrow = '';
+  if (scopedClause && keyClause) narrow = `(${scopedClause} OR ${keyClause})`;
+  else if (scopedClause) narrow = scopedClause;
+  else if (keyClause) narrow = keyClause;
+
+  return narrow ? `project = "${config.jiraProjectKey}" AND ${narrow}` : `project = "${config.jiraProjectKey}"`;
+}
+
+/** Jira keys already linked to this project's Cinematics/LOQs — used to always re-fetch prior links. */
+function linkedJiraKeys(data: PlanningData, projectId: string): string[] {
+  const cinematicIds = new Set(data.cinematics.filter((c) => c.projectId === projectId).map((c) => c.id));
+  const keys: string[] = [];
+  for (const c of data.cinematics) if (cinematicIds.has(c.id) && c.jiraKey) keys.push(c.jiraKey);
+  for (const l of data.loqs) if (cinematicIds.has(l.cinematicId) && l.jiraKey) keys.push(l.jiraKey);
+  return keys;
 }
 
 /** Custom fields must be requested explicitly via `fields=` or Jira omits them from the response. */
@@ -650,7 +676,7 @@ export const useStore = create<StoreState>((set, get) => {
           baseUrl: config.baseUrl,
           authMode: config.authMode,
           email: config.email,
-          jql: buildJiraJql(config),
+          jql: buildJiraJql(config, linkedJiraKeys(get().data, projectId)),
           fields: buildJiraFields(config),
         });
       } finally {
