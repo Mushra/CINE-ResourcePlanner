@@ -35,7 +35,7 @@ import { parseMppJson, type NormalizedMppImport } from '../import/mppImport';
 import { parseJiraSearchResponse, defaultJiraFieldMapping, type JiraRawSearchResponse, type NormalizedJiraBatch } from '../import/jiraSync';
 import { DEFAULT_HOTLINE_LABEL, relatedIssuesForCinematic } from '../domain/relatedIssues';
 import { PlanningEngine, round2 } from '../engine/planning';
-import type { Cinematic, Discipline, JiraProjectConfig, Loq, LoqDependency, LoqResource, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
+import type { Cinematic, CinematicJiraSyncState, Discipline, JiraProjectConfig, Loq, LoqDependency, LoqResource, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
 import { wouldCreateCycle } from '../domain/loqGraph';
 import { emptyPlanningData } from '../domain/types';
 import { applyStructureOverrides } from '../domain/overrides';
@@ -284,6 +284,21 @@ function linkedJiraKeys(data: PlanningData, projectId: string): string[] {
   for (const c of data.cinematics) if (cinematicIds.has(c.id) && c.jiraKey) keys.push(c.jiraKey);
   for (const l of data.loqs) if (cinematicIds.has(l.cinematicId) && l.jiraKey) keys.push(l.jiraKey);
   return keys;
+}
+
+/** The Cinematics List value of the issue a Cinematic is bound to, read from its stored Jira sync
+ * snapshot — the light per-cinematic refresh queries related issues by this value (the technical
+ * code its hotlines/bugs share), not by the app-side Cinematic name. Null when unbound/unsynced or
+ * the snapshot carries no value. */
+function boundCinematicsListValue(states: CinematicJiraSyncState[], cinematicId: string): string | null {
+  const snapshot = states.find((s) => s.cinematicId === cinematicId)?.rawSnapshot;
+  if (!snapshot) return null;
+  try {
+    const parsed = JSON.parse(snapshot) as { cinematicName?: unknown };
+    return typeof parsed.cinematicName === 'string' && parsed.cinematicName.trim() ? parsed.cinematicName : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Custom fields must be requested explicitly via `fields=` or Jira omits them from the response.
@@ -763,16 +778,24 @@ export const useStore = create<StoreState>((set, get) => {
       const config = get().jiraConfigs.find((c) => c.projectId === cinematic.projectId);
       if (!config) return;
 
-      // Narrow to this Cinematic: issues carrying its Cinematics List name, OR the related issues we
+      // Narrow to this Cinematic: issues carrying the *bound issue's* Cinematics List value — the
+      // same technical code (e.g. "SOLO_MQ1020_S000_CIN Fixers_Car") its hotlines/bugs are tagged
+      // with, read off the linked issue's stored snapshot; the app-side Cinematic name rarely equals
+      // it on real projects, so matching on the name finds nothing — OR the related issues we
       // already track for it (refreshes their status; catches resolved/reassigned ones). Light by
       // design — no whole-project scan; the full sync remains the authoritative discovery path.
       const knownKeys = get().data.cinematicRelatedIssues
         .filter((r) => r.cinematicId === cinematicId)
         .map((r) => r.jiraKey)
         .filter((k) => /^[A-Z][A-Z0-9]*-\d+$/.test(k));
-      const escapedName = cinematic.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-      const clauses = [`"Cinematics List" = "${escapedName}"`];
+      const clauses: string[] = [];
+      const listValue = boundCinematicsListValue(get().data.cinematicJiraSyncStates, cinematicId);
+      if (listValue) {
+        const escaped = listValue.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        clauses.push(`"Cinematics List" = "${escaped}"`);
+      }
       if (knownKeys.length > 0) clauses.push(`key IN (${knownKeys.join(', ')})`);
+      if (clauses.length === 0) return; // nothing yet to refresh or discover — wait for the full sync
       const jql = `project = "${config.jiraProjectKey}" AND (${clauses.join(' OR ')})`;
 
       const result = await window.jira.search({

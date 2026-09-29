@@ -23,9 +23,16 @@ export function classifyRelatedIssue(issue: NormalizedJiraIssue, hotlineLabel: s
 
 /**
  * Groups a batch's Hotline/QA-bug issues by the Cinematic they belong to. Association follows the
- * same "Cinematics List" name signal the binding cascade uses (matched accent/order-insensitively
- * via jiraMatchKey): an issue's own cinematicName, or — for a sub-task hotline that lacks the field
- * (the NEO case) — its parent issue's cinematicName, looked up within the same batch. Issues that
+ * "Cinematics List" name signal the binding cascade uses (matched accent/order-insensitively via
+ * jiraMatchKey): an issue's own cinematicName, or — for a sub-task hotline that lacks the field (the
+ * NEO case) — its parent issue's cinematicName, looked up within the same batch.
+ *
+ * The anchor those names resolve against is built primarily from each Cinematic's *already-bound*
+ * Jira issue (`c.jiraKey`): on real projects the Cinematics List value is a technical code (e.g.
+ * "SOLO_MQ1020_S000_CIN Fixers_Car") that rarely equals the app's Cinematic name, so matching issue
+ * values against `c.name` finds nothing. The bound issue carries the *same* Cinematics List value
+ * its hotlines/bugs carry, so `boundIssue.cinematicName → c.id` is the reliable link; `c.name`
+ * stays as a fallback for data that is already name-aligned (and for the unit fixtures). Issues that
  * match no Cinematic in `cinematics` are dropped. `syncedAt` stamps every produced row.
  */
 export function resolveRelatedIssuesByCinematic(
@@ -34,10 +41,19 @@ export function resolveRelatedIssuesByCinematic(
   hotlineLabel: string,
   syncedAt: string,
 ): Map<string, CinematicRelatedIssue[]> {
-  const cinematicIdByNameKey = new Map<string, string>();
-  for (const c of cinematics) cinematicIdByNameKey.set(jiraMatchKey(c.name), c.id);
-
   const issueByKey = new Map(batch.issues.map((i) => [i.key, i]));
+
+  const cinematicIdByNameKey = new Map<string, string>();
+  // Fallback layer first: the Cinematic's display name.
+  for (const c of cinematics) cinematicIdByNameKey.set(jiraMatchKey(c.name), c.id);
+  // Preferred layer last (so it wins on collision): the Cinematics List value of the issue this
+  // Cinematic is bound to — the value its own hotlines/bugs are tagged with.
+  for (const c of cinematics) {
+    if (!c.jiraKey) continue;
+    const boundName = issueByKey.get(c.jiraKey)?.cinematicName;
+    if (boundName) cinematicIdByNameKey.set(jiraMatchKey(boundName), c.id);
+  }
+
   const result = new Map<string, CinematicRelatedIssue[]>();
 
   for (const issue of batch.issues) {

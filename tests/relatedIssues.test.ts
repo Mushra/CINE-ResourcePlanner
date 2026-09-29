@@ -56,6 +56,25 @@ describe('resolveRelatedIssuesByCinematic', () => {
     expect(map.get('c1')![0]).toMatchObject({ kind: 'bug', lastSyncedAt: '2026-09-28T00:00:00Z' });
   });
 
+  it('anchors on the bound issue\'s Cinematics List value when the app name does not match it', () => {
+    // Real-project shape: the Cinematics List value is a technical code the Cinematic name never
+    // equals, so name matching alone would drop everything. The Cinematic is bound to an Initiative
+    // (INIT-9) that carries the same code its bug/hotline do.
+    const bound = { ...cinematic('c1', 'Seq010 Opening'), jiraKey: 'INIT-9' };
+    const code = 'SOLO_MQ1020_S000_CIN Fixers_Car';
+    const batch: NormalizedJiraBatch = {
+      issues: [
+        issue({ key: 'INIT-9', issueType: 'Initiative', cinematicName: code }), // the bound issue
+        issue({ key: 'B-1', issueType: 'Bug', cinematicName: code }),
+        issue({ key: 'H-1', labels: [HOTLINE], cinematicName: code }),
+      ],
+      warnings: [],
+    };
+    const map = resolveRelatedIssuesByCinematic(batch, [bound], HOTLINE, 't');
+    // The Initiative itself is not a related issue (neither a Bug nor hotline-labelled).
+    expect(map.get('c1')!.map((r) => r.jiraKey).sort()).toEqual(['B-1', 'H-1']);
+  });
+
   it('resolves a sub-task hotline that lacks the field through its parent in the batch', () => {
     const batch: NormalizedJiraBatch = {
       issues: [
