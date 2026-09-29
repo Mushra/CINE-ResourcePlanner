@@ -262,6 +262,7 @@ export function jiraConfig(overrides: Partial<JiraProjectConfig> = {}): JiraProj
     scopeValue: 'CIN 2',
     statusMapping: { ...DEFAULT_JIRA_STATUS_MAPPING },
     hotlineLabel: 'CINE_HOTLINE',
+    discoveryKeywords: null,
     ...overrides,
   };
 }

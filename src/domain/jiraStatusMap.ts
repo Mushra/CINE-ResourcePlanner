@@ -116,6 +116,9 @@ export function withJiraConfigDefaults(config: JiraProjectConfig): JiraProjectCo
     ? config.statusMapping
     : { ...DEFAULT_JIRA_STATUS_MAPPING };
   const hotlineLabel = config.hotlineLabel && config.hotlineLabel.trim() ? config.hotlineLabel : DEFAULT_HOTLINE_LABEL;
-  if (statusMapping === config.statusMapping && hotlineLabel === config.hotlineLabel) return config;
-  return { ...config, statusMapping, hotlineLabel };
+  // discoveryKeywords is genuinely optional (null = fall back to the global/default map), so it's
+  // only normalized from an absent field to null, never seeded with the default map here.
+  const discoveryKeywords = config.discoveryKeywords ?? null;
+  if (statusMapping === config.statusMapping && hotlineLabel === config.hotlineLabel && discoveryKeywords === config.discoveryKeywords) return config;
+  return { ...config, statusMapping, hotlineLabel, discoveryKeywords };
 }

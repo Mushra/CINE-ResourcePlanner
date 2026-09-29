@@ -36,7 +36,7 @@ import { parseStaffingWorkbook } from '../import/staffingImport';
 import { parseMppJson, type NormalizedMppImport } from '../import/mppImport';
 import { parseJiraSearchResponse, defaultJiraFieldMapping, type JiraRawSearchResponse, type NormalizedJiraBatch } from '../import/jiraSync';
 import { DEFAULT_HOTLINE_LABEL, relatedIssuesForCinematic } from '../domain/relatedIssues';
-import { jiraMatchKey } from '../domain/jiraBinding';
+import { discoverMissingLoqs, resolveDiscoveryKeywords, type DiscoveredLoq } from '../domain/loqDiscovery';
 import { PlanningEngine, round2 } from '../engine/planning';
 import type { Cinematic, CinematicJiraSyncState, CinematicRelatedIssue, Discipline, JiraProjectConfig, Loq, LoqDependency, LoqResource, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
 import { wouldCreateCycle } from '../domain/loqGraph';
@@ -62,14 +62,12 @@ export interface Toast {
 
 export type Theme = 'light' | 'dark';
 
-/** A Jira issue that looks like a LOQ (carries the LOQ Target field, or is linked to the bound epic)
- * under a Cinematic's Cinematics List value, but has no matching LOQ in the MS Project plan. Purely
- * a session-level discovery surfaced in CinematicDetail — never persisted to the plan file. */
-export interface MissingLoqInfo {
-  jiraKey: string;
-  loqTarget: string | null;
-  summary: string;
-}
+/** A Jira issue that looks like a LOQ of a bound Cinematic (outward-linked from its epic, carrying a
+ * tracked department in its summary) but has no matching LOQ in the plan. Purely a session-level
+ * discovery surfaced in CinematicDetail — never persisted to the plan file. The shape (department,
+ * level, resolved discipline) is produced by the pure engine in domain/loqDiscovery.ts. */
+export type MissingLoqInfo = DiscoveredLoq;
+export type { DiscoveredLoq } from '../domain/loqDiscovery';
 
 interface StoreState {
   status: 'loading' | 'ready' | 'error';
@@ -147,10 +145,22 @@ interface StoreState {
    * single toast only when something actually changed since the stored snapshots; silent no-op
    * without desktop/config or when nothing is bound/known. Never writes plan status/dates. */
   refreshCinematicView: (cinematicId: string) => Promise<void>;
-  /** Session-only discovery, keyed by cinematicId: Jira issues that look like LOQs under the bound
-   * Cinematic's Cinematics List value but have no LOQ in the MS Project plan (Jira → plan direction).
-   * Populated by refreshCinematicView on open; never persisted (cleared on plan swap). */
+  /** Session-only discovery, keyed by cinematicId: Jira issues that look like LOQs of the bound
+   * Cinematic (outward-linked from its epic, in a tracked department) but have no LOQ in the plan
+   * (Jira → plan direction). Populated by refreshCinematicView on open; never persisted (cleared on
+   * plan swap). */
   discoveredMissingLoqs: Record<string, MissingLoqInfo[]>;
+  /** Plan-wide default department→keyword map for LOQ discovery (disciplineKey → keywords), loaded
+   * from the `jira.discovery.keywords` setting; null = use the built-in DEFAULT_DISCOVERY_KEYWORDS.
+   * A JiraProjectConfig.discoveryKeywords override takes precedence per project. Editable in Settings
+   * — the shared-config seam that can later move to a global file. */
+  discoveryKeywordsGlobal: Record<string, string[]> | null;
+  /** Persists the plan-wide discovery keyword map (null clears it back to the built-in default). */
+  setDiscoveryKeywordsGlobal: (map: Record<string, string[]> | null) => void;
+  /** Creates the given discovered Jira issues as LOQs under the Cinematic — bound (jiraKey set), with
+   * the resolved discipline and parsed level as its type — then refreshes the view to snapshot them.
+   * A user-initiated plan edit; never writes back to Jira (signal-only holds). */
+  addDiscoveredLoqs: (cinematicId: string, selections: { jiraKey: string; disciplineId: string; type: string }[]) => Promise<void>;
 
   createProject: (input: Omit<Project, 'id' | 'sortOrder'>) => Project;
   updateProject: (project: Project) => void;
@@ -350,8 +360,30 @@ const JIRA_KEY_RE = /^[A-Z][A-Z0-9]*-\d+$/;
 /** Custom fields must be requested explicitly via `fields=` or Jira omits them from the response.
  * `labels` and `issuetype` are needed to classify Hotlines (label) vs QA bugs (type) for the
  * Cinematic detail widgets — see domain/relatedIssues.ts. */
+/** settings-table key for the plan-wide LOQ-discovery keyword map. */
+const DISCOVERY_KEYWORDS_SETTING = 'jira.discovery.keywords';
+
+/** Reads the plan-wide discovery keyword map from settings; null (absent/corrupt) = use the built-in
+ * default. Shape validated loosely (a record of string arrays) so a hand-edited blob can't crash the
+ * store. */
+function loadDiscoveryKeywords(db: PlannerDatabase): Record<string, string[]> | null {
+  const raw = db.getSetting(DISCOVERY_KEYWORDS_SETTING);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object') return null;
+    const out: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (Array.isArray(v)) out[k] = v.filter((x): x is string => typeof x === 'string');
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
 function buildJiraFields(config: JiraProjectConfig): string[] {
-  const fields = new Set(['summary', 'status', 'issuetype', 'labels', 'assignee', 'duedate', 'resolutiondate', 'parent', 'updated']);
+  const fields = new Set(['summary', 'status', 'issuetype', 'labels', 'assignee', 'duedate', 'resolutiondate', 'parent', 'issuelinks', 'updated']);
   for (const f of [config.startDateField, config.dueDateField, config.cinematicsListField, config.loqTargetField, config.epicLinkField, config.scopeField]) {
     if (f) fields.add(f);
   }
@@ -393,7 +425,7 @@ export const useStore = create<StoreState>((set, get) => {
     const raw = loadPlanningData(db);
     const data = applyStructureOverrides(raw, raw.structureOverrides);
     const engine = new PlanningEngine(data, BASE_SCENARIO_ID);
-    set({ data, engine, jiraConfigs: repoListJiraConfigs(db) });
+    set({ data, engine, jiraConfigs: repoListJiraConfigs(db), discoveryKeywordsGlobal: loadDiscoveryKeywords(db) });
   }
 
   function persist(): void {
@@ -639,6 +671,7 @@ export const useStore = create<StoreState>((set, get) => {
     toasts: [],
     lastImportReport: null,
     discoveredMissingLoqs: {},
+    discoveryKeywordsGlobal: null,
 
     init: async () => {
       try {
@@ -1003,32 +1036,64 @@ export const useStore = create<StoreState>((set, get) => {
       if (relatedSignature(prevRelated) !== relatedSignature(rows)) changed = true;
       repoReplaceCinematicRelatedIssues(db, cinematicId, rows);
 
-      // Discoverability (Jira → plan): issues that look like LOQs of this Cinematic (carry the LOQ
-      // Target field, or are linked to the bound epic) but have no matching LOQ in the plan. The
-      // batch already covers them (the "Cinematics List" clause pulled the whole family), so this is
-      // free — a session-only signal, never persisted. Covered = an existing LOQ is bound to that
-      // key, or shares its LOQ Target type.
-      const listKey = listValue ? jiraMatchKey(listValue) : null;
-      const planLoqKeys = new Set(cinematicLoqs.map((l) => l.jiraKey).filter((k): k is string => Boolean(k)));
-      const planLoqTypes = new Set(cinematicLoqs.map((l) => l.type));
-      const missing: MissingLoqInfo[] = batch.issues
-        .filter((i) => {
-          const looksLikeLoq =
-            i.loqTarget !== null ||
-            (cinematic.jiraKey ? i.epicLinkKey === cinematic.jiraKey || i.parentKey === cinematic.jiraKey : false);
-          if (!looksLikeLoq) return false;
-          const belongsHere =
-            (listKey !== null && i.cinematicName !== null && jiraMatchKey(i.cinematicName) === listKey) ||
-            (cinematic.jiraKey ? i.epicLinkKey === cinematic.jiraKey || i.parentKey === cinematic.jiraKey : false);
-          if (!belongsHere) return false;
-          const covered = planLoqKeys.has(i.key) || (i.loqTarget !== null && planLoqTypes.has(i.loqTarget));
-          return !covered;
-        })
-        .map((i) => ({ jiraKey: i.key, loqTarget: i.loqTarget, summary: i.summary }));
+      // Discoverability (Jira → plan): LOQs of this Cinematic that live in Jira but not in the plan.
+      // The family is the epic's *outward-linked* children (issuelinks — the only structural epic→LOQ
+      // signal, since fields.parent is empty on the real projects), filtered to the tracked
+      // departments detected from each summary and not already covered by a plan LOQ. Pure engine,
+      // fed from the already-fetched batch — a session-only signal, never persisted. See
+      // domain/loqDiscovery.ts for the department/level/coverage rules.
+      const missing: MissingLoqInfo[] = discoverMissingLoqs({
+        epicIssue: cinematic.jiraKey ? issueByKey.get(cinematic.jiraKey) ?? null : null,
+        familyIssues: batch.issues,
+        planLoqs: cinematicLoqs,
+        disciplines: get().data.disciplines,
+        keywords: resolveDiscoveryKeywords(config.discoveryKeywords, get().discoveryKeywordsGlobal),
+      });
 
       persist();
       set({ discoveredMissingLoqs: { ...get().discoveredMissingLoqs, [cinematicId]: missing } });
       if (changed) get().toast('info', 'Statuts Jira mis à jour');
+    },
+
+    setDiscoveryKeywordsGlobal: (map) => {
+      const db = get().db;
+      if (!db) return;
+      if (map && Object.keys(map).length > 0) {
+        db.setSetting(DISCOVERY_KEYWORDS_SETTING, JSON.stringify(map));
+      } else {
+        db.setSetting(DISCOVERY_KEYWORDS_SETTING, '');
+      }
+      persist();
+      set({ discoveryKeywordsGlobal: map && Object.keys(map).length > 0 ? map : null });
+    },
+
+    addDiscoveredLoqs: async (cinematicId, selections) => {
+      const db = get().db;
+      if (!db || selections.length === 0) return;
+      let created = 0;
+      for (const sel of selections) {
+        if (!sel.disciplineId) continue;
+        repoCreateLoq(db, {
+          cinematicId,
+          disciplineId: sel.disciplineId,
+          jiraKey: sel.jiraKey,
+          type: sel.type,
+          status: 'TODO',
+          estimateDays: null,
+          committedStart: null,
+          committedFinish: null,
+          actualFinish: null,
+          dodRef: '',
+          paused: false,
+        });
+        created += 1;
+      }
+      if (created === 0) return;
+      persist();
+      reload(db);
+      // Re-run the on-open refresh so the new LOQs get their Jira snapshot and drop off the banner.
+      await get().refreshCinematicView(cinematicId);
+      get().toast('success', `${created} LOQ${created === 1 ? '' : 's'} ajoutée${created === 1 ? '' : 's'} depuis Jira`);
     },
 
     createProject: (input) => {

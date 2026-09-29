@@ -345,6 +345,12 @@ export interface JiraProjectConfig {
    * Defaults to "CINE_HOTLINE" via withJiraConfigDefaults; a settable property so the department
    * can retarget it without a code change (see the shared-config direction). null on legacy configs. */
   hotlineLabel: string | null;
+  /** Per-project override of the LOQ-discovery department keyword map (disciplineKey → keywords),
+   * used to detect a Jira subtask's department from its summary — see domain/loqDiscovery.ts. null =
+   * fall back to the global setting, then to DEFAULT_DISCOVERY_KEYWORDS. A whole-map replacement, not
+   * a merge. Kept per-project because summary conventions can differ; defaults live globally since
+   * disciplines are shared (see the shared-config direction). */
+  discoveryKeywords: Record<string, string[]> | null;
 }
 
 /**

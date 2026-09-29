@@ -65,6 +65,7 @@ describe('parseJiraSearchResponse', () => {
         loqTarget: null,
         scopeValue: null,
         epicLinkKey: null,
+        linkedIssueKeys: [],
         updatedAt: '2026-09-20T10:23:00.000+0000',
       },
       {
@@ -82,6 +83,7 @@ describe('parseJiraSearchResponse', () => {
         loqTarget: null,
         scopeValue: null,
         epicLinkKey: null,
+        linkedIssueKeys: [],
         updatedAt: '2026-09-28T08:00:00.000+0000',
       },
     ]);
@@ -121,6 +123,32 @@ describe('parseJiraSearchResponse', () => {
       scopeValue: null,
       epicLinkKey: null,
     });
+  });
+
+  it('collects outward issue-link keys into linkedIssueKeys (any link type), ignoring inward links', () => {
+    // Mirrors the real epic→LOQ shape: OVR uses "is parent task of", NEO uses "breaks into" — both are
+    // outwardIssue links. Inward links and the noise types ("breaks"/"relates") that point back must
+    // not be collected. An issue with no issuelinks reads as [].
+    const raw: JiraRawSearchResponse = {
+      issues: [
+        {
+          key: 'OVR-176772',
+          fields: {
+            summary: 'CIN Teresa wounded',
+            issuelinks: [
+              { type: { name: 'Parent/Child' }, outwardIssue: { key: 'OVR-1001' } },
+              { type: { name: 'Parent/Child' }, outwardIssue: { key: 'OVR-1002' } },
+              { type: { name: 'Relates' }, inwardIssue: { key: 'OVR-9999' } }, // inward → ignored
+              null, // defensive: a null link entry must not throw
+            ],
+          },
+        },
+        { key: 'OVR-2', fields: { summary: 'no links' } },
+      ],
+    };
+    const batch = parseJiraSearchResponse(raw, NATIVE_ONLY);
+    expect(batch.issues[0].linkedIssueKeys).toEqual(['OVR-1001', 'OVR-1002']);
+    expect(batch.issues[1].linkedIssueKeys).toEqual([]);
   });
 
   it('reads the start date from the configured custom field, falling back to null when unmapped', () => {

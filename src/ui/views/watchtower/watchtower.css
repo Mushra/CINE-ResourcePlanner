@@ -203,8 +203,8 @@ a.hotline-key:hover { text-decoration: underline; }
  * matching LOQ in the plan. A soft warning tone, session-only — see discoveredMissingLoqs. */
 .missing-loq-banner {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  flex-direction: column;
+  gap: 10px;
   margin-bottom: 12px;
   padding: 10px 12px;
   border: 1px solid var(--border);
@@ -216,6 +216,39 @@ a.hotline-key:hover { text-decoration: underline; }
   line-height: 1.5;
 }
 .missing-loq-banner strong { color: var(--text-primary); font-weight: 600; }
+.missing-loq-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.missing-loq-sub { flex-basis: 100%; color: var(--text-secondary); }
+.missing-loq-groups { display: flex; flex-direction: column; gap: 8px; }
+.missing-loq-group { display: flex; flex-direction: column; gap: 2px; }
+.missing-loq-group-head {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-primary);
+}
+.missing-loq-nodisc { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-secondary); font-style: italic; }
+.missing-loq-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.missing-loq-row:hover { background: var(--surface-2); }
+.missing-loq-row.is-disabled { cursor: default; opacity: 0.6; }
+.missing-loq-row.is-disabled:hover { background: none; }
+.missing-loq-row input { cursor: inherit; }
+.missing-loq-level {
+  min-width: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+.missing-loq-key { font-variant-numeric: tabular-nums; }
+.missing-loq-summary { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.missing-loq-actions { display: flex; justify-content: flex-end; }
 
 /* QA-bugs widget — metric tiles only (Open · In Progress · Waiting For · Resolved). */
 .bug-metrics { display: flex; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }

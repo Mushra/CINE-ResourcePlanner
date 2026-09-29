@@ -57,6 +57,13 @@ export interface NormalizedJiraIssue {
   /** Key from a dedicated Epic Link / Parent Issue custom field (mapping.epicLinkField), distinct
    * from parentKey's native fields.parent. Null = field absent/unconfigured. */
   epicLinkKey: string | null;
+  /** Keys of every issue this one points to via an *outward* issue link (fields.issuelinks[].
+   * outwardIssue) — regardless of link type. This is how a Cinematic-level epic reaches its LOQ
+   * children on the real projects: OVR uses "is parent task of", NEO uses "breaks into" (the type
+   * name is inverted between projects, so it's never filtered on — see domain/loqDiscovery.ts). The
+   * native fields.parent is empty on both, so this is the only structural epic→LOQ signal. Empty
+   * array when the field is absent/unrequested. */
+  linkedIssueKeys: string[];
   updatedAt: string | null;
 }
 
@@ -79,6 +86,7 @@ interface JiraRawIssue {
     duedate?: string | null;
     resolutiondate?: string | null;
     parent?: { key?: string } | null;
+    issuelinks?: Array<{ outwardIssue?: { key?: string } | null; inwardIssue?: { key?: string } | null } | null> | null;
     updated?: string | null;
     [customField: string]: unknown;
   };
@@ -134,6 +142,11 @@ export function parseJiraSearchResponse(raw: JiraRawSearchResponse, mapping: Jir
       loqTarget: mapping.loqTargetField ? readOptionValue(fields[mapping.loqTargetField]) : null,
       scopeValue: mapping.scopeField ? readOptionValue(fields[mapping.scopeField]) : null,
       epicLinkKey: mapping.epicLinkField ? readOptionValue(fields[mapping.epicLinkField]) : null,
+      linkedIssueKeys: Array.isArray(fields.issuelinks)
+        ? fields.issuelinks
+            .map((link) => (typeof link?.outwardIssue?.key === 'string' ? link.outwardIssue.key : null))
+            .filter((k): k is string => k !== null)
+        : [],
       updatedAt: typeof fields.updated === 'string' ? fields.updated : null,
     });
   }

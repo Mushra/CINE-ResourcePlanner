@@ -76,7 +76,11 @@ export function jiraMatchKey(s: string): string {
   return Array.from(tokenize(s)).sort().join(' ');
 }
 
-function tokenize(s: string): Set<string> {
+/** Splits a string into a set of lowercased, diacritic-stripped alphanumeric tokens (any run of
+ * non-alphanumerics is a separator) — so `-`, ` | ` and spaces all vanish, and `TechAnim` stays a
+ * single token distinct from `Anim`. Exported for reuse by domain/loqDiscovery.ts's department
+ * detection, which relies on the exact same token boundaries. */
+export function tokenize(s: string): Set<string> {
   const stripped = s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   return new Set(stripped.split(/[^a-z0-9]+/).filter(Boolean));
 }

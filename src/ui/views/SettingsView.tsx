@@ -6,6 +6,7 @@ import type { JiraProjectConfig } from '../../domain/types';
 import { DEFAULT_JIRA_STATUS_MAPPING } from '../../domain/jiraStatusMap';
 import { DEFAULT_HOTLINE_LABEL } from '../../domain/relatedIssues';
 import { JiraStatusMappingEditor } from '../components/JiraStatusMappingEditor';
+import { disciplineKey, resolveDiscoveryKeywords } from '../../domain/loqDiscovery';
 
 const DEFAULT_CINEMATICS_LIST_FIELD = 'customfield_10420';
 const DEFAULT_LOQ_TARGET_FIELD = 'customfield_12338';
@@ -34,6 +35,7 @@ function emptyConfig(projectId: string): JiraProjectConfig {
     scopeJql: DEFAULT_SCOPE_JQL,
     statusMapping: { ...DEFAULT_JIRA_STATUS_MAPPING },
     hotlineLabel: DEFAULT_HOTLINE_LABEL,
+    discoveryKeywords: null,
   };
 }
 
@@ -47,6 +49,9 @@ export function SettingsView() {
   const jiraSetToken = useStore((s) => s.jiraSetToken);
   const jiraClearToken = useStore((s) => s.jiraClearToken);
   const testJiraConnection = useStore((s) => s.testJiraConnection);
+  const disciplines = useStore((s) => s.data.disciplines);
+  const discoveryKeywordsGlobal = useStore((s) => s.discoveryKeywordsGlobal);
+  const setDiscoveryKeywordsGlobal = useStore((s) => s.setDiscoveryKeywordsGlobal);
 
   const sortedProjects = [...projects].sort((a, b) => a.name.localeCompare(b.name));
   const [projectId, setProjectId] = useState<string>('');
@@ -55,10 +60,22 @@ export function SettingsView() {
   const [hasToken, setHasToken] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [testing, setTesting] = useState(false);
+  // Global LOQ-discovery keywords editor: one CSV draft per plan discipline, keyed by discipline id.
+  const [keywordDrafts, setKeywordDrafts] = useState<Record<string, string>>({});
+  const [keywordsSaved, setKeywordsSaved] = useState(false);
 
   useEffect(() => {
     if (!projectId && sortedProjects.length > 0) setProjectId(sortedProjects[0].id);
   }, [projectId, sortedProjects]);
+
+  // Seed the keyword drafts from the effective global map (saved global override, else built-in
+  // defaults), one row per discipline, so the editor always shows what discovery currently uses.
+  useEffect(() => {
+    const effective = resolveDiscoveryKeywords(null, discoveryKeywordsGlobal);
+    const drafts: Record<string, string> = {};
+    for (const d of disciplines) drafts[d.id] = (effective[disciplineKey(d.name)] ?? []).join(', ');
+    setKeywordDrafts(drafts);
+  }, [disciplines, discoveryKeywordsGlobal]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -94,6 +111,21 @@ export function SettingsView() {
     const result = await testJiraConnection(projectId);
     setTesting(false);
     setTestResult(result);
+  }
+
+  function handleSaveKeywords(): void {
+    // Build a disciplineKey→keywords map from the drafts, dropping empties. Whole-map replacement:
+    // null (all empty) resets discovery to its built-in defaults.
+    const map: Record<string, string[]> = {};
+    for (const d of disciplines) {
+      const words = (keywordDrafts[d.id] ?? '')
+        .split(',')
+        .map((w) => w.trim())
+        .filter((w) => w.length > 0);
+      if (words.length > 0) map[disciplineKey(d.name)] = words;
+    }
+    setDiscoveryKeywordsGlobal(Object.keys(map).length > 0 ? map : null);
+    setKeywordsSaved(true);
   }
 
   const selectedProject = sortedProjects.find((p) => p.id === projectId);
@@ -277,6 +309,41 @@ export function SettingsView() {
       )}
 
       {sortedProjects.length === 0 && <p className="field-hint">Create a project first to configure its Jira connection.</p>}
+
+      <div className="card settings-card">
+        <div className="panel-header">
+          <h2>LOQ discovery keywords</h2>
+          <span className="panel-sub">Global — shared across projects</span>
+        </div>
+        <p className="field-hint">
+          When you open a bound cinematic, the planner scans the Jira issues linked to it and proposes the ones whose summary names a
+          tracked department. These keywords decide which departments count and how they're spelled in Jira. One discipline per row,
+          comma-separated keywords; leave a row blank to skip that discipline. A single-word keyword must appear as a whole word in the
+          summary (so <code>Anim</code> won't match <code>TechAnim</code>); a multi-word keyword matches even when the words are jammed
+          together (<code>cin design</code> matches <code>CinDesign</code>). Clear every row to fall back to the built-in defaults.
+        </p>
+        {disciplines.length === 0 ? (
+          <p className="field-hint">Create disciplines first — discovery maps keywords onto your plan's disciplines.</p>
+        ) : (
+          <>
+            {[...disciplines].sort((a, b) => a.name.localeCompare(b.name)).map((d) => (
+              <div className="field" key={d.id}>
+                <label htmlFor={`kw-${d.id}`}>{d.name}</label>
+                <input
+                  id={`kw-${d.id}`}
+                  value={keywordDrafts[d.id] ?? ''}
+                  onChange={(e) => { setKeywordDrafts((prev) => ({ ...prev, [d.id]: e.target.value })); setKeywordsSaved(false); }}
+                  placeholder="e.g. anim, animation"
+                />
+              </div>
+            ))}
+            <div className="detail-header-actions" style={{ marginTop: 12 }}>
+              {keywordsSaved && <span className="field-hint" style={{ color: 'var(--status-success, #2e7d32)' }}>Saved.</span>}
+              <Button variant="primary" icon="save" onClick={handleSaveKeywords}>Save keywords</Button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -223,6 +223,7 @@ describe('Jira project config (Phase 5b — non-secret settings only, no token)'
       scopeValue: 'CIN 2',
       statusMapping: { ...DEFAULT_JIRA_STATUS_MAPPING },
       hotlineLabel: 'CINE_HOTLINE',
+      discoveryKeywords: null,
     };
   }
 
