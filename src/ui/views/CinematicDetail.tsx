@@ -84,7 +84,7 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const updateLoq = useStore((s) => s.updateLoq);
   const deleteLoq = useStore((s) => s.deleteLoq);
   const relatedIssues = useStore((s) => s.data.cinematicRelatedIssues);
-  const refreshCinematicRelatedIssues = useStore((s) => s.refreshCinematicRelatedIssues);
+  const refreshCinematicView = useStore((s) => s.refreshCinematicView);
   const backToProject = useUiStore((s) => s.backToProject);
   const [editing, setEditing] = useState(false);
   const [newLoq, setNewLoq] = useState(false);
@@ -93,11 +93,12 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const [varianceTarget, setVarianceTarget] = useState<Loq | null>(null);
   const [focus, setFocus] = useState<string>('ALL');
 
-  // Light-refresh this cinematic's Hotline/QA-bug widgets on open so they're current without a full
-  // project sync. Silent + guarded (desktop + config) inside the action; a no-op in a browser tab.
+  // Live-refresh this cinematic on open — the Jira-mirrored status of the bound epic and its LOQs,
+  // plus the Hotline/QA-bug widgets (with discovery of newly-tagged ones) — so the page is current
+  // without a full project sync. Toasts only when something changed; guarded/silent in a browser tab.
   useEffect(() => {
-    void refreshCinematicRelatedIssues(cinematicId);
-  }, [cinematicId, refreshCinematicRelatedIssues]);
+    void refreshCinematicView(cinematicId);
+  }, [cinematicId, refreshCinematicView]);
 
   if (!cinematic) {
     return (

@@ -37,7 +37,7 @@ import { parseMppJson, type NormalizedMppImport } from '../import/mppImport';
 import { parseJiraSearchResponse, defaultJiraFieldMapping, type JiraRawSearchResponse, type NormalizedJiraBatch } from '../import/jiraSync';
 import { DEFAULT_HOTLINE_LABEL, relatedIssuesForCinematic } from '../domain/relatedIssues';
 import { PlanningEngine, round2 } from '../engine/planning';
-import type { Cinematic, CinematicJiraSyncState, Discipline, JiraProjectConfig, Loq, LoqDependency, LoqResource, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
+import type { Cinematic, CinematicJiraSyncState, CinematicRelatedIssue, Discipline, JiraProjectConfig, Loq, LoqDependency, LoqResource, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
 import { wouldCreateCycle } from '../domain/loqGraph';
 import { emptyPlanningData } from '../domain/types';
 import { applyStructureOverrides } from '../domain/overrides';
@@ -128,9 +128,15 @@ interface StoreState {
   testJiraConnection: (projectId: string) => Promise<{ ok: true; total: number } | { ok: false; error: string }>;
   /** Light per-Cinematic refresh of its Hotline/QA-bug widgets: fetches only this Cinematic's
    * related issues (by Cinematics List value + its already-known related keys) and replaces the
-   * stored set. Silent (no toast), a no-op without desktop/config/jiraKey — never throws. Called on
-   * opening the Cinematic detail so the widgets are current without a full project sync. */
+   * stored set. Silent (no toast), a no-op without desktop/config/jiraKey — never throws. Used
+   * internally after a Cinematic rebind (the on-open path uses refreshCinematicView). */
   refreshCinematicRelatedIssues: (cinematicId: string) => Promise<void>;
+  /** On-open refresh for the whole Cinematic page, in one narrow query: the Jira-mirrored status of
+   * the issue bound to the Cinematic and to each of its LOQs, plus the Hotlines/QA-bugs widgets
+   * (known related issues refreshed and newly Cinematics-List-tagged ones discovered). Surfaces a
+   * single toast only when something actually changed since the stored snapshots; silent no-op
+   * without desktop/config or when nothing is bound/known. Never writes plan status/dates. */
+  refreshCinematicView: (cinematicId: string) => Promise<void>;
 
   createProject: (input: Omit<Project, 'id' | 'sortOrder'>) => Project;
   updateProject: (project: Project) => void;
@@ -303,6 +309,30 @@ function boundCinematicsListValue(states: CinematicJiraSyncState[], cinematicId:
   }
 }
 
+/** The field-id → semantic mapping the parser needs, assembled from a project's Jira config. */
+function jiraFieldMapping(config: JiraProjectConfig) {
+  return defaultJiraFieldMapping({
+    startDateField: config.startDateField,
+    dueDateField: config.dueDateField,
+    cinematicsListField: config.cinematicsListField,
+    loqTargetField: config.loqTargetField,
+    epicLinkField: config.epicLinkField,
+    scopeField: config.scopeField,
+  });
+}
+
+/** Order-independent fingerprint of a Cinematic's related-issue set, used to tell whether an
+ * on-open refresh actually changed anything (key membership + the status/resolution/updated fields
+ * that drive the widgets) before deciding to surface a "synced" toast. */
+function relatedSignature(rows: CinematicRelatedIssue[]): string {
+  return rows
+    .map((r) => `${r.jiraKey}|${r.status ?? ''}|${r.resolutionDate ?? ''}|${r.updatedAt ?? ''}`)
+    .sort()
+    .join(';');
+}
+
+const JIRA_KEY_RE = /^[A-Z][A-Z0-9]*-\d+$/;
+
 /** Custom fields must be requested explicitly via `fields=` or Jira omits them from the response.
  * `labels` and `issuetype` are needed to classify Hotlines (label) vs QA bugs (type) for the
  * Cinematic detail widgets — see domain/relatedIssues.ts. */
@@ -371,7 +401,7 @@ export const useStore = create<StoreState>((set, get) => {
   async function liveRefreshBoundIssue(kind: 'cinematic' | 'loq', id: string, jiraKey: string): Promise<void> {
     const { db } = get();
     if (!db || !window.jira) return; // browser tab or not yet loaded
-    if (!/^[A-Z][A-Z0-9]*-\d+$/.test(jiraKey)) return; // keeps the JQL safe; malformed keys can't match
+    if (!JIRA_KEY_RE.test(jiraKey)) return; // keeps the JQL safe; malformed keys can't match
     const projectId = kind === 'cinematic'
       ? get().data.cinematics.find((c) => c.id === id)?.projectId
       : (() => {
@@ -394,15 +424,7 @@ export const useStore = create<StoreState>((set, get) => {
       get().toast('error', `Jira : impossible de rafraîchir ${jiraKey}`);
       return;
     }
-    const mapping = defaultJiraFieldMapping({
-      startDateField: config.startDateField,
-      dueDateField: config.dueDateField,
-      cinematicsListField: config.cinematicsListField,
-      loqTargetField: config.loqTargetField,
-      epicLinkField: config.epicLinkField,
-      scopeField: config.scopeField,
-    });
-    const issue = parseJiraSearchResponse(result.raw, mapping).issues[0];
+    const issue = parseJiraSearchResponse(result.raw, jiraFieldMapping(config)).issues[0];
     if (!issue) {
       get().toast('error', `Jira : ${jiraKey} introuvable`);
       return;
@@ -860,7 +882,7 @@ export const useStore = create<StoreState>((set, get) => {
       const knownKeys = get().data.cinematicRelatedIssues
         .filter((r) => r.cinematicId === cinematicId)
         .map((r) => r.jiraKey)
-        .filter((k) => /^[A-Z][A-Z0-9]*-\d+$/.test(k));
+        .filter((k) => JIRA_KEY_RE.test(k));
       const clauses: string[] = [];
       const listValue = boundCinematicsListValue(get().data.cinematicJiraSyncStates, cinematicId);
       if (listValue) {
@@ -881,19 +903,93 @@ export const useStore = create<StoreState>((set, get) => {
       });
       if (!result.ok) return; // silent — the persisted set stays as-is
 
-      const mapping = defaultJiraFieldMapping({
-        startDateField: config.startDateField,
-        dueDateField: config.dueDateField,
-        cinematicsListField: config.cinematicsListField,
-        loqTargetField: config.loqTargetField,
-        epicLinkField: config.epicLinkField,
-        scopeField: config.scopeField,
-      });
-      const batch = parseJiraSearchResponse(result.raw, mapping);
+      const batch = parseJiraSearchResponse(result.raw, jiraFieldMapping(config));
       const hotlineLabel = config.hotlineLabel ?? DEFAULT_HOTLINE_LABEL;
       const rows = relatedIssuesForCinematic(batch, cinematicId, hotlineLabel, new Date().toISOString());
       repoReplaceCinematicRelatedIssues(db, cinematicId, rows);
       persist();
+    },
+    refreshCinematicView: async (cinematicId) => {
+      const { db } = get();
+      if (!db || !window.jira) return; // browser tab or not yet loaded — keep the persisted snapshots
+      const cinematic = get().data.cinematics.find((c) => c.id === cinematicId);
+      if (!cinematic) return;
+      const config = get().jiraConfigs.find((c) => c.projectId === cinematic.projectId);
+      if (!config) return;
+
+      // One narrow query covering everything the Cinematic page mirrors: the issue bound to the
+      // Cinematic (its epic) and those bound to its LOQs (via `key IN`), plus the Hotlines/QA-bugs
+      // — the already-known related keys AND a discovery clause on the epic's Cinematics List value,
+      // so newly-tagged bugs/hotlines surface too. Light by design; the full sync stays the
+      // authoritative whole-project scan.
+      const cinematicLoqs = get().data.loqs.filter((l) => l.cinematicId === cinematicId);
+      const boundKeys = new Set<string>();
+      if (cinematic.jiraKey && JIRA_KEY_RE.test(cinematic.jiraKey)) boundKeys.add(cinematic.jiraKey);
+      for (const l of cinematicLoqs) if (l.jiraKey && JIRA_KEY_RE.test(l.jiraKey)) boundKeys.add(l.jiraKey);
+      const knownKeys = get().data.cinematicRelatedIssues
+        .filter((r) => r.cinematicId === cinematicId)
+        .map((r) => r.jiraKey)
+        .filter((k) => JIRA_KEY_RE.test(k));
+
+      const clauses: string[] = [];
+      const inKeys = [...new Set([...boundKeys, ...knownKeys])];
+      if (inKeys.length > 0) clauses.push(`key IN (${inKeys.join(', ')})`);
+      const listValue = boundCinematicsListValue(get().data.cinematicJiraSyncStates, cinematicId);
+      if (listValue) {
+        const escaped = listValue.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        clauses.push(`"Cinematics List" = "${escaped}"`);
+      }
+      if (clauses.length === 0) return; // nothing bound or known yet — wait for the full sync
+
+      const result = await window.jira.search({
+        projectId: cinematic.projectId,
+        baseUrl: config.baseUrl,
+        authMode: config.authMode,
+        email: config.email,
+        jql: `project = "${config.jiraProjectKey}" AND (${clauses.join(' OR ')})`,
+        fields: buildJiraFields(config),
+      });
+      if (!result.ok) return; // silent on open — the persisted snapshots stay as-is
+
+      const batch = parseJiraSearchResponse(result.raw, jiraFieldMapping(config));
+      const issueByKey = new Map(batch.issues.map((i) => [i.key, i]));
+      const now = new Date().toISOString();
+      let changed = false;
+
+      // Bound Cinematic epic status snapshot.
+      if (cinematic.jiraKey) {
+        const issue = issueByKey.get(cinematic.jiraKey);
+        if (issue) {
+          const prev = get().data.cinematicJiraSyncStates.find((s) => s.cinematicId === cinematicId);
+          if (!prev || prev.jiraStatus !== issue.status || prev.jiraUpdatedAt !== issue.updatedAt) changed = true;
+          repoUpsertCinematicJiraSyncState(db, {
+            cinematicId, jiraStatus: issue.status, jiraUpdatedAt: issue.updatedAt,
+            lastSyncedAt: now, rawSnapshot: JSON.stringify(issue),
+          });
+        }
+      }
+      // Bound LOQ status snapshots.
+      for (const loq of cinematicLoqs) {
+        if (!loq.jiraKey) continue;
+        const issue = issueByKey.get(loq.jiraKey);
+        if (!issue) continue;
+        const prev = get().data.jiraSyncStates.find((s) => s.loqId === loq.id);
+        if (!prev || prev.jiraStatus !== issue.status || prev.jiraUpdatedAt !== issue.updatedAt) changed = true;
+        repoUpsertJiraSyncState(db, {
+          loqId: loq.id, jiraStatus: issue.status, jiraAssignee: issue.assignee, jiraUpdatedAt: issue.updatedAt,
+          lastSyncedAt: now, rawSnapshot: JSON.stringify(issue),
+        });
+      }
+      // Hotlines/QA-bugs — exclude the bound work-issues so a LOQ/epic issue is never counted as one.
+      const relatedBatch: NormalizedJiraBatch = { issues: batch.issues.filter((i) => !boundKeys.has(i.key)), warnings: [] };
+      const hotlineLabel = config.hotlineLabel ?? DEFAULT_HOTLINE_LABEL;
+      const rows = relatedIssuesForCinematic(relatedBatch, cinematicId, hotlineLabel, now);
+      const prevRelated = get().data.cinematicRelatedIssues.filter((r) => r.cinematicId === cinematicId);
+      if (relatedSignature(prevRelated) !== relatedSignature(rows)) changed = true;
+      repoReplaceCinematicRelatedIssues(db, cinematicId, rows);
+
+      persist();
+      if (changed) get().toast('info', 'Statuts Jira mis à jour');
     },
 
     createProject: (input) => {
