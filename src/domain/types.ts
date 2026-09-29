@@ -340,6 +340,11 @@ export interface JiraProjectConfig {
    * map surfaces explicitly as "À mapper", never a silent default. null on legacy configs that
    * predate this field — backfilled by withJiraConfigDefaults at load. */
   statusMapping: Record<string, LoqStatus> | null;
+  /** Jira label marking an issue as a Hotline/escalation (Ubisoft convention: "CINE_HOTLINE").
+   * Drives both the widened sync JQL and the hotline-vs-bug classifier (domain/relatedIssues.ts).
+   * Defaults to "CINE_HOTLINE" via withJiraConfigDefaults; a settable property so the department
+   * can retarget it without a code change (see the shared-config direction). null on legacy configs. */
+  hotlineLabel: string | null;
 }
 
 /**
@@ -355,6 +360,26 @@ export interface CinematicJiraSyncState {
   jiraUpdatedAt: string | null;
   lastSyncedAt: string;
   rawSnapshot: string;
+}
+
+/**
+ * A Jira issue (Hotline or QA bug) associated with a Cinematic — surfaced in the Cinematic detail
+ * view's Hotlines/QA-bugs widgets. Persisted on full sync and refreshed by a light per-cinematic
+ * fetch (see relatedIssues.ts for how issues are classified and associated). Signal-only, like the
+ * Jira sync states — never written back to plan status or dates.
+ */
+export interface CinematicRelatedIssue {
+  cinematicId: string;
+  jiraKey: string;
+  kind: 'hotline' | 'bug';
+  summary: string | null;
+  /** Raw Jira status string, unmapped. */
+  status: string | null;
+  issueType: string | null;
+  assignee: string | null;
+  updatedAt: string | null;
+  resolutionDate: string | null;
+  lastSyncedAt: string;
 }
 
 /** Full snapshot of persisted data the engine operates on. Pure — no DB or UI concerns. */
@@ -378,6 +403,7 @@ export interface PlanningData {
   varianceEvents: VarianceEvent[];
   jiraSyncStates: JiraSyncState[];
   cinematicJiraSyncStates: CinematicJiraSyncState[];
+  cinematicRelatedIssues: CinematicRelatedIssue[];
 }
 
 export function emptyPlanningData(): PlanningData {
@@ -401,5 +427,6 @@ export function emptyPlanningData(): PlanningData {
     varianceEvents: [],
     jiraSyncStates: [],
     cinematicJiraSyncStates: [],
+    cinematicRelatedIssues: [],
   };
 }

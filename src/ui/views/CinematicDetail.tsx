@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
 import { getSanityChecks, type SanityCheck } from '../../engine/validation';
@@ -17,7 +17,7 @@ import { LoqFormDrawer, type LoqFormValue } from '../components/LoqFormDrawer';
 import { LoqTimeline } from '../components/LoqTimeline';
 import { RecommitDialog } from '../components/RecommitDialog';
 import { VarianceDialog } from '../components/VarianceDialog';
-import type { Loq } from '../../domain/types';
+import type { CinematicRelatedIssue, Loq } from '../../domain/types';
 
 const SEVERITY_RANK: Record<SanityCheck['severity'], number> = { critical: 2, warning: 1, info: 0 };
 
@@ -32,8 +32,35 @@ function loqStatusCell(loq: Loq, effective: EffectiveStatus | undefined): { clas
 }
 
 const VERSION_PLAYER_GAP = "Needs a ShotGrid/Flow connector to fetch and stream published review versions, and to expose the publish/push event log.";
-const HOTLINES_GAP = "Needs a Hotline/escalation feed integration — no domain model exists yet.";
-const QA_BUGS_GAP = "Needs a QA bug tracker integration (e.g. ShotGrid Notes/Tickets, or a dedicated bug DB) — no domain model exists yet.";
+
+/** A resolved Jira issue reads as calm/neutral; anything else is still open work. */
+function isResolvedIssue(issue: CinematicRelatedIssue): boolean {
+  return issue.resolutionDate !== null;
+}
+
+/** One row of the Hotlines / QA-bugs widgets: the Jira key, summary, raw status and assignee. */
+function RelatedIssueList({ issues, baseUrl }: { issues: CinematicRelatedIssue[]; baseUrl: string | null }) {
+  return (
+    <ul className="related-issue-list">
+      {issues.map((issue) => (
+        <li key={issue.jiraKey} className={`related-issue ${isResolvedIssue(issue) ? 'resolved' : ''}`}>
+          <div className="related-issue-main">
+            {baseUrl ? (
+              <a className="related-issue-key" href={`${baseUrl.replace(/\/$/, '')}/browse/${issue.jiraKey}`} target="_blank" rel="noreferrer">{issue.jiraKey}</a>
+            ) : (
+              <span className="related-issue-key">{issue.jiraKey}</span>
+            )}
+            <span className="related-issue-summary">{issue.summary ?? '—'}</span>
+          </div>
+          <div className="related-issue-meta">
+            {issue.status && <span className="related-issue-status">{issue.status}</span>}
+            {issue.assignee && <span className="related-issue-assignee">{issue.assignee}</span>}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const cinematic = useStore((s) => s.data.cinematics.find((c) => c.id === cinematicId));
@@ -47,6 +74,8 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const createLoq = useStore((s) => s.createLoq);
   const updateLoq = useStore((s) => s.updateLoq);
   const deleteLoq = useStore((s) => s.deleteLoq);
+  const relatedIssues = useStore((s) => s.data.cinematicRelatedIssues);
+  const refreshCinematicRelatedIssues = useStore((s) => s.refreshCinematicRelatedIssues);
   const backToProject = useUiStore((s) => s.backToProject);
   const [editing, setEditing] = useState(false);
   const [newLoq, setNewLoq] = useState(false);
@@ -54,6 +83,12 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const [recommitTarget, setRecommitTarget] = useState<{ loq: Loq; initialStart: string | null; initialFinish: string | null } | null>(null);
   const [varianceTarget, setVarianceTarget] = useState<Loq | null>(null);
   const [focus, setFocus] = useState<string>('ALL');
+
+  // Light-refresh this cinematic's Hotline/QA-bug widgets on open so they're current without a full
+  // project sync. Silent + guarded (desktop + config) inside the action; a no-op in a browser tab.
+  useEffect(() => {
+    void refreshCinematicRelatedIssues(cinematicId);
+  }, [cinematicId, refreshCinematicRelatedIssues]);
 
   if (!cinematic) {
     return (
@@ -69,6 +104,7 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const forecasts = engine.getLoqForecasts();
   const effectiveStatusMap = buildEffectiveStatusMap(engine, jiraConfigs);
   const statusOf = statusResolverFrom(effectiveStatusMap);
+  const jiraConfig = project ? jiraConfigs.find((c) => c.projectId === project.id) ?? null : null;
 
   const checks = project ? getSanityChecks(engine, jiraConfigs).filter((c) => c.projectId === project.id) : [];
   const cinematicAttention: AttentionItem[] = project
@@ -83,6 +119,14 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const focusLoq = focusDisciplineId ? representativeLoq(loqs, cinematic.id, focusDisciplineId, statusOf) : null;
   const focusHealth: WatchtowerHealth | null = focusLoq ? deriveLoqHealth(focusLoq, forecasts.get(focusLoq.id), statusOf(focusLoq)) : null;
   const focusForecastFinish = focusLoq ? forecasts.get(focusLoq.id)?.forecastFinish ?? focusLoq.actualFinish ?? null : null;
+
+  // Open (unresolved) issues first, then by most recently updated — the freshest, most actionable
+  // on top. Split by kind into the two widgets.
+  const cinematicRelated = relatedIssues
+    .filter((r) => r.cinematicId === cinematic.id)
+    .sort((a, b) => Number(isResolvedIssue(a)) - Number(isResolvedIssue(b)) || (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
+  const hotlines = cinematicRelated.filter((r) => r.kind === 'hotline');
+  const bugs = cinematicRelated.filter((r) => r.kind === 'bug');
 
   return (
     <div className="cinematic-detail-view">
@@ -175,18 +219,30 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
         </div>
       </div>
 
-      <div className="card panel">
-        <div className="panel-header">
-          <h2>Hotlines</h2>
+      <div className="cd-grid2">
+        <div className="card panel">
+          <div className="panel-header">
+            <h2>Hotlines</h2>
+            {hotlines.length > 0 && <span className="panel-sub">{hotlines.length} linked</span>}
+          </div>
+          {hotlines.length > 0 ? (
+            <RelatedIssueList issues={hotlines} baseUrl={jiraConfig?.baseUrl ?? null} />
+          ) : (
+            <EmptyState icon="check" title="No hotlines" description={`No ${jiraConfig?.hotlineLabel ?? 'CINE_HOTLINE'} issues linked to this cinematic.`} compact />
+          )}
         </div>
-        <EmptyState icon="info" title="Not available yet" description={HOTLINES_GAP} compact />
-      </div>
 
-      <div className="card panel">
-        <div className="panel-header">
-          <h2>QA bugs</h2>
+        <div className="card panel">
+          <div className="panel-header">
+            <h2>QA bugs</h2>
+            {bugs.length > 0 && <span className="panel-sub">{bugs.length} linked</span>}
+          </div>
+          {bugs.length > 0 ? (
+            <RelatedIssueList issues={bugs} baseUrl={jiraConfig?.baseUrl ?? null} />
+          ) : (
+            <EmptyState icon="check" title="No bugs" description="No Jira bugs linked to this cinematic." compact />
+          )}
         </div>
-        <EmptyState icon="info" title="Not available yet" description={QA_BUGS_GAP} compact />
       </div>
 
       <div className="card loqs-card">

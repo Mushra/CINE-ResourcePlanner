@@ -222,6 +222,7 @@ describe('Jira project config (Phase 5b — non-secret settings only, no token)'
       scopeField: 'customfield_57706',
       scopeValue: 'CIN 2',
       statusMapping: { ...DEFAULT_JIRA_STATUS_MAPPING },
+      hotlineLabel: 'CINE_HOTLINE',
     };
   }
 

@@ -5,8 +5,9 @@
 // silently overwrites the plan (see docs/INTEGRATIONS.md §3). Date/status comparison lives in the
 // jira_inconsistency sanity check instead.
 import type { PlannerDatabase } from './database';
-import { loadPlanningData, updateCinematic, updateLoq, upsertCinematicJiraSyncState, upsertJiraSyncState } from './repository';
+import { loadPlanningData, replaceCinematicRelatedIssues, updateCinematic, updateLoq, upsertCinematicJiraSyncState, upsertJiraSyncState } from './repository';
 import type { NormalizedJiraBatch } from '../import/jiraSync';
+import { DEFAULT_HOTLINE_LABEL, resolveRelatedIssuesByCinematic } from '../domain/relatedIssues';
 
 /** cinematicId/loqId -> confirmed Jira key, or null for "don't link" (a proposal the user rejected). */
 export interface ConfirmedJiraBindings {
@@ -19,6 +20,7 @@ export interface JiraApplyReport {
   cinematicsSkippedOtherProject: number;
   loqsLinked: number;
   loqsSkippedOtherProject: number;
+  relatedIssuesLinked: number;
   warnings: string[];
 }
 
@@ -27,6 +29,7 @@ export function applyJiraBindings(
   batch: NormalizedJiraBatch,
   targetProjectId: string,
   confirmed: ConfirmedJiraBindings,
+  hotlineLabel: string = DEFAULT_HOTLINE_LABEL,
 ): JiraApplyReport {
   const data = loadPlanningData(db);
   const warnings: string[] = [];
@@ -35,6 +38,7 @@ export function applyJiraBindings(
     cinematicsSkippedOtherProject: 0,
     loqsLinked: 0,
     loqsSkippedOtherProject: 0,
+    relatedIssuesLinked: 0,
     warnings,
   };
 
@@ -112,6 +116,18 @@ export function applyJiraBindings(
       rawSnapshot: JSON.stringify(issue),
     });
     report.loqsLinked++;
+  }
+
+  // Hotlines/QA-bugs for the Cinematic detail widgets: derive them from the full batch (which holds
+  // both a sub-task hotline and its parent, so parent-based association resolves entirely here) and
+  // replace each target-project Cinematic's stored set. Signal-only, like the sync states above.
+  const targetCinematics = data.cinematics.filter((c) => c.projectId === targetProjectId);
+  const syncedAt = new Date().toISOString();
+  const relatedByCinematic = resolveRelatedIssuesByCinematic(batch, targetCinematics, hotlineLabel, syncedAt);
+  for (const cinematic of targetCinematics) {
+    const related = relatedByCinematic.get(cinematic.id) ?? [];
+    replaceCinematicRelatedIssues(db, cinematic.id, related);
+    report.relatedIssuesLinked += related.length;
   }
 
   return report;

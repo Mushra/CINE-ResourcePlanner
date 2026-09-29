@@ -261,6 +261,7 @@ export function jiraConfig(overrides: Partial<JiraProjectConfig> = {}): JiraProj
     scopeField: 'customfield_57706',
     scopeValue: 'CIN 2',
     statusMapping: { ...DEFAULT_JIRA_STATUS_MAPPING },
+    hotlineLabel: 'CINE_HOTLINE',
     ...overrides,
   };
 }

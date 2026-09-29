@@ -217,6 +217,24 @@ CREATE TABLE IF NOT EXISTS cinematic_jira_sync (
   raw_snapshot     TEXT NOT NULL DEFAULT '{}'  -- JSON blob of whatever fields the adapter cared about
 );
 
+-- Hotline/QA-bug Jira issues associated with a Cinematic (its detail-view widgets), one row per
+-- (cinematic, issue). Populated on sync from issues sharing the Cinematic's "Cinematics List" name
+-- (directly or via a sub-task's parent) — see domain/relatedIssues.ts. Signal-only, never written
+-- back to the plan. Added in the v12->v13 migration (database.ts).
+CREATE TABLE IF NOT EXISTS cinematic_related_issues (
+  cinematic_id     TEXT NOT NULL REFERENCES cinematics(id) ON DELETE CASCADE,
+  jira_key         TEXT NOT NULL,
+  kind             TEXT NOT NULL,   -- 'hotline' | 'bug'
+  summary          TEXT,
+  status           TEXT,            -- raw Jira status string, unmapped
+  issue_type       TEXT,
+  assignee         TEXT,
+  updated_at       TEXT,            -- Jira's own last-updated timestamp
+  resolution_date  TEXT,
+  last_synced_at   TEXT NOT NULL,
+  PRIMARY KEY (cinematic_id, jira_key)
+);
+
 CREATE INDEX IF NOT EXISTS idx_requirements_project ON requirements(project_id);
 CREATE INDEX IF NOT EXISTS idx_requirements_pool ON requirements(pool_id);
 CREATE INDEX IF NOT EXISTS idx_req_alloc_req ON requirement_allocations(requirement_id);

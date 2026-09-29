@@ -6,7 +6,7 @@ import type { NormalizedJiraBatch, NormalizedJiraIssue } from '../src/import/jir
 
 function issue(overrides: Partial<NormalizedJiraIssue> = {}): NormalizedJiraIssue {
   return {
-    key: 'PROD-1', summary: '', issueType: 'Task', status: 'In Progress', assignee: 'Alice',
+    key: 'PROD-1', summary: '', issueType: 'Task', status: 'In Progress', labels: [], assignee: 'Alice',
     startDate: null, dueDate: '2026-10-01', resolutionDate: null, parentKey: null, updatedAt: '2026-09-20T00:00:00Z',
     ...overrides,
   };
@@ -118,5 +118,32 @@ describe('applyJiraBindings', () => {
     const report2 = applyJiraBindings(db, batch, project.id, confirmed);
     expect(report2).toMatchObject({ cinematicsLinked: 1, cinematicsSkippedOtherProject: 0, warnings: [] });
     expect(loadPlanningData(db).cinematics.find((c) => c.id === cine.id)!.jiraKey).toBe('PROD-100');
+  });
+
+  it('persists Hotline (by label) and QA-bug (by type) related issues per cinematic — directly and via a sub-task parent', async () => {
+    const db = await PlannerDatabase.createNew();
+    const project = await seedProject(db);
+    const cine = createCinematic(db, { projectId: project.id, name: 'Seq010 Opening', jiraKey: null, targetDate: null, notes: '' });
+
+    const hotlineDirect = issue({ key: 'PROD-200', issueType: 'Task', labels: ['CINE_HOTLINE'], summary: 'Broken shot', cinematicName: 'Seq010 Opening' });
+    const bug = issue({ key: 'PROD-201', issueType: 'Bug', summary: 'Flicker', cinematicName: 'Seq010 Opening', status: 'Open' });
+    const parentTask = issue({ key: 'PROD-202', issueType: 'Task', cinematicName: 'Seq010 Opening' });
+    const hotlineSubtask = issue({ key: 'PROD-203', issueType: 'Sub-task', labels: ['CINE_HOTLINE'], parentKey: 'PROD-202', cinematicName: null, summary: 'Escalation' });
+    const unrelated = issue({ key: 'PROD-204', issueType: 'Story', cinematicName: 'Seq010 Opening' });
+    const batch: NormalizedJiraBatch = { issues: [hotlineDirect, bug, parentTask, hotlineSubtask, unrelated], warnings: [] };
+
+    const report = applyJiraBindings(db, batch, project.id, { cinematics: {}, loqs: {} });
+    expect(report.relatedIssuesLinked).toBe(3);
+
+    const related = loadPlanningData(db).cinematicRelatedIssues.filter((r) => r.cinematicId === cine.id);
+    expect(related.map((r) => r.jiraKey).sort()).toEqual(['PROD-200', 'PROD-201', 'PROD-203']);
+    expect(related.find((r) => r.jiraKey === 'PROD-200')!.kind).toBe('hotline');
+    expect(related.find((r) => r.jiraKey === 'PROD-201')!.kind).toBe('bug');
+    expect(related.find((r) => r.jiraKey === 'PROD-203')!.kind).toBe('hotline'); // resolved via parent's Cinematics List
+
+    // Re-running with a shrunk batch replaces the set (no stale rows linger).
+    const report2 = applyJiraBindings(db, { issues: [bug], warnings: [] }, project.id, { cinematics: {}, loqs: {} });
+    expect(report2.relatedIssuesLinked).toBe(1);
+    expect(loadPlanningData(db).cinematicRelatedIssues.filter((r) => r.cinematicId === cine.id).map((r) => r.jiraKey)).toEqual(['PROD-201']);
   });
 });

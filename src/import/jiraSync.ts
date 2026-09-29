@@ -34,6 +34,9 @@ export interface NormalizedJiraIssue {
   issueType: string;
   /** Raw Jira status string, unmapped — see docs/INTEGRATIONS.md §3.3 for how this compares to LOQ.status. */
   status: string;
+  /** Jira labels on the issue (e.g. "CINE_HOTLINE"), lowercase-preserved as Jira returns them.
+   * Empty array when the field is absent/unrequested. Used to classify hotlines — see domain/relatedIssues.ts. */
+  labels: string[];
   assignee: string | null;
   /** ISO date (yyyy-mm-dd), or null when the field is absent/unmapped. */
   startDate: string | null;
@@ -71,6 +74,7 @@ interface JiraRawIssue {
     summary?: string;
     issuetype?: { name?: string } | null;
     status?: { name?: string } | null;
+    labels?: string[] | null;
     assignee?: { displayName?: string } | null;
     duedate?: string | null;
     resolutiondate?: string | null;
@@ -120,6 +124,7 @@ export function parseJiraSearchResponse(raw: JiraRawSearchResponse, mapping: Jir
       summary: typeof fields.summary === 'string' ? fields.summary : '',
       issueType: fields.issuetype?.name ?? 'Unknown',
       status: fields.status?.name ?? 'Unknown',
+      labels: Array.isArray(fields.labels) ? fields.labels.filter((l): l is string => typeof l === 'string') : [],
       assignee: fields.assignee?.displayName ?? null,
       startDate: toIsoDate(startDateRaw),
       dueDate: toIsoDate(dueDateRaw ?? fields.duedate),

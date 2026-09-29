@@ -19,6 +19,7 @@ import {
   createVarianceEvent as repoCreateVarianceEvent,
   createLoqDependency as repoCreateLoqDependency, updateLoqDependency as repoUpdateLoqDependency, deleteLoqDependency as repoDeleteLoqDependency,
   setJiraConfig as repoSetJiraConfig, listJiraConfigs as repoListJiraConfigs,
+  replaceCinematicRelatedIssues as repoReplaceCinematicRelatedIssues,
 } from '../db/repository';
 import { applyRpmImport, type ImportMode } from '../db/applyImport';
 import { applyMppImport, type MppApplyReport, type MppDisciplineResolution } from '../db/applyMppImport';
@@ -32,6 +33,7 @@ import { parseRpmWorkbook } from '../import/rpmImport';
 import { parseStaffingWorkbook } from '../import/staffingImport';
 import { parseMppJson, type NormalizedMppImport } from '../import/mppImport';
 import { parseJiraSearchResponse, defaultJiraFieldMapping, type JiraRawSearchResponse, type NormalizedJiraBatch } from '../import/jiraSync';
+import { DEFAULT_HOTLINE_LABEL, relatedIssuesForCinematic } from '../domain/relatedIssues';
 import { PlanningEngine, round2 } from '../engine/planning';
 import type { Cinematic, Discipline, JiraProjectConfig, Loq, LoqDependency, LoqResource, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
 import { wouldCreateCycle } from '../domain/loqGraph';
@@ -122,6 +124,11 @@ interface StoreState {
   /** Settings screen's "Test connection" probe: fetches a single-issue page against this project's
    * saved config/token and reports how many issues its JQL matched, without writing anything. */
   testJiraConnection: (projectId: string) => Promise<{ ok: true; total: number } | { ok: false; error: string }>;
+  /** Light per-Cinematic refresh of its Hotline/QA-bug widgets: fetches only this Cinematic's
+   * related issues (by Cinematics List value + its already-known related keys) and replaces the
+   * stored set. Silent (no toast), a no-op without desktop/config/jiraKey — never throws. Called on
+   * opening the Cinematic detail so the widgets are current without a full project sync. */
+  refreshCinematicRelatedIssues: (cinematicId: string) => Promise<void>;
 
   createProject: (input: Omit<Project, 'id' | 'sortOrder'>) => Project;
   updateProject: (project: Project) => void;
@@ -241,7 +248,17 @@ export function buildJiraJql(config: JiraProjectConfig, linkedKeys: string[] = [
   if (rawScope) {
     scoped.push(rawScope);
   } else {
-    if (config.cinematicsListField) scoped.push(`${jqlFieldRef(config.cinematicsListField)} IS NOT EMPTY`);
+    // The Cinematics-List anchor would exclude Hotlines/QA-bugs that don't carry the field, so when
+    // it's present we OR in those related-issue kinds — Hotlines (label) and bugs (issuetype) — to
+    // pull them for the Cinematic detail widgets. Without that anchor the fetch is already broad
+    // (whole project / key-based), so no widening is needed. See domain/relatedIssues.ts.
+    if (config.cinematicsListField) {
+      const anchors = [`${jqlFieldRef(config.cinematicsListField)} IS NOT EMPTY`];
+      const hotlineLabel = config.hotlineLabel?.trim();
+      if (hotlineLabel) anchors.push(`labels = "${hotlineLabel}"`);
+      anchors.push('issuetype = "Bug"');
+      scoped.push(`(${anchors.join(' OR ')})`);
+    }
     if (config.scopeField && config.scopeValue) scoped.push(`${jqlFieldRef(config.scopeField)} = "${config.scopeValue}"`);
   }
   const scopedClause = scoped.join(' AND ');
@@ -269,9 +286,11 @@ function linkedJiraKeys(data: PlanningData, projectId: string): string[] {
   return keys;
 }
 
-/** Custom fields must be requested explicitly via `fields=` or Jira omits them from the response. */
+/** Custom fields must be requested explicitly via `fields=` or Jira omits them from the response.
+ * `labels` and `issuetype` are needed to classify Hotlines (label) vs QA bugs (type) for the
+ * Cinematic detail widgets — see domain/relatedIssues.ts. */
 function buildJiraFields(config: JiraProjectConfig): string[] {
-  const fields = new Set(['summary', 'status', 'assignee', 'duedate', 'resolutiondate', 'parent', 'updated']);
+  const fields = new Set(['summary', 'status', 'issuetype', 'labels', 'assignee', 'duedate', 'resolutiondate', 'parent', 'updated']);
   for (const f of [config.startDateField, config.dueDateField, config.cinematicsListField, config.loqTargetField, config.epicLinkField, config.scopeField]) {
     if (f) fields.add(f);
   }
@@ -644,7 +663,8 @@ export const useStore = create<StoreState>((set, get) => {
     },
     applyJiraBindingsToProject: (projectId, batch, confirmed) => {
       const db = get().db!;
-      const report = applyJiraBindings(db, batch, projectId, confirmed);
+      const hotlineLabel = get().jiraConfigs.find((c) => c.projectId === projectId)?.hotlineLabel ?? DEFAULT_HOTLINE_LABEL;
+      const report = applyJiraBindings(db, batch, projectId, confirmed, hotlineLabel);
       persist();
       get().toast(
         'success',
@@ -734,6 +754,50 @@ export const useStore = create<StoreState>((set, get) => {
         testOnly: true,
       });
       return result.ok ? { ok: true, total: result.raw.total } : { ok: false, error: result.error };
+    },
+    refreshCinematicRelatedIssues: async (cinematicId) => {
+      const { db } = get();
+      if (!db || !window.jira) return; // browser tab or not yet loaded — keep the persisted set
+      const cinematic = get().data.cinematics.find((c) => c.id === cinematicId);
+      if (!cinematic) return;
+      const config = get().jiraConfigs.find((c) => c.projectId === cinematic.projectId);
+      if (!config) return;
+
+      // Narrow to this Cinematic: issues carrying its Cinematics List name, OR the related issues we
+      // already track for it (refreshes their status; catches resolved/reassigned ones). Light by
+      // design — no whole-project scan; the full sync remains the authoritative discovery path.
+      const knownKeys = get().data.cinematicRelatedIssues
+        .filter((r) => r.cinematicId === cinematicId)
+        .map((r) => r.jiraKey)
+        .filter((k) => /^[A-Z][A-Z0-9]*-\d+$/.test(k));
+      const escapedName = cinematic.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const clauses = [`"Cinematics List" = "${escapedName}"`];
+      if (knownKeys.length > 0) clauses.push(`key IN (${knownKeys.join(', ')})`);
+      const jql = `project = "${config.jiraProjectKey}" AND (${clauses.join(' OR ')})`;
+
+      const result = await window.jira.search({
+        projectId: cinematic.projectId,
+        baseUrl: config.baseUrl,
+        authMode: config.authMode,
+        email: config.email,
+        jql,
+        fields: buildJiraFields(config),
+      });
+      if (!result.ok) return; // silent — the persisted set stays as-is
+
+      const mapping = defaultJiraFieldMapping({
+        startDateField: config.startDateField,
+        dueDateField: config.dueDateField,
+        cinematicsListField: config.cinematicsListField,
+        loqTargetField: config.loqTargetField,
+        epicLinkField: config.epicLinkField,
+        scopeField: config.scopeField,
+      });
+      const batch = parseJiraSearchResponse(result.raw, mapping);
+      const hotlineLabel = config.hotlineLabel ?? DEFAULT_HOTLINE_LABEL;
+      const rows = relatedIssuesForCinematic(batch, cinematicId, hotlineLabel, new Date().toISOString());
+      repoReplaceCinematicRelatedIssues(db, cinematicId, rows);
+      persist();
     },
 
     createProject: (input) => {

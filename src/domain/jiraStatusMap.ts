@@ -11,6 +11,7 @@
 // Jira never drives it. `BLOCKED` is the *involuntary* status Jira can report.
 
 import type { JiraProjectConfig, LoqStatus } from './types';
+import { DEFAULT_HOTLINE_LABEL } from './relatedIssues';
 
 /** All canonical statuses, best-known display order. */
 export const CANONICAL_STATUSES: LoqStatus[] = ['TODO', 'IN_PROGRESS', 'TO_REVIEW', 'BLOCKED', 'DONE', 'CUT'];
@@ -73,6 +74,10 @@ export function resolveJiraStatus(raw: string | null, mapping: Record<string, Lo
  * (repository.getJiraConfig/listJiraConfigs) so every consumer sees a populated map.
  */
 export function withJiraConfigDefaults(config: JiraProjectConfig): JiraProjectConfig {
-  if (config.statusMapping && Object.keys(config.statusMapping).length > 0) return config;
-  return { ...config, statusMapping: { ...DEFAULT_JIRA_STATUS_MAPPING } };
+  const statusMapping = config.statusMapping && Object.keys(config.statusMapping).length > 0
+    ? config.statusMapping
+    : { ...DEFAULT_JIRA_STATUS_MAPPING };
+  const hotlineLabel = config.hotlineLabel && config.hotlineLabel.trim() ? config.hotlineLabel : DEFAULT_HOTLINE_LABEL;
+  if (statusMapping === config.statusMapping && hotlineLabel === config.hotlineLabel) return config;
+  return { ...config, statusMapping, hotlineLabel };
 }

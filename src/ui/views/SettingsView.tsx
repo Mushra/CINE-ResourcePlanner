@@ -4,6 +4,7 @@ import { Button } from '../components/Button';
 import { Collapsible } from '../components/Collapsible';
 import type { JiraProjectConfig } from '../../domain/types';
 import { DEFAULT_JIRA_STATUS_MAPPING } from '../../domain/jiraStatusMap';
+import { DEFAULT_HOTLINE_LABEL } from '../../domain/relatedIssues';
 import { JiraStatusMappingEditor } from '../components/JiraStatusMappingEditor';
 
 const DEFAULT_CINEMATICS_LIST_FIELD = 'customfield_10420';
@@ -11,8 +12,9 @@ const DEFAULT_LOQ_TARGET_FIELD = 'customfield_12338';
 const DEFAULT_DUE_DATE_FIELD = 'duedate';
 const DEFAULT_TOLERANCE_DAYS = 1;
 /** Bracket-free scope so new configs don't emit `cf[id]` (rejected by some proxies) — see
- * JiraProjectConfig.scopeJql. References the Cinematics List field by its display name. */
-const DEFAULT_SCOPE_JQL = '"Cinematics List" is not EMPTY';
+ * JiraProjectConfig.scopeJql. References the Cinematics List field by its display name, and also
+ * pulls Hotlines (label) and QA bugs (issuetype) so the Cinematic detail widgets have data. */
+const DEFAULT_SCOPE_JQL = `("Cinematics List" is not EMPTY OR labels = ${DEFAULT_HOTLINE_LABEL} OR issuetype = Bug)`;
 
 function emptyConfig(projectId: string): JiraProjectConfig {
   return {
@@ -31,6 +33,7 @@ function emptyConfig(projectId: string): JiraProjectConfig {
     scopeValue: null,
     scopeJql: DEFAULT_SCOPE_JQL,
     statusMapping: { ...DEFAULT_JIRA_STATUS_MAPPING },
+    hotlineLabel: DEFAULT_HOTLINE_LABEL,
   };
 }
 

@@ -218,7 +218,7 @@ describe('v6 -> v7 migration', () => {
   it('a fresh database has all 8 new tables and the current schema_version', async () => {
     const db = await PlannerDatabase.createNew();
     expect(db.getSetting('schema_version')).toBe(SCHEMA_VERSION);
-    expect(SCHEMA_VERSION).toBe('12');
+    expect(SCHEMA_VERSION).toBe('13');
 
     const tables = new Set(db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table'").map((r) => r.name));
     for (const t of V7_TABLES) expect(tables.has(t)).toBe(true);
@@ -241,6 +241,14 @@ describe('v6 -> v7 migration', () => {
     expect(cinSyncColumns.find((c) => c.name === 'cinematic_id')?.pk).toBe(1);
     expect(cinSyncColumns.map((c) => c.name)).toEqual(
       expect.arrayContaining(['cinematic_id', 'jira_status', 'jira_updated_at', 'last_synced_at', 'raw_snapshot']),
+    );
+
+    // v13: the per-Cinematic related-issues table (Hotlines/QA-bugs), composite (cinematic_id, jira_key) PK.
+    expect(tables.has('cinematic_related_issues')).toBe(true);
+    const relatedColumns = db.query<{ name: string; pk: number }>('PRAGMA table_info(cinematic_related_issues)');
+    expect(relatedColumns.filter((c) => c.pk > 0).map((c) => c.name).sort()).toEqual(['cinematic_id', 'jira_key']);
+    expect(relatedColumns.map((c) => c.name)).toEqual(
+      expect.arrayContaining(['cinematic_id', 'jira_key', 'kind', 'summary', 'status', 'issue_type', 'assignee', 'updated_at', 'resolution_date', 'last_synced_at']),
     );
 
     const indexes = new Set(db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='index'").map((r) => r.name));

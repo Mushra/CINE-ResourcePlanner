@@ -1,6 +1,7 @@
 import type {
   Cinematic,
   CinematicJiraSyncState,
+  CinematicRelatedIssue,
   DateCertainty,
   DependencySource,
   DependencyTemplate,
@@ -201,6 +202,16 @@ export function loadPlanningData(db: PlannerDatabase): PlanningData {
       lastSyncedAt: r.last_synced_at, rawSnapshot: r.raw_snapshot,
     }));
 
+  const cinematicRelatedIssues = db
+    .query<{ cinematic_id: string; jira_key: string; kind: string; summary: string | null; status: string | null; issue_type: string | null; assignee: string | null; updated_at: string | null; resolution_date: string | null; last_synced_at: string }>(
+      'SELECT * FROM cinematic_related_issues',
+    )
+    .map((r): CinematicRelatedIssue => ({
+      cinematicId: r.cinematic_id, jiraKey: r.jira_key, kind: r.kind === 'hotline' ? 'hotline' : 'bug',
+      summary: r.summary, status: r.status, issueType: r.issue_type, assignee: r.assignee,
+      updatedAt: r.updated_at, resolutionDate: r.resolution_date, lastSyncedAt: r.last_synced_at,
+    }));
+
   return {
     projects,
     pools,
@@ -221,6 +232,7 @@ export function loadPlanningData(db: PlannerDatabase): PlanningData {
     varianceEvents,
     jiraSyncStates,
     cinematicJiraSyncStates,
+    cinematicRelatedIssues,
   };
 }
 
@@ -823,6 +835,19 @@ export function upsertCinematicJiraSyncState(db: PlannerDatabase, state: Cinemat
 
 export function deleteCinematicJiraSyncState(db: PlannerDatabase, cinematicId: string): void {
   db.exec('DELETE FROM cinematic_jira_sync WHERE cinematic_id = ?', [cinematicId]);
+}
+
+/** Replaces the full set of related Hotline/QA-bug issues for one Cinematic (delete-then-insert) —
+ * a sync always reports the complete current set, so stale rows must not linger. */
+export function replaceCinematicRelatedIssues(db: PlannerDatabase, cinematicId: string, issues: CinematicRelatedIssue[]): void {
+  db.exec('DELETE FROM cinematic_related_issues WHERE cinematic_id = ?', [cinematicId]);
+  for (const issue of issues) {
+    db.exec(
+      `INSERT INTO cinematic_related_issues (cinematic_id, jira_key, kind, summary, status, issue_type, assignee, updated_at, resolution_date, last_synced_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [cinematicId, issue.jiraKey, issue.kind, issue.summary, issue.status, issue.issueType, issue.assignee, issue.updatedAt, issue.resolutionDate, issue.lastSyncedAt],
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

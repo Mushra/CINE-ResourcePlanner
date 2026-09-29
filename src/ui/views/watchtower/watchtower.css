@@ -97,6 +97,15 @@
   transition: opacity 0.15s;
 }
 .outlook-dot.dimmed { opacity: 0.25; }
+/* Overdue-but-unresolved delivery: pinned to the left edge (past today) and highlighted so it reads
+ * as the nearest, most urgent deadline. Larger, ringed, and lifted above its neighbours. */
+.outlook-dot.overdue {
+  width: 14px;
+  height: 14px;
+  z-index: 2;
+  border-color: var(--wt-blocked);
+  box-shadow: 0 0 0 3px var(--status-critical-bg), var(--shadow-sm);
+}
 .outlook-empty { color: var(--text-tertiary); font-size: 12.5px; padding: 10px 0; }
 
 /* ---------- Cinematics Matrix ---------- */
@@ -167,6 +176,37 @@ table.mx-table th.mx-cin-col { background: var(--surface-1); z-index: 2; }
 .kv-row:last-child { border-bottom: none; }
 .kv-row .k { color: var(--text-secondary); }
 .kv-row .v { color: var(--text-primary); font-weight: 500; }
+
+/* Hotlines / QA-bugs widgets — related Jira issues linked to the cinematic. */
+.related-issue-list { display: flex; flex-direction: column; gap: 2px; }
+.related-issue {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.related-issue:last-child { border-bottom: none; }
+.related-issue.resolved { opacity: 0.55; }
+.related-issue-main { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.related-issue-key { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--accent); text-decoration: none; }
+a.related-issue-key:hover { text-decoration: underline; }
+.related-issue-summary { color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.related-issue-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.related-issue-status {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+.related-issue-assignee { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
 
 @media (max-width: 720px) {
   .outlook-axis { display: none; }

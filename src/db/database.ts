@@ -35,7 +35,10 @@ async function getSqlJs(): Promise<SqlJsStatic> {
 // jira_sync_state) — a plain additive table, created by schemaSql's CREATE TABLE IF NOT EXISTS on
 // every applySchema; migrateV11toV12() just records the version bump. See CinematicJiraSyncState in
 // types.ts and checkCinematicEpicDivergence in validation.ts.
-export const SCHEMA_VERSION = '12';
+// v13 adds the cinematic_related_issues table (Hotline/QA-bug issues per Cinematic) — likewise a
+// plain additive table created on every applySchema; migrateV12toV13() just records the bump. See
+// CinematicRelatedIssue in types.ts and domain/relatedIssues.ts.
+export const SCHEMA_VERSION = '13';
 
 /** Thin wrapper around a sql.js Database: schema bootstrap, typed helpers, byte export. */
 export class PlannerDatabase {
@@ -191,6 +194,7 @@ export class PlannerDatabase {
     if (Number(from) < 10) this.migrateV9toV10();
     if (Number(from) < 11) this.migrateV10toV11();
     if (Number(from) < 12) this.migrateV11toV12();
+    if (Number(from) < 13) this.migrateV12toV13();
   }
 
   /**
@@ -511,6 +515,24 @@ export class PlannerDatabase {
         jira_updated_at  TEXT,
         last_synced_at   TEXT NOT NULL,
         raw_snapshot     TEXT NOT NULL DEFAULT '{}'
+      );
+    `);
+  }
+
+  private migrateV12toV13(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS cinematic_related_issues (
+        cinematic_id     TEXT NOT NULL REFERENCES cinematics(id) ON DELETE CASCADE,
+        jira_key         TEXT NOT NULL,
+        kind             TEXT NOT NULL,
+        summary          TEXT,
+        status           TEXT,
+        issue_type       TEXT,
+        assignee         TEXT,
+        updated_at       TEXT,
+        resolution_date  TEXT,
+        last_synced_at   TEXT NOT NULL,
+        PRIMARY KEY (cinematic_id, jira_key)
       );
     `);
   }
