@@ -1,4 +1,5 @@
-import type { JiraProjectConfig, LoqStatus, Period, Severity } from '../domain/types';
+import type { JiraProjectConfig, LoqStatus, Period, Person, Severity } from '../domain/types';
+import { personMatchKey } from '../domain/identity';
 import { PlanningEngine, UNASSIGNED_DISCIPLINE_ID, round2 } from './planning';
 import { getForecastWindowPeriods } from './forecast';
 import { impactedLoqIds } from './loqForecast';
@@ -86,6 +87,7 @@ export function getSanityChecks(engine: PlanningEngine, jiraConfigs: JiraProject
   checks.push(...checkJiraInconsistency(engine, toleranceDaysByProjectId, statusMappingByProjectId));
   checks.push(...checkCinematicEpicDivergence(engine, statusMappingByProjectId, statusResolver));
   checks.push(...checkCinematicBindingCoherence(engine));
+  checks.push(...checkJiraAssigneeStaffing(engine, statusResolver));
 
   for (const check of checks) {
     if (check.disciplineId) continue;
@@ -645,6 +647,88 @@ function checkCinematicBindingCoherence(engine: PlanningEngine): SanityCheck[] {
         impact: 'A cinematic-level issue is normally tagged with the Cinematics List field that anchors its hotlines and bugs — this binding may point at the wrong issue (e.g. a task that merely shares the name)',
       });
     }
+  }
+
+  return checks;
+}
+
+/**
+ * jira_inconsistency, assignee ↔ staffing (Phase: "connect everything"): a LOQ's Jira assignee is
+ * the person doing the work per Jira, but the plan may not reflect it. Reconciles the assignee's
+ * display name to a tool Person by personMatchKey (identity.ts — accent/order-insensitive, the same
+ * key that merges people across imports; a name-based link, a confirmable id-based one is a later
+ * phase), then compares against who's actually staffed on the LOQ's project:
+ *  - assignee resolves to no Person            → info    (add them, or their Jira name differs)
+ *  - resolves, but that Person isn't staffed   → warning (the plan's staffing may be missing them)
+ *
+ * Jira → plan direction only. Aggregated per (project, person/assignee) — one finding, not one per
+ * LOQ (same first-seen dedupe idiom as checkProjectStaffing). Terminal LOQs and cancelled/completed
+ * projects are skipped. Signal only — never writes staffing or touches Jira.
+ */
+function checkJiraAssigneeStaffing(engine: PlanningEngine, statusOf: StatusResolver): SanityCheck[] {
+  const checks: SanityCheck[] = [];
+
+  const peopleByKey = new Map<string, Person[]>();
+  for (const person of engine.people()) {
+    const key = personMatchKey(person.name);
+    const list = peopleByKey.get(key) ?? [];
+    list.push(person);
+    peopleByKey.set(key, list);
+  }
+
+  const assignedByProject = new Map<string, Set<string>>();
+  const seenUnmatched = new Set<string>(); // `${projectId}:${assigneeKey}`
+  const seenUnstaffed = new Set<string>(); // `${projectId}:${personId}`
+
+  for (const { loq, state } of engine.loqsWithJiraSync()) {
+    const assignee = state.jiraAssignee?.trim();
+    if (!assignee || isTerminalStatus(statusOf(loq))) continue;
+    const project = engine.loqProject(loq.id);
+    if (!project) continue;
+    const projectStatus = deriveProjectStatus(project);
+    if (projectStatus === 'cancelled' || projectStatus === 'completed') continue;
+
+    const key = personMatchKey(assignee);
+    const matches = peopleByKey.get(key) ?? [];
+
+    if (matches.length === 0) {
+      const dedupe = `${project.id}:${key}`;
+      if (seenUnmatched.has(dedupe)) continue;
+      seenUnmatched.add(dedupe);
+      checks.push({
+        id: `jira-assignee-unmatched:${project.id}:${key}`,
+        severity: 'info',
+        category: 'jira_inconsistency',
+        projectId: project.id,
+        projectName: project.name,
+        message: `Jira assignee "${assignee}" isn't in the tool's team`,
+        impact: `${assignee} is the Jira assignee on a ${project.name} LOQ (${loqLabel(engine, loq.id)}) but matches no person in the plan — add them, or their Jira display name differs from the tool's`,
+      });
+      continue;
+    }
+
+    let assigned = assignedByProject.get(project.id);
+    if (!assigned) {
+      assigned = engine.projectAssignedPersonIds(project.id);
+      assignedByProject.set(project.id, assigned);
+    }
+    if (matches.some((p) => assigned.has(p.id))) continue;
+
+    const person = matches[0];
+    const dedupe = `${project.id}:${person.id}`;
+    if (seenUnstaffed.has(dedupe)) continue;
+    seenUnstaffed.add(dedupe);
+    checks.push({
+      id: `jira-assignee-unstaffed:${project.id}:${person.id}`,
+      severity: 'warning',
+      category: 'jira_inconsistency',
+      projectId: project.id,
+      projectName: project.name,
+      personId: person.id,
+      personName: person.name,
+      message: `${person.name} works on ${project.name} in Jira but isn't staffed on it in the plan`,
+      impact: `${person.name} is the Jira assignee on a ${project.name} LOQ (${loqLabel(engine, loq.id)}) yet has no assignment on this project — the plan's staffing may be missing them`,
+    });
   }
 
   return checks;

@@ -277,6 +277,17 @@ export class PlanningEngine {
     return round2(this.data.people.reduce((sum, p) => sum + this.getPersonAssignedExcludingDispo(p.id, period), 0));
   }
 
+  /** The set of people with at least one assignment on this project (any period). Membership only —
+   * no FTE, no period window. Used by the Jira assignee↔staffing coherence check. */
+  projectAssignedPersonIds(projectId: string): Set<string> {
+    const ids = new Set<string>();
+    for (const pa of this.personAssignmentsByProject.get(projectId) ?? []) {
+      if (pa.scenarioId !== this.scenarioId) continue;
+      ids.add(pa.personId);
+    }
+    return ids;
+  }
+
   /** Sum of a project's assigned FTE across all its person assignments at a period. */
   getProjectAssigned(projectId: string, period: Period): number {
     let total = 0;
