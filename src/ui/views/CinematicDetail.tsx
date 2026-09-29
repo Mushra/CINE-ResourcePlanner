@@ -36,6 +36,17 @@ function loqStatusCell(loq: Loq, effective: EffectiveStatus | undefined): { clas
 
 const VERSION_PLAYER_GAP = "Needs a ShotGrid/Flow connector to fetch and stream published review versions, and to expose the publish/push event log.";
 
+const JIRA_KEY_RE = /^[A-Z][A-Z0-9]*-\d+$/;
+
+/** Deep-link to a single issue's page. */
+function jiraBrowseUrl(baseUrl: string, key: string): string {
+  return `${baseUrl.replace(/\/$/, '')}/browse/${key}`;
+}
+/** Link to the Jira issue navigator pre-filtered by a JQL query. */
+function jiraSearchUrl(baseUrl: string, jql: string): string {
+  return `${baseUrl.replace(/\/$/, '')}/issues/?jql=${encodeURIComponent(jql)}`;
+}
+
 /** Hotlines widget: only the currently-open hotlines are listed (a status dot, the Jira key, its
  * summary and assignee). Resolved ones aren't listed — they're summarised in a small report line. */
 function HotlineList({ issues, baseUrl }: { issues: CinematicRelatedIssue[]; baseUrl: string | null }) {
@@ -45,7 +56,7 @@ function HotlineList({ issues, baseUrl }: { issues: CinematicRelatedIssue[]; bas
         <li key={issue.jiraKey} className="hotline-row">
           <span className="hotline-dot" />
           {baseUrl ? (
-            <a className="hotline-key" href={`${baseUrl.replace(/\/$/, '')}/browse/${issue.jiraKey}`} target="_blank" rel="noreferrer">{issue.jiraKey}</a>
+            <a className="hotline-key" href={jiraBrowseUrl(baseUrl, issue.jiraKey)} target="_blank" rel="noreferrer">{issue.jiraKey}</a>
           ) : (
             <span className="hotline-key">{issue.jiraKey}</span>
           )}
@@ -57,16 +68,28 @@ function HotlineList({ issues, baseUrl }: { issues: CinematicRelatedIssue[]; bas
   );
 }
 
-/** QA-bugs widget: metrics only — one tile per status bucket, no per-issue list. */
-function BugMetrics({ metrics }: { metrics: Record<BugStatusBucket, number> }) {
+/** QA-bugs widget: metrics only — one tile per status bucket. Each tile with issues links to the
+ * Jira issue navigator filtered to exactly that bucket's bugs for this cinematic (`key in (…)`), so
+ * "Open"/"In Progress"/… open the matching bugs in the browser. */
+function BugMetrics({ bugsByBucket, baseUrl }: { bugsByBucket: Record<BugStatusBucket, CinematicRelatedIssue[]>; baseUrl: string | null }) {
   return (
     <div className="bug-metrics">
-      {BUG_BUCKETS.map((bucket) => (
-        <div key={bucket} className="bug-metric">
-          <div className="bug-metric-value">{metrics[bucket]}</div>
-          <div className="bug-metric-label">{BUG_BUCKET_LABEL[bucket]}</div>
-        </div>
-      ))}
+      {BUG_BUCKETS.map((bucket) => {
+        const issues = bugsByBucket[bucket];
+        const keys = issues.map((b) => b.jiraKey).filter((k) => JIRA_KEY_RE.test(k));
+        const href = baseUrl && keys.length > 0 ? jiraSearchUrl(baseUrl, `key in (${keys.join(', ')})`) : null;
+        const inner = (
+          <>
+            <div className="bug-metric-value">{issues.length}</div>
+            <div className="bug-metric-label">{BUG_BUCKET_LABEL[bucket]}</div>
+          </>
+        );
+        return href ? (
+          <a key={bucket} className="bug-metric bug-metric-link" href={href} target="_blank" rel="noreferrer">{inner}</a>
+        ) : (
+          <div key={bucket} className="bug-metric">{inner}</div>
+        );
+      })}
     </div>
   );
 }
@@ -144,9 +167,9 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
     .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
   const resolvedHotlineCount = hotlines.length - openHotlines.length;
 
-  // QA bugs: counts per status bucket, no list.
-  const bugMetrics: Record<BugStatusBucket, number> = { open: 0, inProgress: 0, waitingFor: 0, resolved: 0 };
-  for (const bug of bugs) bugMetrics[bugStatusBucket(bug.status, bug.resolutionDate, statusMapping)] += 1;
+  // QA bugs: grouped per status bucket so each tile can both count and deep-link to its bugs.
+  const bugsByBucket: Record<BugStatusBucket, CinematicRelatedIssue[]> = { open: [], inProgress: [], waitingFor: [], resolved: [] };
+  for (const bug of bugs) bugsByBucket[bugStatusBucket(bug.status, bug.resolutionDate, statusMapping)].push(bug);
 
   return (
     <div className="cinematic-detail-view">
@@ -262,10 +285,10 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
         <div className="card panel">
           <div className="panel-header">
             <h2>QA bugs</h2>
-            {bugs.length > 0 && <span className="panel-sub">{bugMetrics.open} open · {bugs.length} total</span>}
+            {bugs.length > 0 && <span className="panel-sub">{bugsByBucket.open.length} open · {bugs.length} total</span>}
           </div>
           {bugs.length > 0 ? (
-            <BugMetrics metrics={bugMetrics} />
+            <BugMetrics bugsByBucket={bugsByBucket} baseUrl={jiraConfig?.baseUrl ?? null} />
           ) : (
             <EmptyState icon="check" title="No bugs" description="No Jira bugs linked to this cinematic." compact />
           )}
@@ -312,7 +335,13 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
                           ? `${loq.committedStart} → ${loq.committedFinish ?? '…'}`
                           : <span className="tbd-text">Unscheduled</span>}
                       </td>
-                      <td>{loq.jiraKey ?? <span className="tbd-text">—</span>}</td>
+                      <td>
+                        {loq.jiraKey
+                          ? (jiraConfig?.baseUrl
+                              ? <a className="jira-link" href={jiraBrowseUrl(jiraConfig.baseUrl, loq.jiraKey)} target="_blank" rel="noreferrer">{loq.jiraKey}</a>
+                              : loq.jiraKey)
+                          : <span className="tbd-text">—</span>}
+                      </td>
                       <td className="cell-actions">
                         <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditingLoq(loq)}>Edit</Button>
                         <Button variant="ghost" size="sm" icon="warning" onClick={() => setVarianceTarget(loq)}>Variance</Button>

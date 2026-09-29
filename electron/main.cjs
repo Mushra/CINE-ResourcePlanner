@@ -1,6 +1,6 @@
 // Electron main process. CommonJS on purpose — package.json is "type": "module" for the Vite
 // side, but Electron's main process is simplest as plain CJS, loaded via package.json's "main".
-const { app, BrowserWindow, protocol, net, dialog, Menu, ipcMain, safeStorage } = require('electron');
+const { app, BrowserWindow, protocol, net, dialog, Menu, ipcMain, safeStorage, shell } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { spawn } = require('node:child_process');
@@ -341,6 +341,17 @@ function registerJiraHandlers() {
   });
 }
 
+// http/https only — never let a target="_blank" / window.open hand shell.openExternal an
+// app://, file:// or javascript: URL.
+function isExternalWebUrl(url) {
+  try {
+    const { protocol: p } = new URL(url);
+    return p === 'https:' || p === 'http:';
+  } catch {
+    return false;
+  }
+}
+
 async function createWindow() {
   const win = new BrowserWindow({
     width: 1440,
@@ -352,6 +363,22 @@ async function createWindow() {
       sandbox: true,
       preload: path.join(__dirname, 'preload.cjs'),
     },
+  });
+
+  // Any external link (Jira `browse`/`issues` URLs, etc.) opens in the user's default browser rather
+  // than a bare in-app Electron window. `target="_blank"`/window.open is denied here and handed to
+  // the OS; a stray in-place navigation to an external origin is likewise redirected outward, while
+  // the app's own origin (app://bundle, or the Vite dev server) keeps navigating internally.
+  const appOrigin = DEV_SERVER_URL ?? 'app://bundle';
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isExternalWebUrl(url)) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith(appOrigin) && isExternalWebUrl(url)) {
+      event.preventDefault();
+      void shell.openExternal(url);
+    }
   });
 
   win.once('ready-to-show', () => win.show());

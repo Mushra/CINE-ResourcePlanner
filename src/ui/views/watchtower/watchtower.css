@@ -195,12 +195,20 @@ a.hotline-key:hover { text-decoration: underline; }
 .hotline-assignee { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
 .hotline-report { margin: 10px 0 0; font-size: 11.5px; color: var(--text-tertiary); }
 
+/* Clickable Jira key (LOQ table) — same accent idiom as .hotline-key. */
+.jira-link { color: var(--accent); text-decoration: none; font-variant-numeric: tabular-nums; }
+.jira-link:hover { text-decoration: underline; }
+
 /* QA-bugs widget — metric tiles only (Open · In Progress · Waiting For · Resolved). */
 .bug-metrics { display: flex; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
 .bug-metric { flex: 1; padding: 12px 6px; text-align: center; border-right: 1px solid var(--border); }
 .bug-metric:last-child { border-right: none; }
 .bug-metric-value { font-size: 18px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .bug-metric-label { margin-top: 2px; font-size: 10.5px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.02em; }
+/* A tile that deep-links to its bucket's bugs in Jira. */
+.bug-metric-link { display: block; color: inherit; text-decoration: none; cursor: pointer; }
+.bug-metric-link:hover { background: var(--surface-1); }
+.bug-metric-link:hover .bug-metric-value { color: var(--accent); }
 
 @media (max-width: 720px) {
   .outlook-axis { display: none; }
