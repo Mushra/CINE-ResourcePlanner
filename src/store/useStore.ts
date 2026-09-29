@@ -20,6 +20,8 @@ import {
   createLoqDependency as repoCreateLoqDependency, updateLoqDependency as repoUpdateLoqDependency, deleteLoqDependency as repoDeleteLoqDependency,
   setJiraConfig as repoSetJiraConfig, listJiraConfigs as repoListJiraConfigs,
   replaceCinematicRelatedIssues as repoReplaceCinematicRelatedIssues,
+  upsertJiraSyncState as repoUpsertJiraSyncState, deleteJiraSyncState as repoDeleteJiraSyncState,
+  upsertCinematicJiraSyncState as repoUpsertCinematicJiraSyncState, deleteCinematicJiraSyncState as repoDeleteCinematicJiraSyncState,
 } from '../db/repository';
 import { applyRpmImport, type ImportMode } from '../db/applyImport';
 import { applyMppImport, type MppApplyReport, type MppDisciplineResolution } from '../db/applyMppImport';
@@ -357,6 +359,77 @@ export const useStore = create<StoreState>((set, get) => {
     void saveAutosave(bytes);
     set({ dirty: true });
     reload(db);
+  }
+
+  /**
+   * Live-fetches the single Jira issue a Cinematic/LOQ was just bound to and refreshes that row's
+   * sync snapshot, so its Jira-mirrored status/health updates at once — no full-project sync needed.
+   * Signal-only: only the `*_jira_sync*` snapshot is written, never the plan's status/dates (same
+   * rule as applyJiraSync.ts). Desktop + configured-project guarded; a no-op in a browser tab. For a
+   * Cinematic it also re-anchors the Hotlines/QA-bugs widgets on the new Cinematics List value.
+   */
+  async function liveRefreshBoundIssue(kind: 'cinematic' | 'loq', id: string, jiraKey: string): Promise<void> {
+    const { db } = get();
+    if (!db || !window.jira) return; // browser tab or not yet loaded
+    if (!/^[A-Z][A-Z0-9]*-\d+$/.test(jiraKey)) return; // keeps the JQL safe; malformed keys can't match
+    const projectId = kind === 'cinematic'
+      ? get().data.cinematics.find((c) => c.id === id)?.projectId
+      : (() => {
+          const loq = get().data.loqs.find((l) => l.id === id);
+          return loq ? get().data.cinematics.find((c) => c.id === loq.cinematicId)?.projectId : undefined;
+        })();
+    if (!projectId) return;
+    const config = get().jiraConfigs.find((c) => c.projectId === projectId);
+    if (!config) return;
+
+    const result = await window.jira.search({
+      projectId,
+      baseUrl: config.baseUrl,
+      authMode: config.authMode,
+      email: config.email,
+      jql: `key = "${jiraKey}"`,
+      fields: buildJiraFields(config),
+    });
+    if (!result.ok) {
+      get().toast('error', `Jira : impossible de rafraîchir ${jiraKey}`);
+      return;
+    }
+    const mapping = defaultJiraFieldMapping({
+      startDateField: config.startDateField,
+      dueDateField: config.dueDateField,
+      cinematicsListField: config.cinematicsListField,
+      loqTargetField: config.loqTargetField,
+      epicLinkField: config.epicLinkField,
+      scopeField: config.scopeField,
+    });
+    const issue = parseJiraSearchResponse(result.raw, mapping).issues[0];
+    if (!issue) {
+      get().toast('error', `Jira : ${jiraKey} introuvable`);
+      return;
+    }
+    const lastSyncedAt = new Date().toISOString();
+    if (kind === 'loq') {
+      repoUpsertJiraSyncState(db, {
+        loqId: id,
+        jiraStatus: issue.status,
+        jiraAssignee: issue.assignee,
+        jiraUpdatedAt: issue.updatedAt,
+        lastSyncedAt,
+        rawSnapshot: JSON.stringify(issue),
+      });
+    } else {
+      repoUpsertCinematicJiraSyncState(db, {
+        cinematicId: id,
+        jiraStatus: issue.status,
+        jiraUpdatedAt: issue.updatedAt,
+        lastSyncedAt,
+        rawSnapshot: JSON.stringify(issue),
+      });
+    }
+    persist();
+    // The new epic carries a different Cinematics List value — re-anchor its hotlines/bugs widgets.
+    if (kind === 'cinematic') await get().refreshCinematicRelatedIssues(id);
+    get().toast('success', 'Statut Jira synchronisé');
   }
 
   /**
@@ -931,12 +1004,24 @@ export const useStore = create<StoreState>((set, get) => {
       const cinematic = repoCreateCinematic(db, input);
       persist();
       get().toast('success', `${cinematic.name} created`);
+      if (cinematic.jiraKey) void liveRefreshBoundIssue('cinematic', cinematic.id, cinematic.jiraKey);
       return cinematic;
     },
     updateCinematic: (cinematic) => {
       const db = get().db!;
+      const oldKey = get().data.cinematics.find((c) => c.id === cinematic.id)?.jiraKey ?? null;
       repoUpdateCinematic(db, cinematic);
       persist();
+      if (cinematic.jiraKey === oldKey) return; // binding unchanged (or a non-binding edit)
+      if (cinematic.jiraKey) {
+        void liveRefreshBoundIssue('cinematic', cinematic.id, cinematic.jiraKey);
+      } else {
+        // Binding cleared — drop the stale snapshot and related issues so the row falls back to its
+        // own plan status and the widgets empty.
+        repoDeleteCinematicJiraSyncState(db, cinematic.id);
+        repoReplaceCinematicRelatedIssues(db, cinematic.id, []);
+        persist();
+      }
     },
     deleteCinematic: (cinematicId) => {
       const db = get().db!;
@@ -950,12 +1035,22 @@ export const useStore = create<StoreState>((set, get) => {
       const db = get().db!;
       const loq = repoCreateLoq(db, input);
       persist();
+      if (loq.jiraKey) void liveRefreshBoundIssue('loq', loq.id, loq.jiraKey);
       return loq;
     },
     updateLoq: (loq) => {
       const db = get().db!;
+      const oldKey = get().data.loqs.find((l) => l.id === loq.id)?.jiraKey ?? null;
       repoUpdateLoq(db, loq);
       persist();
+      if (loq.jiraKey === oldKey) return; // binding unchanged (or a non-binding edit)
+      if (loq.jiraKey) {
+        void liveRefreshBoundIssue('loq', loq.id, loq.jiraKey);
+      } else {
+        // Binding cleared — drop the stale snapshot so the row falls back to its own plan status.
+        repoDeleteJiraSyncState(db, loq.id);
+        persist();
+      }
     },
     deleteLoq: (loqId) => {
       const db = get().db!;
