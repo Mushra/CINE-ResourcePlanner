@@ -36,6 +36,7 @@ import { parseStaffingWorkbook } from '../import/staffingImport';
 import { parseMppJson, type NormalizedMppImport } from '../import/mppImport';
 import { parseJiraSearchResponse, defaultJiraFieldMapping, type JiraRawSearchResponse, type NormalizedJiraBatch } from '../import/jiraSync';
 import { DEFAULT_HOTLINE_LABEL, relatedIssuesForCinematic } from '../domain/relatedIssues';
+import { jiraMatchKey } from '../domain/jiraBinding';
 import { PlanningEngine, round2 } from '../engine/planning';
 import type { Cinematic, CinematicJiraSyncState, CinematicRelatedIssue, Discipline, JiraProjectConfig, Loq, LoqDependency, LoqResource, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
 import { wouldCreateCycle } from '../domain/loqGraph';
@@ -60,6 +61,15 @@ export interface Toast {
 }
 
 export type Theme = 'light' | 'dark';
+
+/** A Jira issue that looks like a LOQ (carries the LOQ Target field, or is linked to the bound epic)
+ * under a Cinematic's Cinematics List value, but has no matching LOQ in the MS Project plan. Purely
+ * a session-level discovery surfaced in CinematicDetail — never persisted to the plan file. */
+export interface MissingLoqInfo {
+  jiraKey: string;
+  loqTarget: string | null;
+  summary: string;
+}
 
 interface StoreState {
   status: 'loading' | 'ready' | 'error';
@@ -137,6 +147,10 @@ interface StoreState {
    * single toast only when something actually changed since the stored snapshots; silent no-op
    * without desktop/config or when nothing is bound/known. Never writes plan status/dates. */
   refreshCinematicView: (cinematicId: string) => Promise<void>;
+  /** Session-only discovery, keyed by cinematicId: Jira issues that look like LOQs under the bound
+   * Cinematic's Cinematics List value but have no LOQ in the MS Project plan (Jira → plan direction).
+   * Populated by refreshCinematicView on open; never persisted (cleared on plan swap). */
+  discoveredMissingLoqs: Record<string, MissingLoqInfo[]>;
 
   createProject: (input: Omit<Project, 'id' | 'sortOrder'>) => Project;
   updateProject: (project: Project) => void;
@@ -624,6 +638,7 @@ export const useStore = create<StoreState>((set, get) => {
     theme: (localStorage.getItem('cine-planner-theme') as Theme | null) ?? 'light',
     toasts: [],
     lastImportReport: null,
+    discoveredMissingLoqs: {},
 
     init: async () => {
       try {
@@ -662,7 +677,7 @@ export const useStore = create<StoreState>((set, get) => {
       const db = await PlannerDatabase.createNew();
       if (seed) seedDemoData(db);
       const fileName = seed ? 'Demo plan' : 'Untitled plan';
-      set({ db, fileName, fileHandle: null, dirty: false });
+      set({ db, fileName, fileHandle: null, dirty: false, discoveredMissingLoqs: {} });
       setStoredFileName(fileName);
       reload(db);
       void saveAutosave(db.export());
@@ -674,7 +689,7 @@ export const useStore = create<StoreState>((set, get) => {
         const opened = await files.openFile();
         if (!opened) return;
         const db = await PlannerDatabase.openFromBytes(opened.bytes);
-        set({ db, fileName: opened.name, fileHandle: opened.handle, dirty: false });
+        set({ db, fileName: opened.name, fileHandle: opened.handle, dirty: false, discoveredMissingLoqs: {} });
         setStoredFileName(opened.name);
         reload(db);
         void saveAutosave(db.export());
@@ -988,7 +1003,31 @@ export const useStore = create<StoreState>((set, get) => {
       if (relatedSignature(prevRelated) !== relatedSignature(rows)) changed = true;
       repoReplaceCinematicRelatedIssues(db, cinematicId, rows);
 
+      // Discoverability (Jira → plan): issues that look like LOQs of this Cinematic (carry the LOQ
+      // Target field, or are linked to the bound epic) but have no matching LOQ in the plan. The
+      // batch already covers them (the "Cinematics List" clause pulled the whole family), so this is
+      // free — a session-only signal, never persisted. Covered = an existing LOQ is bound to that
+      // key, or shares its LOQ Target type.
+      const listKey = listValue ? jiraMatchKey(listValue) : null;
+      const planLoqKeys = new Set(cinematicLoqs.map((l) => l.jiraKey).filter((k): k is string => Boolean(k)));
+      const planLoqTypes = new Set(cinematicLoqs.map((l) => l.type));
+      const missing: MissingLoqInfo[] = batch.issues
+        .filter((i) => {
+          const looksLikeLoq =
+            i.loqTarget !== null ||
+            (cinematic.jiraKey ? i.epicLinkKey === cinematic.jiraKey || i.parentKey === cinematic.jiraKey : false);
+          if (!looksLikeLoq) return false;
+          const belongsHere =
+            (listKey !== null && i.cinematicName !== null && jiraMatchKey(i.cinematicName) === listKey) ||
+            (cinematic.jiraKey ? i.epicLinkKey === cinematic.jiraKey || i.parentKey === cinematic.jiraKey : false);
+          if (!belongsHere) return false;
+          const covered = planLoqKeys.has(i.key) || (i.loqTarget !== null && planLoqTypes.has(i.loqTarget));
+          return !covered;
+        })
+        .map((i) => ({ jiraKey: i.key, loqTarget: i.loqTarget, summary: i.summary }));
+
       persist();
+      set({ discoveredMissingLoqs: { ...get().discoveredMissingLoqs, [cinematicId]: missing } });
       if (changed) get().toast('info', 'Statuts Jira mis à jour');
     },
 

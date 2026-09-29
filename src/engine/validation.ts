@@ -6,6 +6,8 @@ import { comparePeriod, formatPeriodLabel, periodFromISODate, periodRange } from
 import { deriveProjectStatus } from '../domain/projectStatus';
 import { buildEffectiveStatusMap, cinematicStatus, statusResolverFrom, isTerminalStatus, type StatusResolver } from './watchtower';
 import { CANONICAL_STATUS_LABEL, resolveJiraStatus } from '../domain/jiraStatusMap';
+import { jiraMatchKey } from '../domain/jiraBinding';
+import type { NormalizedJiraIssue } from '../import/jiraSync';
 
 export type CheckCategory =
   | 'over_capacity'
@@ -83,6 +85,7 @@ export function getSanityChecks(engine: PlanningEngine, jiraConfigs: JiraProject
   checks.push(...checkLoqEarlyOpportunity(engine));
   checks.push(...checkJiraInconsistency(engine, toleranceDaysByProjectId, statusMappingByProjectId));
   checks.push(...checkCinematicEpicDivergence(engine, statusMappingByProjectId, statusResolver));
+  checks.push(...checkCinematicBindingCoherence(engine));
 
   for (const check of checks) {
     if (check.disciplineId) continue;
@@ -551,6 +554,95 @@ function checkCinematicEpicDivergence(
         ...base,
         message: `"${cinematic.name}"'s epic is Blocked in Jira, but none of its LOQs are`,
         impact: `Linked epic reads Blocked while the Cinematic rolls up to ${rollup} — the block isn't reflected on any shot`,
+      });
+    }
+  }
+
+  return checks;
+}
+
+/** The subset of a snapshot's NormalizedJiraIssue the binding-coherence check reads. */
+type SnapshotIssue = Pick<NormalizedJiraIssue, 'issueType' | 'cinematicName' | 'epicLinkKey' | 'parentKey'>;
+
+/** Same defensive shape as parseJiraSnapshotDates — the snapshot is a JSON blob, not a typed column. */
+function parseJiraSnapshotIssue(rawSnapshot: string): SnapshotIssue | null {
+  try {
+    const p = JSON.parse(rawSnapshot) as Partial<NormalizedJiraIssue>;
+    return {
+      issueType: typeof p.issueType === 'string' ? p.issueType : 'Unknown',
+      cinematicName: typeof p.cinematicName === 'string' ? p.cinematicName : null,
+      epicLinkKey: typeof p.epicLinkKey === 'string' ? p.epicLinkKey : null,
+      parentKey: typeof p.parentKey === 'string' ? p.parentKey : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * jira_inconsistency, binding *structure* (not status — that's checkCinematicEpicDivergence): a
+ * Cinematic bound to a Jira issue that isn't structurally coherent with its LOQs. Catches the
+ * failure mode where the name-matching fallback (jiraBinding.ts's 'name' level) bound a Cinematic to
+ * a plain Task that merely shares its name, rather than the Cinematic's real epic/initiative.
+ *
+ * Two graded signals, at most one emitted per Cinematic (strong wins), both `warning`:
+ *  - strong (needs ≥1 bound LOQ): none of the Cinematic's bound LOQs is actually linked to the
+ *    bound epic — no native parent, no Epic Link, and no shared Cinematics List value. The epic is
+ *    disconnected from the very shots it heads.
+ *  - soft fallback (fires when the strong one can't — e.g. no LOQ bound yet): the bound issue
+ *    carries no Cinematics List value at all, so it likely isn't a cinematic-level issue.
+ *
+ * Signal only — reads snapshots, never writes back.
+ */
+function checkCinematicBindingCoherence(engine: PlanningEngine): SanityCheck[] {
+  const checks: SanityCheck[] = [];
+  const loqStateById = new Map(engine.loqsWithJiraSync().map(({ loq, state }) => [loq.id, state]));
+
+  for (const { cinematic, state, loqs } of engine.cinematicsWithJiraSync()) {
+    if (!cinematic.jiraKey) continue;
+    const epicIssue = parseJiraSnapshotIssue(state.rawSnapshot);
+    if (!epicIssue) continue;
+    const base = {
+      projectId: cinematic.projectId,
+      projectName: engine.project(cinematic.projectId)?.name,
+      cinematicId: cinematic.id,
+    };
+
+    const boundLoqIssues = loqs
+      .map((l) => loqStateById.get(l.id))
+      .filter((s): s is NonNullable<typeof s> => Boolean(s))
+      .map((s) => parseJiraSnapshotIssue(s.rawSnapshot))
+      .filter((i): i is SnapshotIssue => i !== null);
+
+    if (boundLoqIssues.length > 0) {
+      const epicNameKey = epicIssue.cinematicName ? jiraMatchKey(epicIssue.cinematicName) : null;
+      const connected = boundLoqIssues.some(
+        (li) =>
+          li.epicLinkKey === cinematic.jiraKey ||
+          li.parentKey === cinematic.jiraKey ||
+          (epicNameKey !== null && li.cinematicName !== null && jiraMatchKey(li.cinematicName) === epicNameKey),
+      );
+      if (!connected) {
+        checks.push({
+          id: `cinematic-binding-coherence:${cinematic.id}`,
+          severity: 'warning',
+          category: 'jira_inconsistency',
+          ...base,
+          message: `"${cinematic.name}" and its bound LOQs share no Jira link`,
+          impact: `None of the ${boundLoqIssues.length} bound LOQ${boundLoqIssues.length > 1 ? 's are' : ' is'} a child of ${cinematic.jiraKey} (no native parent, Epic Link, or shared Cinematics List value) — the bound epic may not be the right one for these shots`,
+        });
+        continue;
+      }
+    }
+
+    if (!epicIssue.cinematicName) {
+      checks.push({
+        id: `cinematic-binding-coherence:${cinematic.id}`,
+        severity: 'warning',
+        category: 'jira_inconsistency',
+        ...base,
+        message: `"${cinematic.name}" is bound to ${cinematic.jiraKey} (${epicIssue.issueType}), which carries no Cinematics List value`,
+        impact: 'A cinematic-level issue is normally tagged with the Cinematics List field that anchors its hotlines and bugs — this binding may point at the wrong issue (e.g. a task that merely shares the name)',
       });
     }
   }

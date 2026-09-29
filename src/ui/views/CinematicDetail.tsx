@@ -21,8 +21,12 @@ import { LoqTimeline } from '../components/LoqTimeline';
 import { RecommitDialog } from '../components/RecommitDialog';
 import { VarianceDialog } from '../components/VarianceDialog';
 import type { CinematicRelatedIssue, Loq } from '../../domain/types';
+import type { MissingLoqInfo } from '../../store/useStore';
 
 const SEVERITY_RANK: Record<SanityCheck['severity'], number> = { critical: 2, warning: 1, info: 0 };
+
+/** Stable empty fallback so the discoveredMissingLoqs selector never returns a fresh array. */
+const EMPTY_MISSING_LOQS: MissingLoqInfo[] = [];
 
 /** Status cell for a LOQ row, honouring its effective (Jira-mirrored) status. A voluntary pause
  * reads "On hold"; a bound row whose Jira status isn't mapped reads "À mapper" (never a silent
@@ -108,6 +112,9 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const deleteLoq = useStore((s) => s.deleteLoq);
   const relatedIssues = useStore((s) => s.data.cinematicRelatedIssues);
   const refreshCinematicView = useStore((s) => s.refreshCinematicView);
+  // Select the stored entry (a stable reference, or undefined) — never a fresh [] inside the
+  // selector, which would loop Zustand's reference-equality re-render check.
+  const missingLoqs = useStore((s) => s.discoveredMissingLoqs[cinematicId]) ?? EMPTY_MISSING_LOQS;
   const backToProject = useUiStore((s) => s.backToProject);
   const [editing, setEditing] = useState(false);
   const [newLoq, setNewLoq] = useState(false);
@@ -303,6 +310,25 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
             <Button variant="primary" size="sm" icon="plus" onClick={() => setNewLoq(true)}>New LOQ</Button>
           </div>
         </div>
+
+        {missingLoqs.length > 0 && (
+          <div className="missing-loq-banner">
+            <Icon name="warning" size={14} />
+            <div>
+              <strong>{missingLoqs.length} LOQ{missingLoqs.length === 1 ? '' : 's'} in Jira not in this plan.</strong>{' '}
+              Seen under this cinematic in Jira with no matching LOQ here:{' '}
+              {missingLoqs.map((m, i) => (
+                <span key={m.jiraKey}>
+                  {i > 0 && ', '}
+                  {jiraConfig?.baseUrl
+                    ? <a className="jira-link" href={jiraBrowseUrl(jiraConfig.baseUrl, m.jiraKey)} target="_blank" rel="noreferrer">{m.jiraKey}</a>
+                    : <span>{m.jiraKey}</span>}
+                  {m.loqTarget ? ` (${m.loqTarget})` : ''}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {cinematicLoqs.length === 0 ? (
           <p className="empty-inline">No LOQs yet. Add one to start scheduling this cinematic.</p>
