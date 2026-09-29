@@ -3,6 +3,7 @@ import {
   CANONICAL_STATUSES,
   DEFAULT_JIRA_STATUS_MAPPING,
   UNMAPPED,
+  bugStatusBucket,
   resolveJiraStatus,
   withJiraConfigDefaults,
 } from '../src/domain/jiraStatusMap';
@@ -63,5 +64,29 @@ describe('withJiraConfigDefaults', () => {
 describe('UNMAPPED sentinel', () => {
   it('is the string "unmapped"', () => {
     expect(UNMAPPED).toBe('unmapped');
+  });
+});
+
+describe('bugStatusBucket', () => {
+  const mapping = DEFAULT_JIRA_STATUS_MAPPING;
+
+  it('buckets each canonical status into a QA-bug metric', () => {
+    expect(bugStatusBucket('Open', null, mapping)).toBe('open');
+    expect(bugStatusBucket('In Progress', null, mapping)).toBe('inProgress');
+    expect(bugStatusBucket('In Review', null, mapping)).toBe('inProgress'); // TO_REVIEW folds into In Progress
+    expect(bugStatusBucket('Waiting For', null, mapping)).toBe('waitingFor'); // BLOCKED family
+    expect(bugStatusBucket('On Hold', null, mapping)).toBe('waitingFor');
+    expect(bugStatusBucket('Done', null, mapping)).toBe('resolved');
+    expect(bugStatusBucket("Won't Do", null, mapping)).toBe('resolved'); // CUT counts as resolved/closed
+  });
+
+  it('treats a resolution date as Resolved regardless of the raw status', () => {
+    expect(bugStatusBucket('In Progress', '2026-09-20', mapping)).toBe('resolved');
+    expect(bugStatusBucket(null, '2026-09-20', mapping)).toBe('resolved');
+  });
+
+  it('counts an unmapped or missing status as Open rather than dropping it', () => {
+    expect(bugStatusBucket('Some Custom Status', null, mapping)).toBe('open');
+    expect(bugStatusBucket(null, null, mapping)).toBe('open');
   });
 });

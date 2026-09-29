@@ -52,6 +52,44 @@ function norm(s: string): string {
   return s.trim().toLowerCase();
 }
 
+/** QA-bug metric buckets shown on the Cinematic Detail widget, in display order. */
+export const BUG_BUCKETS = ['open', 'inProgress', 'waitingFor', 'resolved'] as const;
+export type BugStatusBucket = (typeof BUG_BUCKETS)[number];
+
+export const BUG_BUCKET_LABEL: Record<BugStatusBucket, string> = {
+  open: 'Open',
+  inProgress: 'In Progress',
+  waitingFor: 'Waiting For',
+  resolved: 'Resolved',
+};
+
+/**
+ * Folds a QA bug's raw Jira status into one of the four detail-widget metrics. A resolution date
+ * wins outright — an issue Jira has resolved reads Resolved regardless of how its status maps —
+ * otherwise the raw status is resolved through the project mapping: DONE/CUT → Resolved,
+ * BLOCKED (incl. "waiting"/"on hold") → Waiting For, IN_PROGRESS/TO_REVIEW → In Progress, and
+ * TODO plus any unmapped/unknown status → Open (still-active work is surfaced, never dropped).
+ */
+export function bugStatusBucket(
+  rawStatus: string | null,
+  resolutionDate: string | null,
+  mapping: Record<string, LoqStatus> | null | undefined,
+): BugStatusBucket {
+  if (resolutionDate) return 'resolved';
+  switch (resolveJiraStatus(rawStatus, mapping)) {
+    case 'DONE':
+    case 'CUT':
+      return 'resolved';
+    case 'BLOCKED':
+      return 'waitingFor';
+    case 'IN_PROGRESS':
+    case 'TO_REVIEW':
+      return 'inProgress';
+    default:
+      return 'open';
+  }
+}
+
 /**
  * Resolves a raw Jira status string to a canonical LoqStatus through `mapping` (case-insensitive,
  * trimmed). Returns null when the status is absent or not covered by the mapping — the caller treats

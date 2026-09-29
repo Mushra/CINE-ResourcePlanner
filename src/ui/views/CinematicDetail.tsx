@@ -7,7 +7,10 @@ import {
   representativeLoq, statusResolverFrom, worstDiscipline,
   type AttentionItem, type WatchtowerHealth,
 } from '../../engine/watchtower';
-import { CANONICAL_STATUS_LABEL, UNMAPPED, type EffectiveStatus } from '../../domain/jiraStatusMap';
+import {
+  BUG_BUCKETS, BUG_BUCKET_LABEL, CANONICAL_STATUS_LABEL, UNMAPPED,
+  bugStatusBucket, type BugStatusBucket, type EffectiveStatus,
+} from '../../domain/jiraStatusMap';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
 import { ConfirmButton } from '../components/ConfirmButton';
@@ -33,32 +36,38 @@ function loqStatusCell(loq: Loq, effective: EffectiveStatus | undefined): { clas
 
 const VERSION_PLAYER_GAP = "Needs a ShotGrid/Flow connector to fetch and stream published review versions, and to expose the publish/push event log.";
 
-/** A resolved Jira issue reads as calm/neutral; anything else is still open work. */
-function isResolvedIssue(issue: CinematicRelatedIssue): boolean {
-  return issue.resolutionDate !== null;
-}
-
-/** One row of the Hotlines / QA-bugs widgets: the Jira key, summary, raw status and assignee. */
-function RelatedIssueList({ issues, baseUrl }: { issues: CinematicRelatedIssue[]; baseUrl: string | null }) {
+/** Hotlines widget: only the currently-open hotlines are listed (a status dot, the Jira key, its
+ * summary and assignee). Resolved ones aren't listed — they're summarised in a small report line. */
+function HotlineList({ issues, baseUrl }: { issues: CinematicRelatedIssue[]; baseUrl: string | null }) {
   return (
-    <ul className="related-issue-list">
+    <ul className="hotline-list">
       {issues.map((issue) => (
-        <li key={issue.jiraKey} className={`related-issue ${isResolvedIssue(issue) ? 'resolved' : ''}`}>
-          <div className="related-issue-main">
-            {baseUrl ? (
-              <a className="related-issue-key" href={`${baseUrl.replace(/\/$/, '')}/browse/${issue.jiraKey}`} target="_blank" rel="noreferrer">{issue.jiraKey}</a>
-            ) : (
-              <span className="related-issue-key">{issue.jiraKey}</span>
-            )}
-            <span className="related-issue-summary">{issue.summary ?? '—'}</span>
-          </div>
-          <div className="related-issue-meta">
-            {issue.status && <span className="related-issue-status">{issue.status}</span>}
-            {issue.assignee && <span className="related-issue-assignee">{issue.assignee}</span>}
-          </div>
+        <li key={issue.jiraKey} className="hotline-row">
+          <span className="hotline-dot" />
+          {baseUrl ? (
+            <a className="hotline-key" href={`${baseUrl.replace(/\/$/, '')}/browse/${issue.jiraKey}`} target="_blank" rel="noreferrer">{issue.jiraKey}</a>
+          ) : (
+            <span className="hotline-key">{issue.jiraKey}</span>
+          )}
+          <span className="hotline-title">{issue.summary ?? '—'}</span>
+          {issue.assignee && <span className="hotline-assignee">{issue.assignee}</span>}
         </li>
       ))}
     </ul>
+  );
+}
+
+/** QA-bugs widget: metrics only — one tile per status bucket, no per-issue list. */
+function BugMetrics({ metrics }: { metrics: Record<BugStatusBucket, number> }) {
+  return (
+    <div className="bug-metrics">
+      {BUG_BUCKETS.map((bucket) => (
+        <div key={bucket} className="bug-metric">
+          <div className="bug-metric-value">{metrics[bucket]}</div>
+          <div className="bug-metric-label">{BUG_BUCKET_LABEL[bucket]}</div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -120,13 +129,23 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const focusHealth: WatchtowerHealth | null = focusLoq ? deriveLoqHealth(focusLoq, forecasts.get(focusLoq.id), statusOf(focusLoq)) : null;
   const focusForecastFinish = focusLoq ? forecasts.get(focusLoq.id)?.forecastFinish ?? focusLoq.actualFinish ?? null : null;
 
-  // Open (unresolved) issues first, then by most recently updated — the freshest, most actionable
-  // on top. Split by kind into the two widgets.
-  const cinematicRelated = relatedIssues
-    .filter((r) => r.cinematicId === cinematic.id)
-    .sort((a, b) => Number(isResolvedIssue(a)) - Number(isResolvedIssue(b)) || (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
+  // Split the related issues by kind, then reduce each to what its widget shows. Resolved/open both
+  // key off bugStatusBucket so the two widgets agree on what "resolved" means (a resolution date, or
+  // a status that maps to Done/Cut).
+  const statusMapping = jiraConfig?.statusMapping ?? null;
+  const cinematicRelated = relatedIssues.filter((r) => r.cinematicId === cinematic.id);
   const hotlines = cinematicRelated.filter((r) => r.kind === 'hotline');
   const bugs = cinematicRelated.filter((r) => r.kind === 'bug');
+
+  // Hotlines: list only the currently-open ones (freshest first); the rest fold into a resolved count.
+  const openHotlines = hotlines
+    .filter((h) => bugStatusBucket(h.status, h.resolutionDate, statusMapping) !== 'resolved')
+    .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
+  const resolvedHotlineCount = hotlines.length - openHotlines.length;
+
+  // QA bugs: counts per status bucket, no list.
+  const bugMetrics: Record<BugStatusBucket, number> = { open: 0, inProgress: 0, waitingFor: 0, resolved: 0 };
+  for (const bug of bugs) bugMetrics[bugStatusBucket(bug.status, bug.resolutionDate, statusMapping)] += 1;
 
   return (
     <div className="cinematic-detail-view">
@@ -223,10 +242,17 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
         <div className="card panel">
           <div className="panel-header">
             <h2>Hotlines</h2>
-            {hotlines.length > 0 && <span className="panel-sub">{hotlines.length} linked</span>}
+            {hotlines.length > 0 && <span className="panel-sub">{openHotlines.length} open</span>}
           </div>
           {hotlines.length > 0 ? (
-            <RelatedIssueList issues={hotlines} baseUrl={jiraConfig?.baseUrl ?? null} />
+            <>
+              {openHotlines.length > 0 ? (
+                <HotlineList issues={openHotlines} baseUrl={jiraConfig?.baseUrl ?? null} />
+              ) : (
+                <p className="empty-inline">No open hotlines.</p>
+              )}
+              {resolvedHotlineCount > 0 && <p className="hotline-report">{resolvedHotlineCount} resolved</p>}
+            </>
           ) : (
             <EmptyState icon="check" title="No hotlines" description={`No ${jiraConfig?.hotlineLabel ?? 'CINE_HOTLINE'} issues linked to this cinematic.`} compact />
           )}
@@ -235,10 +261,10 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
         <div className="card panel">
           <div className="panel-header">
             <h2>QA bugs</h2>
-            {bugs.length > 0 && <span className="panel-sub">{bugs.length} linked</span>}
+            {bugs.length > 0 && <span className="panel-sub">{bugMetrics.open} open · {bugs.length} total</span>}
           </div>
           {bugs.length > 0 ? (
-            <RelatedIssueList issues={bugs} baseUrl={jiraConfig?.baseUrl ?? null} />
+            <BugMetrics metrics={bugMetrics} />
           ) : (
             <EmptyState icon="check" title="No bugs" description="No Jira bugs linked to this cinematic." compact />
           )}
