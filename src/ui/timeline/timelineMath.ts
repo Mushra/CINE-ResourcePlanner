@@ -21,6 +21,16 @@ export function isoAddDays(iso: string, delta: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+/** Adds `delta` calendar months to an ISO date, clamping the day to the target month's last day
+ * (e.g. Jan 31 + 1 month → Feb 28/29). Used for the "next N months" delivery-outlook horizons. */
+export function isoAddMonths(iso: string, delta: number): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const target = new Date(Date.UTC(y, m - 1 + delta, 1));
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(d, lastDay));
+  return target.toISOString().slice(0, 10);
+}
+
 export function isoDiffDays(a: string, b: string): number {
   const [ay, am, ad] = a.split('-').map(Number);
   const [by, bm, bd] = b.split('-').map(Number);

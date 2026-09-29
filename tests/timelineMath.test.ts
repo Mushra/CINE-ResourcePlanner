@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fineAxisTicks, formatIsoDateShort, timelineGranularity } from '../src/ui/timeline/timelineMath';
+import { fineAxisTicks, formatIsoDateShort, isoAddMonths, timelineGranularity } from '../src/ui/timeline/timelineMath';
 import type { Period } from '../src/domain/types';
 
 describe('timelineGranularity', () => {
@@ -49,5 +49,21 @@ describe('fineAxisTicks', () => {
 describe('formatIsoDateShort', () => {
   it('renders day + short month, no year', () => {
     expect(formatIsoDateShort('2026-04-12')).toBe('Apr 12');
+  });
+});
+
+describe('isoAddMonths', () => {
+  it('adds whole calendar months', () => {
+    expect(isoAddMonths('2026-01-15', 1)).toBe('2026-02-15');
+    expect(isoAddMonths('2026-09-28', 4)).toBe('2027-01-28');
+  });
+
+  it('rolls over the year boundary', () => {
+    expect(isoAddMonths('2026-11-10', 4)).toBe('2027-03-10');
+  });
+
+  it('clamps the day to the target month\'s last day', () => {
+    expect(isoAddMonths('2026-01-31', 1)).toBe('2026-02-28'); // Feb has 28 days in 2026
+    expect(isoAddMonths('2028-01-31', 1)).toBe('2028-02-29'); // 2028 is a leap year
   });
 });

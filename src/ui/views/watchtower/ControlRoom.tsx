@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useStore } from '../../../store/useStore';
 import { useUiStore } from '../../../store/useUiStore';
-import { isoDiffDays } from '../../timeline/timelineMath';
+import { isoAddMonths, isoDiffDays } from '../../timeline/timelineMath';
+import { localTodayIso } from '../../../domain/projectStatus';
 import {
   HEALTH_LABEL, HEALTH_ORDER, buildEffectiveStatusMap, cinematicHealth, deriveLoqHealth, healthCounts,
-  loqLevelDistribution, loqStatusLabel, projectAttention, representativeLoq, statusResolverFrom,
+  isTerminalStatus, loqLevelDistribution, loqStatusLabel, projectAttention, representativeLoq, statusResolverFrom,
   type AttentionItem, type StatusResolver, type WatchtowerHealth,
 } from '../../../engine/watchtower';
 import { Collapsible } from '../../components/Collapsible';
@@ -32,6 +33,7 @@ export function ControlRoom({ project, checks }: { project: Project; checks: San
   const openCinematic = useUiStore((s) => s.openCinematic);
   const [healthFilter, setHealthFilter] = useState<WatchtowerHealth | null>(null);
   const [distDiscipline, setDistDiscipline] = useState<string>('all');
+  const [outlookHorizon, setOutlookHorizon] = useState<OutlookHorizon>('next-4-months');
 
   const cinematics = allCinematics.filter((c) => c.projectId === project.id).sort((a, b) => a.sortOrder - b.sortOrder);
   const cinematicIds = new Set(cinematics.map((c) => c.id));
@@ -148,8 +150,15 @@ export function ControlRoom({ project, checks }: { project: Project; checks: San
 
       <div className="card panel">
         <div className="panel-header">
-          <h2>LOQ delivery outlook</h2>
-          <span className="panel-sub">Forecast finish vs. target date, per discipline</span>
+          <div className="panel-header-title">
+            <h2>LOQ delivery outlook</h2>
+            <span className="panel-sub">Upcoming deliveries from today — soonest first, overdue pinned on top</span>
+          </div>
+          <select className="person-add-select" value={outlookHorizon} onChange={(e) => setOutlookHorizon(e.target.value as OutlookHorizon)}>
+            <option value="next-month">Next month</option>
+            <option value="next-4-months">Next 4 months</option>
+            <option value="all">All upcoming</option>
+          </select>
         </div>
         <LoqOutlook
           cinematics={outlookCinematics}
@@ -159,6 +168,7 @@ export function ControlRoom({ project, checks }: { project: Project; checks: San
           forecasts={forecasts}
           statusOf={statusOf}
           healthFilter={healthFilter}
+          horizon={outlookHorizon}
           onOpenCinematic={openCinematic}
         />
       </div>
@@ -193,8 +203,21 @@ export function ControlRoom({ project, checks }: { project: Project; checks: San
   );
 }
 
+/** Delivery-outlook time window. All three hide the past (start = today); they only bound how far
+ * into the future the timeline reaches. Overdue-but-unresolved deliveries always show regardless. */
+export type OutlookHorizon = 'next-month' | 'next-4-months' | 'all';
+
+interface OutlookCell {
+  disciplineId: string;
+  loq: Loq;
+  date: string;
+  health: WatchtowerHealth;
+  /** Delivery date is in the past and the LOQ isn't finished — the most urgent, pinned left + on top. */
+  overdue: boolean;
+}
+
 function LoqOutlook({
-  cinematics, disciplineIds, disciplineName, loqs, forecasts, statusOf, healthFilter, onOpenCinematic,
+  cinematics, disciplineIds, disciplineName, loqs, forecasts, statusOf, healthFilter, horizon, onOpenCinematic,
 }: {
   cinematics: Cinematic[];
   disciplineIds: string[];
@@ -203,48 +226,57 @@ function LoqOutlook({
   forecasts: ReadonlyMap<string, LoqForecast>;
   statusOf: StatusResolver;
   healthFilter: WatchtowerHealth | null;
+  horizon: OutlookHorizon;
   onOpenCinematic: (id: string) => void;
 }) {
-  const rows = cinematics.map((cinematic) => ({
+  const today = localTodayIso();
+  // Future horizon end; overdue items ignore it (they always show). 'all' extends to the last date.
+  const horizonEnd = horizon === 'next-month' ? isoAddMonths(today, 1) : horizon === 'next-4-months' ? isoAddMonths(today, 4) : null;
+
+  const allRows = cinematics.map((cinematic) => ({
     cinematic,
     cells: disciplineIds
-      .map((disciplineId) => {
+      .map((disciplineId): OutlookCell | null => {
         const loq = representativeLoq(loqs, cinematic.id, disciplineId, statusOf);
         if (!loq) return null;
         const forecast = forecasts.get(loq.id);
         const date = forecast?.forecastFinish ?? loq.committedFinish ?? loq.actualFinish ?? null;
         if (!date) return null;
-        return { disciplineId, loq, date, health: deriveLoqHealth(loq, forecast, statusOf(loq)) };
+        const overdue = date < today && !isTerminalStatus(statusOf(loq));
+        return { disciplineId, loq, date, health: deriveLoqHealth(loq, forecast, statusOf(loq)), overdue };
       })
-      .filter((c): c is { disciplineId: string; loq: Loq; date: string; health: WatchtowerHealth } => c !== null),
+      // Hide the past: keep future-or-today deliveries within the horizon, plus every overdue one.
+      .filter((c): c is OutlookCell => c !== null && (c.overdue || (c.date >= today && (horizonEnd === null || c.date <= horizonEnd)))),
   })).filter((row) => row.cells.length > 0);
 
-  const allDates = [
-    ...rows.flatMap((r) => r.cells.map((c) => c.date)),
-    ...rows.map((r) => r.cinematic.targetDate).filter((d): d is string => d !== null),
-  ];
-
-  if (allDates.length === 0) {
-    return <p className="empty-inline">No forecastable LOQs yet.</p>;
+  if (allRows.length === 0) {
+    return <p className="empty-inline">No deliveries due in this window.</p>;
   }
 
-  const sorted = [...allDates].sort();
-  const minDate = sorted[0];
-  const maxDate = sorted[sorted.length - 1];
-  const totalDays = Math.max(1, isoDiffDays(minDate, maxDate));
-  const padDays = Math.max(2, Math.round(totalDays * 0.08));
-  const windowDays = totalDays + padDays * 2;
+  // Soonest delivery per row drives the ordering — overdue rows (earliest dates) rise to the top.
+  const earliestOf = (cells: OutlookCell[]) => cells.reduce((min, c) => (c.date < min ? c.date : min), cells[0].date);
+  const rows = [...allRows].sort((a, b) => earliestOf(a.cells).localeCompare(earliestOf(b.cells)));
+
+  // Timeline window is anchored at today on the left; overdue dots clamp to the left edge.
+  const windowStart = today;
+  const futureDates = [
+    ...rows.flatMap((r) => r.cells.filter((c) => !c.overdue).map((c) => c.date)),
+    ...rows.map((r) => r.cinematic.targetDate).filter((d): d is string => d !== null && d >= today && (horizonEnd === null || d <= horizonEnd)),
+  ];
+  const windowEnd = horizonEnd ?? (futureDates.length > 0 ? [...futureDates].sort().at(-1)! : isoAddMonths(today, 1));
+  const spanDays = Math.max(1, isoDiffDays(windowStart, windowEnd));
+  const padDays = Math.max(2, Math.round(spanDays * 0.08));
+  const windowDays = spanDays + padDays * 2;
 
   function pct(date: string): number {
-    const offset = isoDiffDays(minDate, date) + padDays;
+    const offset = isoDiffDays(windowStart, date) + padDays;
     return Math.max(0, Math.min(100, (offset / windowDays) * 100));
   }
 
   const tickCount = 5;
   const ticks = Array.from({ length: tickCount }, (_, i) => {
-    const offsetDays = Math.round((i / (tickCount - 1)) * (totalDays + padDays * 2)) - padDays;
-    const iso = new Date(new Date(`${minDate}T00:00:00Z`).getTime() + offsetDays * 86400000).toISOString().slice(0, 10);
-    return iso;
+    const offsetDays = Math.round((i / (tickCount - 1)) * windowDays) - padDays;
+    return new Date(new Date(`${windowStart}T00:00:00Z`).getTime() + offsetDays * 86400000).toISOString().slice(0, 10);
   });
 
   return (
@@ -264,11 +296,13 @@ function LoqOutlook({
             <div key={cell.disciplineId} className="outlook-row">
               <span className="outlook-row-label">{disciplineName(cell.disciplineId)}</span>
               <div className="outlook-track">
-                {row.cinematic.targetDate && <div className="outlook-target-mark" style={{ left: `${pct(row.cinematic.targetDate)}%` }} />}
+                {row.cinematic.targetDate && row.cinematic.targetDate >= today && (horizonEnd === null || row.cinematic.targetDate <= horizonEnd) && (
+                  <div className="outlook-target-mark" style={{ left: `${pct(row.cinematic.targetDate)}%` }} />
+                )}
                 <div
-                  className={`outlook-dot ${healthFilter && cell.health !== healthFilter ? 'dimmed' : ''}`}
+                  className={`outlook-dot ${cell.overdue ? 'overdue' : ''} ${healthFilter && cell.health !== healthFilter ? 'dimmed' : ''}`}
                   style={{ left: `${pct(cell.date)}%`, background: `var(--wt-${cell.health})` }}
-                  title={`${row.cinematic.name} · ${disciplineName(cell.disciplineId)}\nStatus: ${loqStatusLabel(cell.loq, statusOf(cell.loq))}\nHealth: ${HEALTH_LABEL[cell.health]}\nForecast finish: ${cell.date}`}
+                  title={`${row.cinematic.name} · ${disciplineName(cell.disciplineId)}\nStatus: ${loqStatusLabel(cell.loq, statusOf(cell.loq))}\nHealth: ${HEALTH_LABEL[cell.health]}\n${cell.overdue ? 'Overdue since' : 'Forecast finish'}: ${cell.date}`}
                   onClick={() => onOpenCinematic(row.cinematic.id)}
                 />
               </div>
