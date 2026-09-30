@@ -549,10 +549,58 @@ export const useStore = create<StoreState>((set, get) => {
   function resolveGenericPoolId(db: PlannerDatabase, disciplineId: string): string | null {
     const discipline = get().data.disciplines.find((d) => d.id === disciplineId);
     if (!discipline) return null;
-    const existing = get().data.pools.find((p) => p.disciplineId === disciplineId && isGenericPoolName(p.name));
+    // Query the DB (not get().data, which only refreshes on reload) so repeated calls within one
+    // action — e.g. consolidateDisciplineRequirement then the edit itself — resolve to the same pool
+    // instead of each spawning a new one.
+    const existing = db
+      .query<{ id: string; name: string }>('SELECT id, name FROM resource_pools WHERE discipline_id = ?', [disciplineId])
+      .find((p) => isGenericPoolName(p.name));
     if (existing) return existing.id;
     const pool = repoCreatePool(db, { name: genericPoolName(discipline.name), disciplineId, color: discipline.color, capacityFte: 0 });
     return pool.id;
+  }
+
+  /**
+   * Folds any requirement recorded on a discipline's *specific* pools onto its hidden generic pool,
+   * so the discipline's need has a single editable home. MS Project imports and the demo seed record
+   * needs per specific pool (setRequired(project, animation.id, …)), but the Staffing need lane only
+   * ever edits the generic pool (setDisciplineRequirement*). Without this fold, lowering a need whose
+   * FTE lives on a specific pool can't work — the edit lands on the generic pool while the specific
+   * one lingers, so the discipline's aggregated `required` (getProjectDisciplineStaffing sums across
+   * every pool) never drops and its staffing warning can never clear. Called at the start of each
+   * discipline-need write. Month-bucketed (the Staffing view's granularity) and a no-op once the
+   * discipline's need is already generic-only.
+   */
+  function consolidateDisciplineRequirement(db: PlannerDatabase, projectId: string, disciplineId: string): void {
+    const engine = get().engine;
+    const poolIds = new Set(engine.poolsInDiscipline(disciplineId).map((p) => p.id));
+    const disciplineReqs = get().data.requirements.filter(
+      (r) => r.projectId === projectId && r.scenarioId === BASE_SCENARIO_ID && poolIds.has(r.poolId),
+    );
+    const genericPoolIds = new Set(get().data.pools.filter((p) => isGenericPoolName(p.name)).map((p) => p.id));
+    // Nothing to fold once every requirement already sits on the generic pool.
+    if (!disciplineReqs.some((r) => !genericPoolIds.has(r.poolId))) return;
+
+    // Capture the discipline's per-month aggregate (across all its pools) before deleting anything.
+    const periods = new Set<Period>();
+    for (const req of disciplineReqs) {
+      for (const a of get().data.requirementAllocations.filter((x) => x.requirementId === req.id)) {
+        for (const p of periodRange(periodFromISODate(a.startDate), periodFromISODate(a.finishDate))) periods.add(p);
+      }
+    }
+    const totalByPeriod = new Map<Period, number>();
+    for (const period of periods) {
+      const line = engine.getProjectDisciplineStaffing(projectId, period).find((l) => l.disciplineId === disciplineId);
+      if (line && line.required > 0.001) totalByPeriod.set(period, line.required);
+    }
+
+    // Delete every requirement the discipline holds for this project, then rewrite the folded total
+    // onto the single generic pool.
+    for (const req of disciplineReqs) repoDeleteRequirement(db, req.id);
+    const genericPoolId = resolveGenericPoolId(db, disciplineId);
+    if (!genericPoolId) return;
+    const req = getOrCreateRequirement(db, projectId, genericPoolId, BASE_SCENARIO_ID);
+    for (const [period, fte] of totalByPeriod) repoSetRequirementAllocation(db, req.id, period, fte);
   }
 
   /**
@@ -1407,6 +1455,7 @@ export const useStore = create<StoreState>((set, get) => {
     },
     setDisciplineRequirement: (projectId, disciplineId, period, fte) => {
       const db = get().db!;
+      consolidateDisciplineRequirement(db, projectId, disciplineId);
       const poolId = resolveGenericPoolId(db, disciplineId);
       if (!poolId) return;
       const clamped = Math.max(0, fte);
@@ -1417,6 +1466,7 @@ export const useStore = create<StoreState>((set, get) => {
     },
     setDisciplineRequirementRange: (projectId, disciplineId, periods, fte) => {
       const db = get().db!;
+      consolidateDisciplineRequirement(db, projectId, disciplineId);
       const poolId = resolveGenericPoolId(db, disciplineId);
       if (!poolId) return;
       const clamped = Math.max(0, fte);
