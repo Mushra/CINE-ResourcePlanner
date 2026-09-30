@@ -240,6 +240,8 @@ a.hotline-key:hover { text-decoration: underline; }
   color: var(--text-secondary);
 }
 .missing-loq-bind select { font-size: 11px; padding: 1px 4px; }
+/* Bulk-select toolbar sits between the header line and the grouped rows. */
+.missing-loq-toolbar { display: flex; margin: 2px 0 4px; }
 /* Project-wide discovery groups discipline groups under their cinematic. */
 .missing-loq-cinematic { display: flex; flex-direction: column; gap: 4px; }
 .missing-loq-cinematic + .missing-loq-cinematic { margin-top: 6px; }

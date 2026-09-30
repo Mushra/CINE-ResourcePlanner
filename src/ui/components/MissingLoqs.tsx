@@ -128,6 +128,17 @@ export function MissingLoqs({
 
   const selectedRows = rows.filter((r) => r.disciplineId && selected.has(rowKey(r, cinematicId)));
 
+  // "Select all" acts on the addable rows only (a resolved discipline + a landing cinematic) — the
+  // unresolved ones have disabled checkboxes and can't be ticked one-by-one either.
+  const addableKeys = rows
+    .filter((r) => r.disciplineId && (r.cinematicId ?? cinematicId))
+    .map((r) => rowKey(r, cinematicId));
+  const allSelected = addableKeys.length > 0 && addableKeys.every((k) => selected.has(k));
+
+  function toggleAll(): void {
+    setSelected(allSelected ? new Set() : new Set(addableKeys));
+  }
+
   async function handleAdd(): Promise<void> {
     const selections = selectedRows.map((r) => ({
       cinematicId: r.cinematicId ?? cinematicId ?? '',
@@ -203,6 +214,13 @@ export function MissingLoqs({
           {subtitle ?? 'Linked to this cinematic in Jira, in a tracked department, with no matching LOQ here. Tick the ones to add, or bind an unresolved department to a discipline.'}
         </span>
       </div>
+      {addableKeys.length > 0 && (
+        <div className="missing-loq-toolbar">
+          <Button variant="secondary" size="sm" onClick={toggleAll}>
+            {allSelected ? 'Deselect all' : 'Select all'}
+          </Button>
+        </div>
+      )}
       {body}
       <div className="missing-loq-actions">
         <Button variant="primary" size="sm" icon="plus" disabled={selectedRows.length === 0} onClick={() => void handleAdd()}>

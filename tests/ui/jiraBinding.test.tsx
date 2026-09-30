@@ -106,6 +106,43 @@ describe('JiraBindingDrawer (via ProjectDetail)', () => {
     expect(created).toMatchObject({ cinematicId: cinematic.id, type: 'L1', status: 'TODO' });
   });
 
+  it('bulk-selects every addable discovered LOQ with the Select all button, then adds them at once', async () => {
+    await seedStore();
+    const project = seedProject();
+    useStore.getState().createDiscipline({ name: 'Anim', color: '#4f7cff' });
+    const cinematic = useStore.getState().createCinematic({ projectId: project.id, name: 'Exodus Intro', jiraKey: 'OVR-EPIC', targetDate: null, notes: '' });
+    useUiStore.getState().openProject(project.id);
+    useUiStore.getState().setProjectView('production');
+    useUiStore.getState().setProductionScreen('matrix');
+
+    // The bound epic links two Anim LOQs (both resolve to the "Anim" discipline) absent from the plan.
+    mockExport({
+      issues: [
+        { key: 'OVR-EPIC', fields: { summary: 'Exodus Intro', issuetype: { name: 'Epic' }, status: { name: 'To Do' }, issuelinks: [{ outwardIssue: { key: 'OVR-1' } }, { outwardIssue: { key: 'OVR-2' } }] } },
+        { key: 'OVR-1', fields: { summary: 'CIN Fixers-Anim-L1', issuetype: { name: 'Sub-task' }, status: { name: 'To Do' }, customfield_12338: { value: 'L1' } } },
+        { key: 'OVR-2', fields: { summary: 'CIN Fixers-Anim-L2', issuetype: { name: 'Sub-task' }, status: { name: 'To Do' }, customfield_12338: { value: 'L2' } } },
+      ],
+    });
+
+    const { user } = renderView(<ProjectDetail projectId={project.id} />);
+    await user.click(screen.getByRole('button', { name: 'Sync with Jira' }));
+    await user.click(screen.getByRole('button', { name: 'Choose Jira export…' }));
+
+    expect(await screen.findByText(/1 cinematic.*linked/)).toBeInTheDocument();
+    const banner = document.querySelector('.missing-loq-banner') as HTMLElement;
+    expect(within(banner).getByText('2 LOQs in Jira not in this plan.')).toBeInTheDocument();
+
+    await user.click(within(banner).getByRole('button', { name: 'Select all' }));
+    // All checkboxes ticked and the button flips to Deselect all.
+    within(banner).getAllByRole('checkbox').forEach((cb) => expect(cb).toBeChecked());
+    expect(within(banner).getByRole('button', { name: 'Deselect all' })).toBeInTheDocument();
+
+    await user.click(within(banner).getByRole('button', { name: /Add 2 selected LOQs/ }));
+
+    const keys = useStore.getState().data.loqs.map((l) => l.jiraKey).sort();
+    expect(keys).toEqual(['OVR-1', 'OVR-2']);
+  });
+
   it('shows the Cinematics List signal badge for a field-based match, and lets the user override it', async () => {
     await seedStore();
     const project = seedProject();
