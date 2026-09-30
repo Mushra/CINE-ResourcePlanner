@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import { Drawer } from './Drawer';
 import { Button } from './Button';
+import { MissingLoqs } from './MissingLoqs';
 import { useStore } from '../../store/useStore';
 import { suggestJiraBindings, rankIssuesByRelevance, type JiraBindingProposals, type BindingKind } from '../../domain/jiraBinding';
+import { discoverMissingLoqsForProject, resolveDiscoveryKeywords, suggestDisciplineForRows } from '../../domain/loqDiscovery';
 import type { ConfirmedJiraBindings, JiraApplyReport } from '../../db/applyJiraSync';
 import type { NormalizedJiraBatch } from '../../import/jiraSync';
 import type { Cinematic, Loq } from '../../domain/types';
@@ -33,10 +35,15 @@ export function JiraBindingDrawer({ projectId, projectName, onClose }: { project
   const allCinematics = useStore((s) => s.data.cinematics);
   const allLoqs = useStore((s) => s.data.loqs);
   const disciplines = useStore((s) => s.data.disciplines);
+  const people = useStore((s) => s.data.people);
+  const pools = useStore((s) => s.data.pools);
   const loadJiraExportFile = useStore((s) => s.loadJiraExportFile);
   const syncJira = useStore((s) => s.syncJira);
   const applyJiraBindingsToProject = useStore((s) => s.applyJiraBindingsToProject);
   const jiraConfig = useStore((s) => s.getJiraConfigForProject(projectId));
+  const discoveryKeywordsGlobal = useStore((s) => s.discoveryKeywordsGlobal);
+  const addDiscoveredLoqsForCinematics = useStore((s) => s.addDiscoveredLoqsForCinematics);
+  const bindDiscoveredDepartment = useStore((s) => s.bindDiscoveredDepartment);
 
   const projectCinematics = allCinematics.filter((c) => c.projectId === projectId);
   const projectCinematicIds = new Set(projectCinematics.map((c) => c.id));
@@ -49,6 +56,20 @@ export function JiraBindingDrawer({ projectId, projectName, onClose }: { project
   const [proposals, setProposals] = useState<JiraBindingProposals | null>(null);
   const [choices, setChoices] = useState<ConfirmedJiraBindings>({ cinematics: {}, loqs: {} });
   const [report, setReport] = useState<JiraApplyReport | null>(null);
+
+  // Project-wide discovery, derived from the fetched batch and the (post-apply, so fresh) plan state:
+  // LOQs of bound cinematics that live in Jira but not the plan. Recomputes when a bind edits the
+  // keyword map or an add creates LOQs, so those rows resolve/drop off without a re-fetch.
+  const discoveredMissing = useMemo(() => {
+    if (!batch) return [];
+    return discoverMissingLoqsForProject({
+      cinematics: projectCinematics.map((c) => ({ id: c.id, name: c.name, jiraKey: c.jiraKey })),
+      familyIssues: batch.issues,
+      planLoqs: projectLoqs,
+      disciplines,
+      keywords: resolveDiscoveryKeywords(jiraConfig?.discoveryKeywords, discoveryKeywordsGlobal),
+    });
+  }, [batch, projectCinematics, projectLoqs, disciplines, jiraConfig, discoveryKeywordsGlobal]);
 
   function applyFetchedBatch(result: { fileName: string | null; batch: NormalizedJiraBatch }): void {
     const suggested = suggestJiraBindings(projectCinematics, projectLoqs, disciplines, result.batch);
@@ -93,7 +114,20 @@ export function JiraBindingDrawer({ projectId, projectName, onClose }: { project
   return (
     <Drawer title={`Sync with Jira — ${projectName}`} onClose={onClose} width={520}>
       {report ? (
-        <JiraApplyReportView fileName={fileName} report={report} onClose={onClose} />
+        <JiraApplyReportView fileName={fileName} report={report} onClose={onClose}>
+          {discoveredMissing.length > 0 && (
+            <MissingLoqs
+              rows={discoveredMissing}
+              disciplines={disciplines}
+              jiraBaseUrl={jiraConfig?.baseUrl ?? null}
+              groupByCinematic
+              subtitle="Linked to a bound cinematic in Jira, in a tracked department, with no matching LOQ in this project. Tick the ones to add, or bind an unresolved department to a discipline."
+              onBind={(key, id) => bindDiscoveredDepartment(key, id)}
+              suggestDisciplineId={(groupRows) => suggestDisciplineForRows(groupRows, people, pools)}
+              onAdd={(sels) => addDiscoveredLoqsForCinematics(sels)}
+            />
+          )}
+        </JiraApplyReportView>
       ) : proposals && batch ? (
         <BindingMappingStep
           fileName={fileName}
@@ -307,7 +341,7 @@ function BindingSelect({
   );
 }
 
-function JiraApplyReportView({ fileName, report, onClose }: { fileName: string | null; report: JiraApplyReport; onClose: () => void }) {
+function JiraApplyReportView({ fileName, report, onClose, children }: { fileName: string | null; report: JiraApplyReport; onClose: () => void; children?: React.ReactNode }) {
   return (
     <>
       <p className="drawer-hint">Synced{fileName ? ` from ${fileName}` : ''}.</p>
@@ -328,6 +362,7 @@ function JiraApplyReportView({ fileName, report, onClose }: { fileName: string |
           ))}
         </ul>
       )}
+      {children}
       <div className="drawer-footer" style={{ margin: '4px -20px -18px', width: 'calc(100% + 40px)' }}>
         <Button variant="primary" onClick={onClose}>Done</Button>
       </div>

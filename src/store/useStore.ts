@@ -36,7 +36,7 @@ import { parseStaffingWorkbook } from '../import/staffingImport';
 import { parseMppJson, type NormalizedMppImport } from '../import/mppImport';
 import { parseJiraSearchResponse, defaultJiraFieldMapping, type JiraRawSearchResponse, type NormalizedJiraBatch } from '../import/jiraSync';
 import { DEFAULT_HOTLINE_LABEL, relatedIssuesForCinematic } from '../domain/relatedIssues';
-import { discoverMissingLoqs, resolveDiscoveryKeywords, type DiscoveredLoq } from '../domain/loqDiscovery';
+import { discoverMissingLoqs, resolveDiscoveryKeywords, disciplineKey, type DiscoveredLoq } from '../domain/loqDiscovery';
 import { PlanningEngine, round2 } from '../engine/planning';
 import type { Cinematic, CinematicJiraSyncState, CinematicRelatedIssue, Discipline, JiraProjectConfig, Loq, LoqDependency, LoqResource, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
 import { wouldCreateCycle } from '../domain/loqGraph';
@@ -161,6 +161,15 @@ interface StoreState {
    * the resolved discipline and parsed level as its type — then refreshes the view to snapshot them.
    * A user-initiated plan edit; never writes back to Jira (signal-only holds). */
   addDiscoveredLoqs: (cinematicId: string, selections: { jiraKey: string; disciplineId: string; type: string }[]) => Promise<void>;
+  /** Project-level variant of addDiscoveredLoqs: creates discovered LOQs across many Cinematics in one
+   * pass (persist + reload once, no per-Cinematic network refresh — callers already hold a fresh
+   * batch). Used by the Sync-with-Jira drawer's project-wide discovery. */
+  addDiscoveredLoqsForCinematics: (selections: { cinematicId: string; jiraKey: string; disciplineId: string; type: string }[]) => Promise<void>;
+  /** Binds a detected discovery department (a keyword-map key such as "anim") onto an existing
+   * discipline, remembered globally: moves that key's keywords onto the discipline's own name-key in
+   * the global discovery-keyword map, so future discovery resolves the department to this discipline
+   * everywhere. Reuses setDiscoveryKeywordsGlobal (persists the `jira.discovery.keywords` setting). */
+  bindDiscoveredDepartment: (detectedKey: string, disciplineId: string) => void;
 
   createProject: (input: Omit<Project, 'id' | 'sortOrder'>) => Project;
   updateProject: (project: Project) => void;
@@ -380,6 +389,34 @@ function loadDiscoveryKeywords(db: PlannerDatabase): Record<string, string[]> | 
   } catch {
     return null;
   }
+}
+
+/** Creates discovered Jira issues as bound LOQs (jiraKey set, resolved discipline, parsed level as
+ * type), skipping any selection missing a discipline. Shared by the per-Cinematic and project-wide
+ * add actions; the caller persists/reloads. Returns how many rows were created. */
+function createDiscoveredLoqRows(
+  db: PlannerDatabase,
+  selections: { cinematicId: string; jiraKey: string; disciplineId: string; type: string }[],
+): number {
+  let created = 0;
+  for (const sel of selections) {
+    if (!sel.disciplineId) continue;
+    repoCreateLoq(db, {
+      cinematicId: sel.cinematicId,
+      disciplineId: sel.disciplineId,
+      jiraKey: sel.jiraKey,
+      type: sel.type,
+      status: 'TODO',
+      estimateDays: null,
+      committedStart: null,
+      committedFinish: null,
+      actualFinish: null,
+      dodRef: '',
+      paused: false,
+    });
+    created += 1;
+  }
+  return created;
 }
 
 function buildJiraFields(config: JiraProjectConfig): string[] {
@@ -1070,30 +1107,43 @@ export const useStore = create<StoreState>((set, get) => {
     addDiscoveredLoqs: async (cinematicId, selections) => {
       const db = get().db;
       if (!db || selections.length === 0) return;
-      let created = 0;
-      for (const sel of selections) {
-        if (!sel.disciplineId) continue;
-        repoCreateLoq(db, {
-          cinematicId,
-          disciplineId: sel.disciplineId,
-          jiraKey: sel.jiraKey,
-          type: sel.type,
-          status: 'TODO',
-          estimateDays: null,
-          committedStart: null,
-          committedFinish: null,
-          actualFinish: null,
-          dodRef: '',
-          paused: false,
-        });
-        created += 1;
-      }
+      const created = createDiscoveredLoqRows(db, selections.map((s) => ({ ...s, cinematicId })));
       if (created === 0) return;
       persist();
       reload(db);
       // Re-run the on-open refresh so the new LOQs get their Jira snapshot and drop off the banner.
       await get().refreshCinematicView(cinematicId);
       get().toast('success', `${created} LOQ${created === 1 ? '' : 's'} ajoutée${created === 1 ? '' : 's'} depuis Jira`);
+    },
+
+    addDiscoveredLoqsForCinematics: async (selections) => {
+      const db = get().db;
+      if (!db || selections.length === 0) return;
+      const created = createDiscoveredLoqRows(db, selections);
+      if (created === 0) return;
+      persist();
+      reload(db);
+      // No per-Cinematic network refresh — the caller (Sync drawer) already holds the fetched batch and
+      // re-derives discovery locally; the new LOQs now carry keys so they drop off next derivation.
+      get().toast('success', `${created} LOQ${created === 1 ? '' : 's'} ajoutée${created === 1 ? '' : 's'} depuis Jira`);
+    },
+
+    bindDiscoveredDepartment: (detectedKey, disciplineId) => {
+      const discipline = get().data.disciplines.find((d) => d.id === disciplineId);
+      if (!discipline) return;
+      const targetKey = disciplineKey(discipline.name);
+      if (targetKey === detectedKey) return; // already resolves to this discipline
+      // Start from the effective map (defaults when no global override is set yet), then move the
+      // detected key's keywords onto the target discipline's own name-key. Moving (not copying) keeps
+      // detectDepartment's longest-match tie-break unambiguous. Whole-map replacement, like the
+      // Settings editor — see resolveDiscoveryKeywords.
+      const effective = resolveDiscoveryKeywords(null, get().discoveryKeywordsGlobal);
+      const next: Record<string, string[]> = {};
+      for (const [k, words] of Object.entries(effective)) if (k !== detectedKey) next[k] = [...words];
+      const moved = effective[detectedKey] ?? [detectedKey];
+      const merged = new Set([...(next[targetKey] ?? []), ...moved]);
+      next[targetKey] = [...merged];
+      get().setDiscoveryKeywordsGlobal(next);
     },
 
     createProject: (input) => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { ProjectDetail } from '../../src/ui/views/ProjectDetail';
 import { CinematicDetail } from '../../src/ui/views/CinematicDetail';
 import { useStore } from '../../src/store/useStore';
@@ -114,5 +114,71 @@ describe('CinematicDetail', () => {
 
     expect(useStore.getState().data.cinematics.some((c) => c.id === cinematic.id)).toBe(false);
     expect(useUiStore.getState().view).toBe('project-detail');
+  });
+});
+
+describe('CinematicDetail — LOQ discovery', () => {
+  it('offers a Bind-to picker for an unresolved department and remembers the bind globally', async () => {
+    await seedStore();
+    const project = seedProject();
+    const discipline = useStore.getState().createDiscipline({ name: 'Animation', color: '#4f7cff' });
+    const cinematic = useStore.getState().createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: 'OVR-EPIC', targetDate: null, notes: '' });
+    // Jira spells the department "Anim" (key "anim"), which doesn't match "Animation" (key "animation").
+    useStore.setState({ discoveredMissingLoqs: { [cinematic.id]: [
+      { jiraKey: 'OVR-1', disciplineKey: 'anim', disciplineName: null, disciplineId: null, level: 'L1', summary: 'CIN Fixers-Anim-L1' },
+    ] } });
+    useUiStore.getState().openCinematic(cinematic.id);
+    const { user } = renderView(<CinematicDetail cinematicId={cinematic.id} />);
+
+    expect(screen.getByText('1 LOQ in Jira not in this plan.')).toBeInTheDocument();
+    const bind = document.querySelector('.missing-loq-bind') as HTMLElement;
+    expect(bind).toBeTruthy(); // the "Bind to…" picker replaces the old "create the discipline first" hint
+    // The row's checkbox is disabled until the department resolves to a discipline.
+    expect(screen.getByRole('checkbox')).toBeDisabled();
+
+    // Selecting a discipline only stages it; the explicit Bind button commits (so a correct pre-fill
+    // can be accepted as-is, since a change event never fires for a value already shown).
+    await user.selectOptions(within(bind).getByRole('combobox'), discipline.id);
+    await user.click(within(bind).getByRole('button', { name: 'Bind' }));
+    expect(useStore.getState().discoveryKeywordsGlobal?.animation).toContain('anim');
+  });
+
+  it('pre-fills the Bind picker with the discipline inferred from the LOQ assignee', async () => {
+    await seedStore();
+    const project = seedProject();
+    const discipline = useStore.getState().createDiscipline({ name: 'Animation', color: '#4f7cff' });
+    const pool = useStore.getState().createPool({ name: 'Animator', color: '#4f7cff', disciplineId: discipline.id, capacityFte: 0 });
+    // The assignee resolves to a Person whose pool sits under the Animation discipline.
+    useStore.getState().createPerson({ name: 'Ada Lovelace', poolId: pool.id, capacityFte: 1, active: true, notes: '', team: '', site: '' });
+    const cinematic = useStore.getState().createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: 'OVR-EPIC', targetDate: null, notes: '' });
+    useStore.setState({ discoveredMissingLoqs: { [cinematic.id]: [
+      { jiraKey: 'OVR-1', disciplineKey: 'anim', disciplineName: null, disciplineId: null, level: 'L1', summary: 'CIN Fixers-Anim-L1', assignee: 'Ada Lovelace' },
+    ] } });
+    useUiStore.getState().openCinematic(cinematic.id);
+    const { user } = renderView(<CinematicDetail cinematicId={cinematic.id} />);
+
+    const bind = document.querySelector('.missing-loq-bind') as HTMLElement;
+    // The picker already points at Animation — the user just confirms with Bind.
+    expect((within(bind).getByRole('combobox') as HTMLSelectElement).value).toBe(discipline.id);
+    await user.click(within(bind).getByRole('button', { name: 'Bind' }));
+    expect(useStore.getState().discoveryKeywordsGlobal?.animation).toContain('anim');
+  });
+
+  it('adds a resolved discovered LOQ into the plan', async () => {
+    await seedStore();
+    const project = seedProject();
+    const discipline = useStore.getState().createDiscipline({ name: 'Animation', color: '#4f7cff' });
+    const cinematic = useStore.getState().createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: 'OVR-EPIC', targetDate: null, notes: '' });
+    useStore.setState({ discoveredMissingLoqs: { [cinematic.id]: [
+      { jiraKey: 'OVR-1', disciplineKey: 'animation', disciplineName: 'Animation', disciplineId: discipline.id, level: 'L1', summary: 'CIN Fixers-Anim-L1' },
+    ] } });
+    useUiStore.getState().openCinematic(cinematic.id);
+    const { user } = renderView(<CinematicDetail cinematicId={cinematic.id} />);
+
+    await user.click(screen.getByRole('checkbox'));
+    await user.click(screen.getByRole('button', { name: /Add 1 selected LOQ/ }));
+
+    const created = useStore.getState().data.loqs.find((l) => l.jiraKey === 'OVR-1');
+    expect(created).toMatchObject({ cinematicId: cinematic.id, disciplineId: discipline.id, type: 'L1', status: 'TODO' });
   });
 });

@@ -4,11 +4,14 @@ import {
   detectDepartment,
   disciplineKey,
   discoverMissingLoqs,
+  discoverMissingLoqsForProject,
   parseLoqLevel,
   resolveDiscoveryKeywords,
+  suggestDisciplineForAssignee,
+  suggestDisciplineForRows,
 } from '../src/domain/loqDiscovery';
 import type { NormalizedJiraIssue } from '../src/import/jiraSync';
-import { discipline, loq } from './fixtures';
+import { discipline, loq, person, pool } from './fixtures';
 
 function issue(overrides: Partial<NormalizedJiraIssue> = {}): NormalizedJiraIssue {
   return {
@@ -218,5 +221,111 @@ describe('discoverMissingLoqs', () => {
       epicIssue: epic, familyIssues: family, planLoqs: [], disciplines: DISCIPLINES, keywords: DEFAULT_DISCOVERY_KEYWORDS,
     });
     expect(result.map((r) => r.jiraKey)).toEqual(['A1']);
+  });
+});
+
+describe('discoverMissingLoqsForProject', () => {
+  it('discovers across every bound cinematic, tags each row, and skips unbound cinematics', () => {
+    const family = [
+      issue({ key: 'EPIC-B', linkedIssueKeys: ['B-A1'] }),
+      issue({ key: 'EPIC-A', linkedIssueKeys: ['A-L1'] }),
+      issue({ key: 'B-A1', summary: 'C-Anim-L1', loqTarget: 'L1' }),
+      issue({ key: 'A-L1', summary: 'C-Light-L1', loqTarget: 'L1' }),
+    ];
+    const result = discoverMissingLoqsForProject({
+      cinematics: [
+        { id: 'cine-b', name: 'Bravo', jiraKey: 'EPIC-B' },
+        { id: 'cine-a', name: 'Alpha', jiraKey: 'EPIC-A' },
+        { id: 'cine-u', name: 'Unbound', jiraKey: null }, // no epic → skipped
+      ],
+      familyIssues: family,
+      planLoqs: [],
+      disciplines: DISCIPLINES,
+      keywords: DEFAULT_DISCOVERY_KEYWORDS,
+    });
+    // Sorted by cinematicName first (Alpha before Bravo), each row tagged with its cinematic.
+    expect(result.map((r) => [r.cinematicName, r.jiraKey])).toEqual([
+      ['Alpha', 'A-L1'],
+      ['Bravo', 'B-A1'],
+    ]);
+    expect(result[0]).toMatchObject({ cinematicId: 'cine-a', disciplineId: 'd-light' });
+    expect(result[1]).toMatchObject({ cinematicId: 'cine-b', disciplineId: 'd-anim' });
+  });
+
+  it('scopes coverage per cinematic — a plan LOQ under one cinematic does not mask another', () => {
+    const family = [
+      issue({ key: 'EPIC-A', linkedIssueKeys: ['A-A1'] }),
+      issue({ key: 'EPIC-B', linkedIssueKeys: ['B-A1'] }),
+      issue({ key: 'A-A1', summary: 'C-Anim-L1', loqTarget: 'L1' }),
+      issue({ key: 'B-A1', summary: 'C-Anim-L1', loqTarget: 'L1' }),
+    ];
+    // Cinematic A already has Anim-L1; cinematic B does not.
+    const planLoqs = [loq({ cinematicId: 'cine-a', disciplineId: 'd-anim', type: 'L1' })];
+    const result = discoverMissingLoqsForProject({
+      cinematics: [
+        { id: 'cine-a', name: 'Alpha', jiraKey: 'EPIC-A' },
+        { id: 'cine-b', name: 'Bravo', jiraKey: 'EPIC-B' },
+      ],
+      familyIssues: family,
+      planLoqs,
+      disciplines: DISCIPLINES,
+      keywords: DEFAULT_DISCOVERY_KEYWORDS,
+    });
+    expect(result.map((r) => [r.cinematicName, r.jiraKey])).toEqual([['Bravo', 'B-A1']]);
+  });
+
+  it('skips a cinematic whose bound epic is absent from the batch', () => {
+    const family = [issue({ key: 'EPIC-A', linkedIssueKeys: ['A-A1'] }), issue({ key: 'A-A1', summary: 'C-Anim-L1', loqTarget: 'L1' })];
+    const result = discoverMissingLoqsForProject({
+      cinematics: [
+        { id: 'cine-a', name: 'Alpha', jiraKey: 'EPIC-A' },
+        { id: 'cine-x', name: 'Xray', jiraKey: 'EPIC-GONE' }, // key not in batch
+      ],
+      familyIssues: family,
+      planLoqs: [],
+      disciplines: DISCIPLINES,
+      keywords: DEFAULT_DISCOVERY_KEYWORDS,
+    });
+    expect(result.map((r) => r.cinematicId)).toEqual(['cine-a']);
+  });
+});
+
+describe('suggestDisciplineForAssignee', () => {
+  const anim = discipline({ id: 'd-anim', name: 'Animation' });
+  const animPool = pool({ id: 'p-anim', name: 'Animator', disciplineId: anim.id });
+  const ada = person({ id: 'u-ada', name: 'Ada Lovelace', poolId: animPool.id });
+
+  it("returns the discipline of the matched person's pool", () => {
+    expect(suggestDisciplineForAssignee('Ada Lovelace', [ada], [animPool])).toBe('d-anim');
+  });
+
+  it('matches accent/order-insensitively (via personMatchKey)', () => {
+    const eloise = person({ id: 'u-el', name: 'Éloïse Martin', poolId: animPool.id });
+    expect(suggestDisciplineForAssignee('Martin Eloise', [eloise], [animPool])).toBe('d-anim');
+  });
+
+  it('returns null for an empty/whitespace assignee, an unknown name, or a person with no pool', () => {
+    expect(suggestDisciplineForAssignee(null, [ada], [animPool])).toBeNull();
+    expect(suggestDisciplineForAssignee('   ', [ada], [animPool])).toBeNull();
+    expect(suggestDisciplineForAssignee('Nobody Here', [ada], [animPool])).toBeNull();
+    const poolless = person({ id: 'u-x', name: 'No Pool', poolId: null });
+    expect(suggestDisciplineForAssignee('No Pool', [poolless], [animPool])).toBeNull();
+  });
+
+  it('returns null when the matched pool carries no discipline', () => {
+    const orphanPool = pool({ id: 'p-orphan', name: 'Floaters', disciplineId: null });
+    const bob = person({ id: 'u-bob', name: 'Bob', poolId: orphanPool.id });
+    expect(suggestDisciplineForAssignee('Bob', [bob], [orphanPool])).toBeNull();
+  });
+
+  it('suggestDisciplineForRows returns the first row assignee that resolves', () => {
+    const rows = [
+      { assignee: 'Nobody Here' },
+      { assignee: 'Ada Lovelace' },
+      { assignee: null },
+    ];
+    expect(suggestDisciplineForRows(rows, [ada], [animPool])).toBe('d-anim');
+    expect(suggestDisciplineForRows([{ assignee: 'Nobody' }], [ada], [animPool])).toBeNull();
+    expect(suggestDisciplineForRows([], [ada], [animPool])).toBeNull();
   });
 });

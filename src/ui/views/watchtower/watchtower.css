@@ -228,6 +228,22 @@ a.hotline-key:hover { text-decoration: underline; }
   color: var(--text-primary);
 }
 .missing-loq-nodisc { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-secondary); font-style: italic; }
+/* Inline "Bind to [discipline]" picker on an unresolved department group. */
+.missing-loq-bind {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-secondary);
+}
+.missing-loq-bind select { font-size: 11px; padding: 1px 4px; }
+/* Project-wide discovery groups discipline groups under their cinematic. */
+.missing-loq-cinematic { display: flex; flex-direction: column; gap: 4px; }
+.missing-loq-cinematic + .missing-loq-cinematic { margin-top: 6px; }
+.missing-loq-cinematic-head { font-size: 12px; font-weight: 700; color: var(--text-primary); }
 .missing-loq-row {
   display: flex;
   align-items: center;

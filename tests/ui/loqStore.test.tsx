@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { useStore } from '../../src/store/useStore';
 import { useUiStore } from '../../src/store/useUiStore';
+import { detectDepartment, resolveDiscoveryKeywords } from '../../src/domain/loqDiscovery';
 import { seedStore } from './harness';
 
 function seedProjectAndDiscipline() {
@@ -279,6 +280,54 @@ describe('useStore — LoqResource CRUD', () => {
 
     deleteLoqResource(resource.id);
     expect(useStore.getState().data.loqResources.some((r) => r.id === resource.id)).toBe(false);
+  });
+});
+
+describe('useStore — LOQ discovery binding & bulk add', () => {
+  it('bindDiscoveredDepartment moves the detected keyword onto the discipline name-key, remembered globally', async () => {
+    await seedStore();
+    const { discipline } = seedProjectAndDiscipline(); // discipline "Animation" (key "animation")
+    expect(useStore.getState().discoveryKeywordsGlobal).toBeNull(); // built-in defaults in effect
+
+    // Jira spells the department "Anim" (default key "anim"), which never matched "Animation".
+    useStore.getState().bindDiscoveredDepartment('anim', discipline.id);
+
+    const map = useStore.getState().discoveryKeywordsGlobal;
+    expect(map).not.toBeNull();
+    expect(map!.animation).toContain('anim'); // now under the discipline's own name-key
+    expect(map!.anim).toBeUndefined();          // moved, not copied — no detectDepartment ambiguity
+    expect(map!.light).toEqual(['light']);      // other defaults preserved (whole-map replacement)
+
+    // Detection now resolves "… Anim L1" to the "animation" key = disciplineKey("Animation").
+    const kw = resolveDiscoveryKeywords(null, useStore.getState().discoveryKeywordsGlobal);
+    expect(detectDepartment('CIN Fixers-Anim-L1', kw)).toBe('animation');
+  });
+
+  it('bindDiscoveredDepartment is a no-op when the department already equals the discipline key', async () => {
+    await seedStore();
+    const { createDiscipline } = useStore.getState();
+    const anim = createDiscipline({ name: 'Anim', color: '#4f7cff' }); // key already "anim"
+    useStore.getState().bindDiscoveredDepartment('anim', anim.id);
+    expect(useStore.getState().discoveryKeywordsGlobal).toBeNull(); // nothing rewritten
+  });
+
+  it('addDiscoveredLoqsForCinematics creates bound LOQs across several cinematics in one pass', async () => {
+    await seedStore();
+    const { project, discipline } = seedProjectAndDiscipline();
+    const { createCinematic, addDiscoveredLoqsForCinematics } = useStore.getState();
+    const a = createCinematic({ projectId: project.id, name: 'Seq01', jiraKey: null, targetDate: null, notes: '' });
+    const b = createCinematic({ projectId: project.id, name: 'Seq02', jiraKey: null, targetDate: null, notes: '' });
+
+    await addDiscoveredLoqsForCinematics([
+      { cinematicId: a.id, jiraKey: 'JIRA-1', disciplineId: discipline.id, type: 'L1' },
+      { cinematicId: b.id, jiraKey: 'JIRA-2', disciplineId: discipline.id, type: 'L2' },
+    ]);
+
+    const loqs = useStore.getState().data.loqs;
+    const la = loqs.find((l) => l.cinematicId === a.id);
+    const lb = loqs.find((l) => l.cinematicId === b.id);
+    expect(la).toMatchObject({ jiraKey: 'JIRA-1', type: 'L1', disciplineId: discipline.id, status: 'TODO' });
+    expect(lb).toMatchObject({ jiraKey: 'JIRA-2', type: 'L2', disciplineId: discipline.id, status: 'TODO' });
   });
 });
 

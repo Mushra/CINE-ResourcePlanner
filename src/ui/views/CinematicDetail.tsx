@@ -13,6 +13,8 @@ import {
 } from '../../domain/jiraStatusMap';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
+import { MissingLoqs } from '../components/MissingLoqs';
+import { suggestDisciplineForRows } from '../../domain/loqDiscovery';
 import { ConfirmButton } from '../components/ConfirmButton';
 import { EmptyState } from '../components/EmptyState';
 import { CinematicFormDrawer, type CinematicFormValue } from '../components/CinematicFormDrawer';
@@ -104,6 +106,8 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const engine = useStore((s) => s.engine);
   const jiraConfigs = useStore((s) => s.jiraConfigs);
   const disciplines = useStore((s) => s.data.disciplines);
+  const people = useStore((s) => s.data.people);
+  const pools = useStore((s) => s.data.pools);
   const loqs = useStore((s) => s.data.loqs);
   const updateCinematic = useStore((s) => s.updateCinematic);
   const deleteCinematic = useStore((s) => s.deleteCinematic);
@@ -113,12 +117,11 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const relatedIssues = useStore((s) => s.data.cinematicRelatedIssues);
   const refreshCinematicView = useStore((s) => s.refreshCinematicView);
   const addDiscoveredLoqs = useStore((s) => s.addDiscoveredLoqs);
+  const bindDiscoveredDepartment = useStore((s) => s.bindDiscoveredDepartment);
   // Select the stored entry (a stable reference, or undefined) — never a fresh [] inside the
   // selector, which would loop Zustand's reference-equality re-render check.
   const missingLoqs = useStore((s) => s.discoveredMissingLoqs[cinematicId]) ?? EMPTY_MISSING_LOQS;
   const backToProject = useUiStore((s) => s.backToProject);
-  // Which discovered LOQs are ticked for the "add" action (jiraKey set), reset when the discovery changes.
-  const [selectedMissing, setSelectedMissing] = useState<ReadonlySet<string>>(() => new Set());
   const [editing, setEditing] = useState(false);
   const [newLoq, setNewLoq] = useState(false);
   const [editingLoq, setEditingLoq] = useState<Loq | null>(null);
@@ -181,32 +184,11 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const bugsByBucket: Record<BugStatusBucket, CinematicRelatedIssue[]> = { open: [], inProgress: [], waitingFor: [], resolved: [] };
   for (const bug of bugs) bugsByBucket[bugStatusBucket(bug.status, bug.resolutionDate, statusMapping)].push(bug);
 
-  // Discovered Jira LOQs absent from the plan, grouped by department. missingLoqs is pre-sorted by
-  // (disciplineKey → level → key), so a same-key group is always contiguous. A group whose department
-  // resolves to no plan discipline (disciplineId null) is shown with a "create the discipline first"
-  // hint and can't be ticked or added — creating disciplines from here is out of scope for v1.
-  const missingGroups: { disciplineKey: string; disciplineName: string | null; disciplineId: string | null; rows: MissingLoqInfo[] }[] = [];
-  for (const m of missingLoqs) {
-    const last = missingGroups[missingGroups.length - 1];
-    if (last && last.disciplineKey === m.disciplineKey) last.rows.push(m);
-    else missingGroups.push({ disciplineKey: m.disciplineKey, disciplineName: m.disciplineName, disciplineId: m.disciplineId, rows: [m] });
-  }
-  const selectedToAdd = missingLoqs.filter((m) => m.disciplineId && selectedMissing.has(m.jiraKey));
-
-  function toggleMissing(jiraKey: string): void {
-    setSelectedMissing((prev) => {
-      const next = new Set(prev);
-      if (next.has(jiraKey)) next.delete(jiraKey);
-      else next.add(jiraKey);
-      return next;
-    });
-  }
-
-  async function handleAddSelectedMissing(): Promise<void> {
-    const selections = selectedToAdd.map((m) => ({ jiraKey: m.jiraKey, disciplineId: m.disciplineId as string, type: m.level ?? 'L1' }));
-    if (selections.length === 0) return;
-    await addDiscoveredLoqs(cinematicId, selections);
-    setSelectedMissing(new Set());
+  // Bind an unresolved discovery department onto an existing discipline (remembered globally), then
+  // re-run discovery so its rows resolve and become addable.
+  async function handleBindDepartment(detectedKey: string, disciplineId: string): Promise<void> {
+    bindDiscoveredDepartment(detectedKey, disciplineId);
+    await refreshCinematicView(cinematicId);
   }
 
   return (
@@ -342,47 +324,15 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
           </div>
         </div>
 
-        {missingLoqs.length > 0 && (
-          <div className="missing-loq-banner">
-            <div className="missing-loq-head">
-              <Icon name="warning" size={14} />
-              <strong>{missingLoqs.length} LOQ{missingLoqs.length === 1 ? '' : 's'} in Jira not in this plan.</strong>{' '}
-              <span className="missing-loq-sub">Linked to this cinematic in Jira, in a tracked department, with no matching LOQ here. Tick the ones to add.</span>
-            </div>
-            <div className="missing-loq-groups">
-              {missingGroups.map((g) => (
-                <div key={g.disciplineKey} className="missing-loq-group">
-                  <div className="missing-loq-group-head">
-                    {g.disciplineName ?? g.disciplineKey}
-                    {!g.disciplineId && (
-                      <span className="missing-loq-nodisc"> — create the discipline “{g.disciplineName ?? g.disciplineKey}” first</span>
-                    )}
-                  </div>
-                  {g.rows.map((m) => (
-                    <label key={m.jiraKey} className={`missing-loq-row${g.disciplineId ? '' : ' is-disabled'}`}>
-                      <input
-                        type="checkbox"
-                        disabled={!g.disciplineId}
-                        checked={selectedMissing.has(m.jiraKey)}
-                        onChange={() => toggleMissing(m.jiraKey)}
-                      />
-                      <span className="missing-loq-level">{m.level ?? '—'}</span>
-                      {jiraConfig?.baseUrl
-                        ? <a className="jira-link" href={jiraBrowseUrl(jiraConfig.baseUrl, m.jiraKey)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{m.jiraKey}</a>
-                        : <span className="missing-loq-key">{m.jiraKey}</span>}
-                      <span className="missing-loq-summary">{m.summary}</span>
-                    </label>
-                  ))}
-                </div>
-              ))}
-            </div>
-            <div className="missing-loq-actions">
-              <Button variant="primary" size="sm" icon="plus" disabled={selectedToAdd.length === 0} onClick={() => void handleAddSelectedMissing()}>
-                Add {selectedToAdd.length} selected LOQ{selectedToAdd.length === 1 ? '' : 's'}
-              </Button>
-            </div>
-          </div>
-        )}
+        <MissingLoqs
+          rows={missingLoqs}
+          disciplines={disciplines}
+          jiraBaseUrl={jiraConfig?.baseUrl ?? null}
+          cinematicId={cinematicId}
+          onBind={(key, id) => void handleBindDepartment(key, id)}
+          suggestDisciplineId={(groupRows) => suggestDisciplineForRows(groupRows, people, pools)}
+          onAdd={(sels) => addDiscoveredLoqs(cinematicId, sels.map(({ jiraKey, disciplineId, type }) => ({ jiraKey, disciplineId, type })))}
+        />
 
         {cinematicLoqs.length === 0 ? (
           <p className="empty-inline">No LOQs yet. Add one to start scheduling this cinematic.</p>

@@ -14,9 +14,10 @@
 //  - The level (L0-L3) is in the "LOQ Target" field on OVR but *empty* on NEO, where it lives only in
 //    the summary text — so we parse it from the summary, using the field as a fallback confirmation.
 
-import type { Discipline, Loq } from './types';
+import type { Discipline, Loq, Person, ResourcePool } from './types';
 import type { NormalizedJiraIssue } from '../import/jiraSync';
 import { tokenize } from './jiraBinding';
+import { personMatchKey } from './identity';
 
 /** One Jira issue that looks like a LOQ of the open Cinematic but isn't in the plan yet. */
 export interface DiscoveredLoq {
@@ -34,6 +35,9 @@ export interface DiscoveredLoq {
    * an OVR "…-CinDesign-MocapPrep" prep task). */
   level: string | null;
   summary: string;
+  /** The Jira issue's assignee display name, when set — used to *suggest* a bind target for an
+   * unresolved department (see suggestDisciplineForAssignee), never to resolve it automatically. */
+  assignee: string | null;
 }
 
 /** Canonical key for a discipline name / keyword-map key: diacritic-stripped, lowercased, single-
@@ -181,6 +185,7 @@ export function discoverMissingLoqs(input: DiscoverMissingLoqsInput): Discovered
       disciplineId: disciplineIdByKey.get(detected) ?? null,
       level,
       summary: issue.summary,
+      assignee: issue.assignee,
     });
   }
 
@@ -191,4 +196,101 @@ export function discoverMissingLoqs(input: DiscoverMissingLoqsInput): Discovered
       a.jiraKey.localeCompare(b.jiraKey),
   );
   return out;
+}
+
+/** A discovered LOQ tagged with the Cinematic it belongs to — the project-level shape (see
+ * discoverMissingLoqsForProject), where results span many Cinematics rather than one. */
+export interface DiscoveredLoqForCinematic extends DiscoveredLoq {
+  cinematicId: string;
+  cinematicName: string;
+}
+
+export interface DiscoverProjectMissingLoqsInput {
+  /** Every Cinematic in the project, with its bound Jira key (its epic) when it has one. */
+  cinematics: { id: string; name: string; jiraKey: string | null }[];
+  /** The whole-project batch already fetched by the Sync-with-Jira drawer. */
+  familyIssues: NormalizedJiraIssue[];
+  /** Every LOQ in the project (scoped per-Cinematic internally for coverage). */
+  planLoqs: Loq[];
+  disciplines: Discipline[];
+  /** Effective disciplineKey→keywords map (see resolveDiscoveryKeywords). */
+  keywords: Record<string, string[]>;
+}
+
+/**
+ * Project-wide discovery: runs discoverMissingLoqs for every Cinematic that is bound to a Jira epic
+ * present in the batch, tagging each result with its Cinematic. Cinematics with no bound epic (or one
+ * absent from the batch) are skipped — they carry no epic→LOQ links to walk (cinematic-level discovery
+ * is out of scope). A thin aggregator over the per-Cinematic engine; deterministic, sorted by
+ * Cinematic name → department → level → key.
+ */
+export function discoverMissingLoqsForProject(input: DiscoverProjectMissingLoqsInput): DiscoveredLoqForCinematic[] {
+  const { cinematics, familyIssues, planLoqs, disciplines, keywords } = input;
+  const issueByKey = new Map(familyIssues.map((i) => [i.key, i]));
+  const loqsByCinematic = new Map<string, Loq[]>();
+  for (const loq of planLoqs) {
+    const list = loqsByCinematic.get(loq.cinematicId);
+    if (list) list.push(loq);
+    else loqsByCinematic.set(loq.cinematicId, [loq]);
+  }
+
+  const out: DiscoveredLoqForCinematic[] = [];
+  for (const cinematic of cinematics) {
+    const epicIssue = cinematic.jiraKey ? issueByKey.get(cinematic.jiraKey) ?? null : null;
+    if (!epicIssue) continue;
+    const discovered = discoverMissingLoqs({
+      epicIssue,
+      familyIssues,
+      planLoqs: loqsByCinematic.get(cinematic.id) ?? [],
+      disciplines,
+      keywords,
+    });
+    for (const d of discovered) out.push({ ...d, cinematicId: cinematic.id, cinematicName: cinematic.name });
+  }
+
+  out.sort(
+    (a, b) =>
+      a.cinematicName.localeCompare(b.cinematicName) ||
+      a.disciplineKey.localeCompare(b.disciplineKey) ||
+      (a.level ?? '').localeCompare(b.level ?? '') ||
+      a.jiraKey.localeCompare(b.jiraKey),
+  );
+  return out;
+}
+
+/**
+ * Suggests which plan discipline to bind an unresolved department to, inferred from a discovered
+ * LOQ's Jira assignee: match the assignee's display name to a tool Person (personMatchKey — the same
+ * accent/order-insensitive key that merges people across imports), then take that Person's pool's
+ * discipline. A *suggestion* only — the caller pre-fills the bind picker with it but never binds
+ * without the user confirming (the assignee's own discipline may differ from the department the LOQ
+ * is filed under). Returns null when the assignee is empty, matches no Person, or that Person has no
+ * pool/discipline. Deterministic; the first Person that matches wins.
+ */
+export function suggestDisciplineForAssignee(
+  assignee: string | null,
+  people: Person[],
+  pools: ResourcePool[],
+): string | null {
+  const name = assignee?.trim();
+  if (!name) return null;
+  const key = personMatchKey(name);
+  const person = people.find((p) => personMatchKey(p.name) === key);
+  if (!person?.poolId) return null;
+  return pools.find((p) => p.id === person.poolId)?.disciplineId ?? null;
+}
+
+/** Group-level convenience over suggestDisciplineForAssignee: the first discipline any of the rows'
+ * assignees resolves to (rows in an unresolved department group share the department but may carry
+ * different assignees). Null when none resolves. */
+export function suggestDisciplineForRows(
+  rows: { assignee?: string | null }[],
+  people: Person[],
+  pools: ResourcePool[],
+): string | null {
+  for (const r of rows) {
+    const id = suggestDisciplineForAssignee(r.assignee ?? null, people, pools);
+    if (id) return id;
+  }
+  return null;
 }

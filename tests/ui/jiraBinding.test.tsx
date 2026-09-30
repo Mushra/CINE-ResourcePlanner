@@ -71,6 +71,41 @@ describe('JiraBindingDrawer (via ProjectDetail)', () => {
     expect(data.cinematics.find((c) => c.id === cinematic.id)?.jiraKey).toBe('OVR-1');
   });
 
+  it('surfaces project-wide discovered LOQs after apply, and adds a selected one into the plan', async () => {
+    await seedStore();
+    const project = seedProject();
+    useStore.getState().createDiscipline({ name: 'Anim', color: '#4f7cff' }); // resolves the "anim" department
+    const cinematic = useStore.getState().createCinematic({ projectId: project.id, name: 'Exodus Intro', jiraKey: 'OVR-EPIC', targetDate: null, notes: '' });
+    useUiStore.getState().openProject(project.id);
+    useUiStore.getState().setProjectView('production');
+    useUiStore.getState().setProductionScreen('matrix');
+
+    // The bound epic outward-links a LOQ subtask in a tracked department that isn't in the plan.
+    mockExport({
+      issues: [
+        { key: 'OVR-EPIC', fields: { summary: 'Exodus Intro', issuetype: { name: 'Epic' }, status: { name: 'To Do' }, issuelinks: [{ outwardIssue: { key: 'OVR-1' } }] } },
+        { key: 'OVR-1', fields: { summary: 'CIN Fixers-Anim-L1', issuetype: { name: 'Sub-task' }, status: { name: 'To Do' }, customfield_12338: { value: 'L1' } } },
+      ],
+    });
+
+    const { user } = renderView(<ProjectDetail projectId={project.id} />);
+    await user.click(screen.getByRole('button', { name: 'Sync with Jira' }));
+    await user.click(screen.getByRole('button', { name: 'Choose Jira export…' }));
+
+    // Exact-key cinematic applies immediately, then the project-wide discovery panel lists OVR-1.
+    expect(await screen.findByText(/1 cinematic.*linked/)).toBeInTheDocument();
+    const banner = document.querySelector('.missing-loq-banner') as HTMLElement;
+    expect(banner).toBeTruthy();
+    expect(within(banner).getByText('1 LOQ in Jira not in this plan.')).toBeInTheDocument();
+    expect(within(banner).getByText('Exodus Intro', { selector: '.missing-loq-cinematic-head' })).toBeInTheDocument();
+
+    await user.click(within(banner).getByRole('checkbox'));
+    await user.click(within(banner).getByRole('button', { name: /Add 1 selected LOQ/ }));
+
+    const created = useStore.getState().data.loqs.find((l) => l.jiraKey === 'OVR-1');
+    expect(created).toMatchObject({ cinematicId: cinematic.id, type: 'L1', status: 'TODO' });
+  });
+
   it('shows the Cinematics List signal badge for a field-based match, and lets the user override it', async () => {
     await seedStore();
     const project = seedProject();
