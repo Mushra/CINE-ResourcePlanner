@@ -1,7 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { useStore } from '../../src/store/useStore';
 import { getSanityChecks } from '../../src/engine/validation';
 import { seedStore, seedDemoStore } from './harness';
+
+// getSanityChecks skips projects whose derived status is completed (end date past), so the Sep-dated
+// project below would stop raising staffing warnings once the wall clock passes September. Pin "today"
+// to mid-September 2026 — fake Date only, leaving real timers for the store's async persist/reload.
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(2026, 8, 15, 12, 0, 0));
+});
+afterAll(() => vi.useRealTimers());
 
 /** Repro for the reported bug: editing needs/assignments in the Staffing view should clear the
  * staffing warnings live. Exercises the real store→persist→reload→engine path the UI uses. */

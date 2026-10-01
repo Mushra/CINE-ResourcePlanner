@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PlanningEngine } from '../src/engine/planning';
 import { buildJiraToleranceMap, getSanityChecks } from '../src/engine/validation';
 import type { JiraProjectConfig, PersonAssignment, PersonAssignmentAllocation, Requirement, RequirementAllocation } from '../src/domain/types';
@@ -18,6 +18,16 @@ import {
   requirement,
   varianceEvent,
 } from './fixtures';
+
+// Staffing checks skip projects deriveProjectStatus() reports as completed (end date in the past), so
+// these fixtures' September/November windows would silently stop producing checks once the wall clock
+// moves past them. Pin "today" to mid-September 2026 (fake Date only — real timers for any async) so
+// the Sep projects stay active and the Nov ones planned, exactly as the cases were written.
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(2026, 8, 15, 12, 0, 0));
+});
+afterAll(() => vi.useRealTimers());
 
 describe('getSanityChecks — over capacity', () => {
   it('emits a critical check when demand exceeds discipline capacity', () => {
