@@ -10,6 +10,7 @@ import './ui/layout/layout.css';
 import './ui/views/views.css';
 import './ui/views/dashboard.css';
 import './ui/views/project-detail.css';
+import './ui/views/loq-detail.css';
 import './ui/views/people.css';
 import './ui/views/team.css';
 import './ui/views/watchtower/watchtower.css';

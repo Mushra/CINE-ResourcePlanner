@@ -3,7 +3,7 @@ import type { GlobalFilter } from '../domain/filter';
 import { EMPTY_GLOBAL_FILTER } from '../domain/filter';
 import type { Period } from '../domain/types';
 
-export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'people' | 'settings' | 'project-detail' | 'person-detail' | 'cinematic-detail';
+export type ViewName = 'dashboard' | 'timeline' | 'projects' | 'team' | 'people' | 'settings' | 'project-detail' | 'person-detail' | 'cinematic-detail' | 'loq-detail';
 export type PeopleMode = 'availability' | 'assignments';
 /** Watchtower's Production/Staffing switch inside a Project — Production is the prototype's
  * Control Room/Matrix, Staffing is the pre-existing requirement/assignment timeline. */
@@ -158,6 +158,7 @@ interface UiState {
   selectedProjectId: string | null;
   selectedPersonId: string | null;
   selectedCinematicId: string | null;
+  selectedLoqId: string | null;
   navigate: (view: ViewName) => void;
   openProject: (projectId: string) => void;
   backToProjects: () => void;
@@ -166,6 +167,10 @@ interface UiState {
   /** Drill in from ProjectDetail — keeps selectedProjectId so backToProject can return there. */
   openCinematic: (cinematicId: string) => void;
   backToProject: () => void;
+  /** Drill into a single LOQ — reachable from the Matrix cell and the Cinematic Detail LOQ table.
+   * Keeps selectedCinematicId set so backToCinematic (and the breadcrumb) can return there. */
+  openLoq: (loqId: string, cinematicId: string) => void;
+  backToCinematic: () => void;
 
   /** Keyed by a stable scope string (e.g. "team:disc:<id>"). true = collapsed. */
   collapsed: Record<string, boolean>;
@@ -226,13 +231,16 @@ export const useUiStore = create<UiState>((set, get) => ({
   selectedProjectId: null,
   selectedPersonId: null,
   selectedCinematicId: null,
-  navigate: (view) => set({ view, selectedProjectId: null, selectedPersonId: null, selectedCinematicId: null }),
-  openProject: (projectId) => set({ view: 'project-detail', selectedProjectId: projectId, selectedPersonId: null, selectedCinematicId: null }),
-  backToProjects: () => set({ view: 'projects', selectedProjectId: null, selectedCinematicId: null }),
+  selectedLoqId: null,
+  navigate: (view) => set({ view, selectedProjectId: null, selectedPersonId: null, selectedCinematicId: null, selectedLoqId: null }),
+  openProject: (projectId) => set({ view: 'project-detail', selectedProjectId: projectId, selectedPersonId: null, selectedCinematicId: null, selectedLoqId: null }),
+  backToProjects: () => set({ view: 'projects', selectedProjectId: null, selectedCinematicId: null, selectedLoqId: null }),
   openPerson: (personId) => set({ view: 'person-detail', selectedPersonId: personId, selectedProjectId: null }),
   backToTeam: () => set({ view: 'team', selectedPersonId: null }),
-  openCinematic: (cinematicId) => set({ view: 'cinematic-detail', selectedCinematicId: cinematicId }),
-  backToProject: () => set({ view: 'project-detail', selectedCinematicId: null }),
+  openCinematic: (cinematicId) => set({ view: 'cinematic-detail', selectedCinematicId: cinematicId, selectedLoqId: null }),
+  backToProject: () => set({ view: 'project-detail', selectedCinematicId: null, selectedLoqId: null }),
+  openLoq: (loqId, cinematicId) => set({ view: 'loq-detail', selectedLoqId: loqId, selectedCinematicId: cinematicId }),
+  backToCinematic: () => set({ view: 'cinematic-detail', selectedLoqId: null }),
 
   collapsed: loadCollapsed(),
   isCollapsed: (key) => get().collapsed[key] === true,

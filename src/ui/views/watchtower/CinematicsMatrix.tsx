@@ -45,6 +45,7 @@ export function CinematicsMatrix({ project, checks }: { project: Project; checks
   const allLoqs = useStore((s) => s.data.loqs);
   const createCinematic = useStore((s) => s.createCinematic);
   const openCinematic = useUiStore((s) => s.openCinematic);
+  const openLoq = useUiStore((s) => s.openLoq);
   const groupBy = useUiStore((s) => s.matrixGroupBy);
   const setGroupBy = useUiStore((s) => s.setMatrixGroupBy);
   const hiddenDisciplineIds = useUiStore((s) => s.matrixHiddenDisciplineIds);
@@ -191,7 +192,7 @@ export function CinematicsMatrix({ project, checks }: { project: Project; checks
           if (!loq) return <td key={disciplineId} className="mx-na">N/A</td>;
           const statusCell = loqStatusCell(loq, effectiveStatusMap.get(loq.id));
           return (
-            <td key={disciplineId} className="mx-cell" onClick={() => openCinematic(cinematic.id)}>
+            <td key={disciplineId} className="mx-cell" onClick={() => openLoq(loq.id, cinematic.id)}>
               <div className="mx-cell-level">{loq.type}</div>
               <div className={`mx-cell-status loq-status ${statusCell.className}`}>{statusCell.label}</div>
             </td>

@@ -18,7 +18,6 @@ import { suggestDisciplineForRows } from '../../domain/loqDiscovery';
 import { ConfirmButton } from '../components/ConfirmButton';
 import { EmptyState } from '../components/EmptyState';
 import { CinematicFormDrawer, type CinematicFormValue } from '../components/CinematicFormDrawer';
-import { LoqFormDrawer, type LoqFormValue } from '../components/LoqFormDrawer';
 import { LoqTimeline } from '../components/LoqTimeline';
 import { RecommitDialog } from '../components/RecommitDialog';
 import { VarianceDialog } from '../components/VarianceDialog';
@@ -112,7 +111,6 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const updateCinematic = useStore((s) => s.updateCinematic);
   const deleteCinematic = useStore((s) => s.deleteCinematic);
   const createLoq = useStore((s) => s.createLoq);
-  const updateLoq = useStore((s) => s.updateLoq);
   const deleteLoq = useStore((s) => s.deleteLoq);
   const relatedIssues = useStore((s) => s.data.cinematicRelatedIssues);
   const refreshCinematicView = useStore((s) => s.refreshCinematicView);
@@ -122,12 +120,29 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   // selector, which would loop Zustand's reference-equality re-render check.
   const missingLoqs = useStore((s) => s.discoveredMissingLoqs[cinematicId]) ?? EMPTY_MISSING_LOQS;
   const backToProject = useUiStore((s) => s.backToProject);
+  const openLoq = useUiStore((s) => s.openLoq);
   const [editing, setEditing] = useState(false);
-  const [newLoq, setNewLoq] = useState(false);
-  const [editingLoq, setEditingLoq] = useState<Loq | null>(null);
   const [recommitTarget, setRecommitTarget] = useState<{ loq: Loq; initialStart: string | null; initialFinish: string | null } | null>(null);
   const [varianceTarget, setVarianceTarget] = useState<Loq | null>(null);
   const [focus, setFocus] = useState<string>('ALL');
+
+  /** Create a blank LOQ (defaults mirror the old New-LOQ drawer) and open its page to fill in. */
+  function handleNewLoq(): void {
+    const created = createLoq({
+      cinematicId: cinematic!.id,
+      disciplineId: disciplines[0]?.id ?? '',
+      jiraKey: null,
+      type: '',
+      status: 'TODO',
+      estimateDays: null,
+      committedStart: null,
+      committedFinish: null,
+      actualFinish: null,
+      dodRef: '',
+      paused: false,
+    });
+    openLoq(created.id, cinematic!.id);
+  }
 
   // Live-refresh this cinematic on open — the Jira-mirrored status of the bound epic and its LOQs,
   // plus the Hotline/QA-bug widgets (with discovery of newly-tagged ones) — so the page is current
@@ -238,7 +253,7 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
                       type="button"
                       className="issue-message"
                       disabled={!linkedLoq}
-                      onClick={() => linkedLoq && setEditingLoq(linkedLoq)}
+                      onClick={() => linkedLoq && openLoq(linkedLoq.id, cinematic.id)}
                     >
                       {item.check.disciplineName ? `${item.check.disciplineName} — ` : ''}{item.check.message}
                     </button>
@@ -320,7 +335,7 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
           <h2>LOQs</h2>
           <span className="panel-sub">Day-level milestones for this cinematic</span>
           <div className="panel-header-toggles">
-            <Button variant="primary" size="sm" icon="plus" onClick={() => setNewLoq(true)}>New LOQ</Button>
+            <Button variant="primary" size="sm" icon="plus" onClick={handleNewLoq}>New LOQ</Button>
           </div>
         </div>
 
@@ -355,7 +370,7 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
                   const discipline = disciplines.find((d) => d.id === loq.disciplineId);
                   const statusCell = loqStatusCell(loq, effectiveStatusMap.get(loq.id));
                   return (
-                    <tr key={loq.id}>
+                    <tr key={loq.id} className="loq-row-clickable" onClick={() => openLoq(loq.id, cinematic.id)}>
                       <td>{discipline?.name ?? 'Unassigned'}</td>
                       <td className="cell-name">{loq.type}</td>
                       <td><span className={`loq-status ${statusCell.className}`}>{statusCell.label}</span></td>
@@ -368,12 +383,11 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
                       <td>
                         {loq.jiraKey
                           ? (jiraConfig?.baseUrl
-                              ? <a className="jira-link" href={jiraBrowseUrl(jiraConfig.baseUrl, loq.jiraKey)} target="_blank" rel="noreferrer">{loq.jiraKey}</a>
+                              ? <a className="jira-link" href={jiraBrowseUrl(jiraConfig.baseUrl, loq.jiraKey)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{loq.jiraKey}</a>
                               : loq.jiraKey)
                           : <span className="tbd-text">—</span>}
                       </td>
-                      <td className="cell-actions">
-                        <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditingLoq(loq)}>Edit</Button>
+                      <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
                         <Button variant="ghost" size="sm" icon="warning" onClick={() => setVarianceTarget(loq)}>Variance</Button>
                         <ConfirmButton label="Delete" onConfirm={() => deleteLoq(loq.id)} />
                       </td>
@@ -395,7 +409,7 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
           <LoqTimeline
             key={cinematic.id}
             cinematicId={cinematic.id}
-            onEditLoq={setEditingLoq}
+            onEditLoq={(loq) => openLoq(loq.id, cinematic.id)}
             onRecommit={(loq, initialStart, initialFinish) => setRecommitTarget({ loq, initialStart, initialFinish })}
           />
         </div>
@@ -408,34 +422,6 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
           onSave={(value: CinematicFormValue) => {
             updateCinematic({ ...cinematic, ...value });
             setEditing(false);
-          }}
-        />
-      )}
-
-      {newLoq && (
-        <LoqFormDrawer
-          disciplines={disciplines}
-          onClose={() => setNewLoq(false)}
-          onSave={(value: LoqFormValue) => {
-            createLoq({ cinematicId: cinematic.id, ...value, actualFinish: null, committedStart: null, committedFinish: null });
-            setNewLoq(false);
-          }}
-        />
-      )}
-
-      {editingLoq && (
-        <LoqFormDrawer
-          loq={editingLoq}
-          disciplines={disciplines}
-          effectiveStatus={effectiveStatusMap.get(editingLoq.id) ?? null}
-          onClose={() => setEditingLoq(null)}
-          onSave={(value: LoqFormValue) => {
-            updateLoq({ ...editingLoq, ...value });
-            setEditingLoq(null);
-          }}
-          onRecommit={() => {
-            setRecommitTarget({ loq: editingLoq, initialStart: editingLoq.committedStart, initialFinish: editingLoq.committedFinish });
-            setEditingLoq(null);
           }}
         />
       )}
