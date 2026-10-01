@@ -69,6 +69,22 @@ describe('ControlRoom', () => {
     expect(screen.queryByText(/is understaffed on Animation/)).not.toBeInTheDocument();
   });
 
+  it('names the LOQ level in each delivery-outlook dot tooltip', async () => {
+    await seedStore();
+    const { project } = seedProjectWithPlanningAndStaffingIssues();
+    useUiStore.getState().openProject(project.id);
+    useUiStore.getState().setProjectView('production');
+    useUiStore.getState().setProductionScreen('control');
+    renderView(<ProjectDetail projectId={project.id} />);
+
+    await screen.findByText('Top 5 of 6 planning issues');
+    const dots = Array.from(document.querySelectorAll('.outlook-dot')) as HTMLElement[];
+    expect(dots.length).toBeGreaterThan(0);
+    // The representative LOQ per discipline is one of L1-L6, so each tooltip's first line now reads
+    // "<cinematic> · Animation · L<n>" — the user can tell which LOQ the dot stands for.
+    for (const dot of dots) expect(dot.title).toMatch(/· Animation · L\d/);
+  });
+
   it('does not show a Dependencies panel — authoring stays on LoqDependencyEditor', async () => {
     await seedStore();
     const { project } = seedProjectWithPlanningAndStaffingIssues();

@@ -302,7 +302,7 @@ function LoqOutlook({
                 <div
                   className={`outlook-dot ${cell.overdue ? 'overdue' : ''} ${healthFilter && cell.health !== healthFilter ? 'dimmed' : ''}`}
                   style={{ left: `${pct(cell.date)}%`, background: `var(--wt-${cell.health})` }}
-                  title={`${row.cinematic.name} · ${disciplineName(cell.disciplineId)}\nStatus: ${loqStatusLabel(cell.loq, statusOf(cell.loq))}\nHealth: ${HEALTH_LABEL[cell.health]}\n${cell.overdue ? 'Overdue since' : 'Forecast finish'}: ${cell.date}`}
+                  title={`${row.cinematic.name} · ${disciplineName(cell.disciplineId)}${cell.loq.type ? ` · ${cell.loq.type}` : ''}\nStatus: ${loqStatusLabel(cell.loq, statusOf(cell.loq))}\nHealth: ${HEALTH_LABEL[cell.health]}\n${cell.overdue ? 'Overdue since' : 'Forecast finish'}: ${cell.date}`}
                   onClick={() => onOpenCinematic(row.cinematic.id)}
                 />
               </div>
