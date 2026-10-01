@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { act, screen, within } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import { LoqTimeline } from '../../src/ui/components/LoqTimeline';
 import { useStore } from '../../src/store/useStore';
 import { renderView, seedStore } from './harness';
@@ -103,6 +103,23 @@ describe('LoqTimeline', () => {
 
     expect(screen.queryByTitle('L1: 2026-09-07 → 2026-09-11')).not.toBeInTheDocument();
     expect(screen.getByTitle('L1: 2026-09-14 → 2026-09-18')).toBeInTheDocument();
+  });
+
+  it('opens fitted (no Fit button) and reveals the Fit button once the user zooms manually', async () => {
+    await seedStore();
+    const { cinematic } = seedScheduledLoq();
+    const { user } = renderView(<LoqTimeline cinematicId={cinematic.id} onEditLoq={vi.fn()} onRecommit={vi.fn()} />);
+
+    // The zoom slider is always present; it opens fitted, so the manual-only Fit button is hidden.
+    const slider = screen.getByRole('slider', { name: 'Zoom level' });
+    expect(slider).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Fit' })).not.toBeInTheDocument();
+
+    // A manual zoom leaves fit and surfaces the Fit button; clicking it returns to the fitted view.
+    act(() => { fireEvent.change(slider, { target: { value: '300' } }); });
+    const fit = await screen.findByRole('button', { name: 'Fit' });
+    await user.click(fit);
+    expect(screen.queryByRole('button', { name: 'Fit' })).not.toBeInTheDocument();
   });
 
   it('expands a LOQ row to assign a person and edit their window', async () => {

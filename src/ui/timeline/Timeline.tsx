@@ -1,7 +1,8 @@
 import { Fragment, useMemo, useState, type CSSProperties, type WheelEvent } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore, TIMELINE_ZOOM_MIN, TIMELINE_ZOOM_MAX } from '../../store/useUiStore';
-import { buildTimelineWindow, fineAxisTicks, isoDiffDays, isoToDayOfMonth, monthWidthPx, timelineGranularity, timelineLabelColumnWidth, totalWindowWidth, xForIsoDate, type TimelineGranularity } from './timelineMath';
+import { buildTimelineWindow, fineAxisTicks, isoDiffDays, isoToDayOfMonth, monthWidthPx, pxPerDayForZoom, timelineGranularity, timelineLabelColumnWidth, totalWindowWidth, xForIsoDate, zoomAfterWheel, type TimelineGranularity } from './timelineMath';
+import { TimelineZoomControl } from './TimelineZoomControl';
 import { addMonths, comparePeriod, formatPeriodLabel, periodFromISODate, periodRange, todayPeriod } from '../../domain/periods';
 import { ProjectBar } from './ProjectBar';
 import { formatNum, hexToRgba } from './AllocationCell';
@@ -332,7 +333,7 @@ export function Timeline() {
   const poolFilter = useMemo(() => (storedPoolFilter ? new Set(storedPoolFilter) : null), [storedPoolFilter]);
   const setPoolFilter = (next: Set<string> | null) => setStoredPoolFilter(next ? Array.from(next) : null);
 
-  const pxPerDay = 3 * (zoom / 100);
+  const pxPerDay = pxPerDayForZoom(zoom);
   const autoWindow = useMemo(() => buildTimelineWindow(engine.allKnownPeriods()), [engine]);
   const window = useMemo(
     () => (timelineFrom && timelineTo ? periodRange(timelineFrom, timelineTo) : autoWindow),
@@ -479,22 +480,7 @@ export function Timeline() {
           activePoolIds={activePoolIds}
           onChange={setPoolFilter}
         />
-        <div className="tl-zoom">
-          <Icon name="zoom-out" size={13} />
-          <input
-            type="range"
-            className="tl-zoom-slider"
-            min={TIMELINE_ZOOM_MIN}
-            max={TIMELINE_ZOOM_MAX}
-            step={5}
-            value={zoom}
-            onChange={(e) => setZoom(Number(e.target.value))}
-            aria-label="Zoom level"
-            title="Ctrl+scroll over the timeline also zooms"
-          />
-          <Icon name="zoom-in" size={13} />
-          <span className="zoom-label">{zoom}%</span>
-        </div>
+        <TimelineZoomControl zoom={zoom} min={TIMELINE_ZOOM_MIN} max={TIMELINE_ZOOM_MAX} onChange={setZoom} />
         <div className="tl-window">
           <select
             className="tl-window-select"
@@ -538,7 +524,7 @@ export function Timeline() {
         onWheel={(e: WheelEvent<HTMLDivElement>) => {
           if (!e.ctrlKey) return;
           e.preventDefault();
-          setZoom(zoom - e.deltaY * 0.2);
+          setZoom(zoomAfterWheel(zoom, e.deltaY, { min: TIMELINE_ZOOM_MIN, max: TIMELINE_ZOOM_MAX }));
         }}
       >
         <div className="tl-scroll-inner" style={{ width: labelWidth + totalWidth, '--tl-label-w': `${labelWidth}px` } as CSSProperties}>

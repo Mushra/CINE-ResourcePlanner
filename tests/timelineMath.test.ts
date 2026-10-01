@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { fineAxisTicks, formatIsoDateShort, isoAddMonths, timelineGranularity } from '../src/ui/timeline/timelineMath';
+import {
+  fineAxisTicks, fitZoomForWidth, formatIsoDateShort, isoAddMonths, monthWindowForIsoRange,
+  pxPerDayForZoom, timelineGranularity, zoomAfterWheel,
+} from '../src/ui/timeline/timelineMath';
 import type { Period } from '../src/domain/types';
 
 describe('timelineGranularity', () => {
@@ -49,6 +52,61 @@ describe('fineAxisTicks', () => {
 describe('formatIsoDateShort', () => {
   it('renders day + short month, no year', () => {
     expect(formatIsoDateShort('2026-04-12')).toBe('Apr 12');
+  });
+});
+
+describe('pxPerDayForZoom', () => {
+  it('maps 100% to the 3px/day base scale and scales linearly', () => {
+    expect(pxPerDayForZoom(100)).toBe(3);
+    expect(pxPerDayForZoom(200)).toBe(6);
+    expect(pxPerDayForZoom(600)).toBe(18); // day-granularity threshold
+    expect(pxPerDayForZoom(10)).toBeCloseTo(0.3);
+  });
+});
+
+describe('fitZoomForWidth', () => {
+  it('returns the zoom that makes the span exactly fill the width', () => {
+    // 100 days should fill 600px at 6px/day => zoom 200%.
+    expect(fitZoomForWidth(600, 100, { min: 10, max: 800 })).toBeCloseTo(200);
+  });
+
+  it('clamps to max when the span is tiny (would need to zoom past the ceiling)', () => {
+    expect(fitZoomForWidth(2000, 5, { min: 10, max: 800 })).toBe(800);
+  });
+
+  it('clamps to min when the span is huge (would need to zoom below the floor)', () => {
+    expect(fitZoomForWidth(300, 100000, { min: 10, max: 800 })).toBe(10);
+  });
+
+  it('stays in range for a zero/unknown width (pre-layout)', () => {
+    expect(fitZoomForWidth(0, 100, { min: 10, max: 800 })).toBe(10);
+  });
+
+  it('returns max for a non-positive span', () => {
+    expect(fitZoomForWidth(600, 0, { min: 10, max: 800 })).toBe(800);
+  });
+});
+
+describe('zoomAfterWheel', () => {
+  it('zooms in on an upward (negative deltaY) scroll and clamps to the range', () => {
+    expect(zoomAfterWheel(100, -50, { min: 10, max: 800 })).toBe(110);
+    expect(zoomAfterWheel(790, -200, { min: 10, max: 800 })).toBe(800);
+    expect(zoomAfterWheel(20, 200, { min: 10, max: 800 })).toBe(10);
+  });
+});
+
+describe('monthWindowForIsoRange', () => {
+  it('spans every month touched by the ISO range, inclusive', () => {
+    // first LOQ 2026-09-07 padded -14d => 2026-08-24; last finish 2026-11-05 padded +14d => 2026-11-19.
+    expect(monthWindowForIsoRange('2026-08-24', '2026-11-19')).toEqual(['2026-08', '2026-09', '2026-10', '2026-11']);
+  });
+
+  it('collapses to a single month when the padded range stays within it', () => {
+    expect(monthWindowForIsoRange('2026-09-05', '2026-09-20')).toEqual(['2026-09']);
+  });
+
+  it('is empty when the range is inverted', () => {
+    expect(monthWindowForIsoRange('2026-11-01', '2026-09-01')).toEqual([]);
   });
 });
 

@@ -1,74 +1,63 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type WheelEvent } from 'react';
 import { useStore } from '../../store/useStore';
-import { isoAddDays, isoDiffDays } from '../timeline/timelineMath';
+import { TIMELINE_ZOOM_MIN, TIMELINE_ZOOM_MAX, TIMELINE_ZOOM_DEFAULT } from '../../store/useUiStore';
+import {
+  fineAxisTicks, fitZoomForWidth, isoAddDays, isoDiffDays, isoToDayOfMonth, monthWidthPx, monthWindowForIsoRange,
+  pxPerDayForZoom, timelineGranularity, totalWindowWidth, xForIsoDate, zoomAfterWheel,
+} from '../timeline/timelineMath';
+import { formatPeriodLabel } from '../../domain/periods';
+import { TimelineZoomControl } from '../timeline/TimelineZoomControl';
 import { loqEffectiveFinish } from '../../engine/loqRollup';
 import type { LoqForecast } from '../../engine/loqForecast';
 import { Icon } from './Icon';
-import type { Loq, LoqResource } from '../../domain/types';
+import { Button } from './Button';
+import type { Loq, LoqResource, Period } from '../../domain/types';
 
-const DAY_W = 28;
+/** Width of the sticky left label column (keep in sync with .loq-row-label / .loq-timeline-corner). */
+const LABEL_W = 200;
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function enumerateDays(startIso: string, endIso: string): string[] {
-  const days: string[] = [];
-  let cursor = startIso;
-  let guard = 0;
-  while (cursor <= endIso && guard < 2000) {
-    days.push(cursor);
-    cursor = isoAddDays(cursor, 1);
-    guard += 1;
-  }
-  return days;
-}
-
-/** Visible day window: padded around every committed LOQ/resource date, or two weeks around today
+/** The ISO range the Schedule covers: the span of every committed LOQ/resource date padded two
+ * weeks on each side (per the user's "first LOQ −2w … last +2w" request), or two weeks around today
  * when nothing is scheduled yet — so a brand-new cinematic still shows a usable grid. */
-function computeWindow(loqs: Loq[], resources: LoqResource[]): { days: string[]; startIso: string } {
+function computeDateRange(loqs: Loq[], resources: LoqResource[]): { minIso: string; maxIso: string } {
   const today = todayIso();
-  let min = today;
-  let max = today;
+  let min: string | null = null;
+  let max: string | null = null;
+  const extend = (iso: string | null | undefined): void => {
+    if (!iso) return;
+    if (min === null || iso < min) min = iso;
+    if (max === null || iso > max) max = iso;
+  };
   for (const loq of loqs) {
     if (!loq.committedStart) continue;
-    if (loq.committedStart < min) min = loq.committedStart;
-    const finish = loqEffectiveFinish(loq) ?? loq.committedStart;
-    if (finish > max) max = finish;
+    extend(loq.committedStart);
+    extend(loqEffectiveFinish(loq) ?? loq.committedStart);
   }
   for (const r of resources) {
-    if (r.startDate && r.startDate < min) min = r.startDate;
-    if (r.finishDate && r.finishDate > max) max = r.finishDate;
+    extend(r.startDate);
+    extend(r.finishDate);
   }
-  const startIso = isoAddDays(min, -4);
-  const endIso = isoAddDays(max, 10);
-  return { days: enumerateDays(startIso, endIso), startIso };
-}
-
-function xForDay(iso: string, startIso: string): number {
-  return isoDiffDays(startIso, iso) * DAY_W;
-}
-
-function isWeekend(iso: string): boolean {
-  const day = new Date(`${iso}T00:00:00Z`).getUTCDay();
-  return day === 0 || day === 6;
-}
-
-function monthLabel(iso: string): string {
-  return new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+  return { minIso: isoAddDays(min ?? today, -14), maxIso: isoAddDays(max ?? today, 14) };
 }
 
 type DragMode = 'move' | 'resize-start' | 'resize-end';
 
 /** A draggable window bar shared by LOQ rows and resource rows: drag the body to move both dates,
- * drag an edge to resize one side. Commits are always explicit ISO dates — dragging a LOQ's implicit
- * finish turns it into an explicit committedFinish, per the V1 direct-write decision. */
+ * drag an edge to resize one side. Positions/drags on the shared (window, pxPerDay) model exactly
+ * like the project timeline's ProjectBar, so a day-precise drag works at any zoom. Commits are
+ * always explicit ISO dates — dragging a LOQ's implicit finish turns it into an explicit
+ * committedFinish, per the V1 direct-write decision. */
 function WindowBar({
-  start, finish, startIso, color, label, onCommit, onClick,
+  start, finish, window, pxPerDay, color, label, onCommit, onClick,
 }: {
   start: string;
   finish: string;
-  startIso: string;
+  window: Period[];
+  pxPerDay: number;
   color: string;
   label: string;
   onCommit: (start: string, finish: string) => void;
@@ -80,8 +69,8 @@ function WindowBar({
 
   const curStart = preview?.start ?? start;
   const curFinish = preview?.finish ?? finish;
-  const left = xForDay(curStart, startIso);
-  const width = Math.max(DAY_W, (isoDiffDays(curStart, curFinish) + 1) * DAY_W);
+  const left = xForIsoDate(curStart, window, pxPerDay);
+  const width = Math.max(pxPerDay * 3, xForIsoDate(isoAddDays(curFinish, 1), window, pxPerDay) - left);
 
   function beginDrag(mode: DragMode, e: React.PointerEvent): void {
     e.preventDefault();
@@ -94,7 +83,7 @@ function WindowBar({
   function onPointerMove(e: React.PointerEvent): void {
     const drag = dragRef.current;
     if (!drag) return;
-    const deltaDays = Math.round((e.clientX - drag.startX) / DAY_W);
+    const deltaDays = Math.round((e.clientX - drag.startX) / pxPerDay);
     if (deltaDays === 0) {
       setPreview(null);
       return;
@@ -152,10 +141,10 @@ function WindowBar({
 /** Read-only overlay for a LOQ's forecast window, drawn alongside the committed WindowBar whenever
  * the forecast has actually diverged from committed (delta !== 0). Never draggable — the forecast is
  * derived, not an editable commitment. */
-function ForecastBar({ forecast, startIso }: { forecast: LoqForecast; startIso: string }) {
+function ForecastBar({ forecast, window, pxPerDay }: { forecast: LoqForecast; window: Period[]; pxPerDay: number }) {
   if (!forecast.forecastStart || !forecast.forecastFinish || forecast.deltaDays === 0) return null;
-  const left = xForDay(forecast.forecastStart, startIso);
-  const width = Math.max(DAY_W, (isoDiffDays(forecast.forecastStart, forecast.forecastFinish) + 1) * DAY_W);
+  const left = xForIsoDate(forecast.forecastStart, window, pxPerDay);
+  const width = Math.max(pxPerDay * 3, xForIsoDate(isoAddDays(forecast.forecastFinish, 1), window, pxPerDay) - left);
   const tone = forecast.deltaDays > 0 ? (forecast.deltaDays >= 5 ? 'critical' : 'warning') : 'info';
   const badge = `${forecast.deltaDays > 0 ? '+' : ''}${forecast.deltaDays}d`;
 
@@ -170,7 +159,7 @@ function ForecastBar({ forecast, startIso }: { forecast: LoqForecast; startIso: 
   );
 }
 
-function ResourceRow({ resource, startIso, trackWidth }: { resource: LoqResource; startIso: string; trackWidth: number }) {
+function ResourceRow({ resource, window, pxPerDay, trackWidth }: { resource: LoqResource; window: Period[]; pxPerDay: number; trackWidth: number }) {
   const people = useStore((s) => s.data.people);
   const updateLoqResource = useStore((s) => s.updateLoqResource);
   const deleteLoqResource = useStore((s) => s.deleteLoqResource);
@@ -186,7 +175,8 @@ function ResourceRow({ resource, startIso, trackWidth }: { resource: LoqResource
             <WindowBar
               start={resource.startDate}
               finish={resource.finishDate}
-              startIso={startIso}
+              window={window}
+              pxPerDay={pxPerDay}
               color="var(--text-tertiary)"
               label={`${resource.fte} FTE`}
               onCommit={(start, finish) => updateLoqResource({ ...resource, startDate: start, finishDate: finish })}
@@ -245,9 +235,10 @@ function ResourceRow({ resource, startIso, trackWidth }: { resource: LoqResource
   );
 }
 
-function LoqRow({ loq, startIso, trackWidth, forecast, onEditLoq, onRecommit }: {
+function LoqRow({ loq, window, pxPerDay, trackWidth, forecast, onEditLoq, onRecommit }: {
   loq: Loq;
-  startIso: string;
+  window: Period[];
+  pxPerDay: number;
   trackWidth: number;
   forecast: LoqForecast | undefined;
   onEditLoq: (loq: Loq) => void;
@@ -280,7 +271,8 @@ function LoqRow({ loq, startIso, trackWidth, forecast, onEditLoq, onRecommit }: 
             <WindowBar
               start={loq.committedStart}
               finish={finish}
-              startIso={startIso}
+              window={window}
+              pxPerDay={pxPerDay}
               color={discipline?.color ?? 'var(--accent)'}
               label={loq.type}
               onCommit={(start, newFinish) => onRecommit(loq, start, newFinish)}
@@ -291,12 +283,12 @@ function LoqRow({ loq, startIso, trackWidth, forecast, onEditLoq, onRecommit }: 
               Unscheduled — set a start date to place it on the timeline
             </button>
           )}
-          {loq.committedStart && finish && forecast && <ForecastBar forecast={forecast} startIso={startIso} />}
+          {loq.committedStart && finish && forecast && <ForecastBar forecast={forecast} window={window} pxPerDay={pxPerDay} />}
         </div>
       </div>
       {expanded && (
         <div className="loq-resource-rows">
-          {resources.map((r) => <ResourceRow key={r.id} resource={r} startIso={startIso} trackWidth={trackWidth} />)}
+          {resources.map((r) => <ResourceRow key={r.id} resource={r} window={window} pxPerDay={pxPerDay} trackWidth={trackWidth} />)}
           {addOptions.length > 0 && (
             <select
               className="loq-resource-add-select"
@@ -324,8 +316,13 @@ function LoqRow({ loq, startIso, trackWidth, forecast, onEditLoq, onRecommit }: 
 }
 
 /**
- * Day-level drag editor for a cinematic's LOQs: one bar per LOQ spanning its committed window
- * (falling back to the implicit estimateDays-derived finish), expandable to its LoqResource windows.
+ * Drag editor for a cinematic's LOQs: one bar per LOQ spanning its committed window (falling back to
+ * the implicit estimateDays-derived finish), expandable to its LoqResource windows. Shares the
+ * project timeline's (window, pxPerDay) positioning model and its zoom affordance (TimelineZoomControl
+ * + Ctrl+scroll), so the two views behave alike. The default view fits the whole plan — first LOQ
+ * −2 weeks to last planned finish +2 weeks — and re-fits whenever the cinematic changes; a manual
+ * zoom is kept until then (not persisted), and the Fit button returns to the overview.
+ *
  * Dragging a LOQ bar or its edges opens RecommitDialog (via onRecommit) instead of writing straight
  * through — committed dates are an attributed, justified event (PLANNING_ENGINE.md §3). Resource
  * bars are unaffected by that rule and still write straight through updateLoqResource.
@@ -342,53 +339,110 @@ export function LoqTimeline({ cinematicId, onEditLoq, onRecommit }: {
   const forecasts = engine.cinematicLoqForecasts(cinematicId);
   const loqIds = new Set(loqs.map((l) => l.id));
   const relevantResources = loqResources.filter((r) => loqIds.has(r.loqId));
-  const { days, startIso } = computeWindow(loqs, relevantResources);
-  const trackWidth = days.length * DAY_W;
-  const today = todayIso();
 
-  const monthRuns: { label: string; days: number }[] = [];
-  for (const day of days) {
-    const label = monthLabel(day);
-    const run = monthRuns[monthRuns.length - 1];
-    if (run && run.label === label) run.days += 1;
-    else monthRuns.push({ label, days: 1 });
-  }
+  // 'fit' = auto-fit to the container (the default); a number = a manual zoom %. Not persisted, and
+  // the parent keys this component on cinematicId, so switching cinematics remounts it back to 'fit'.
+  const [zoom, setZoom] = useState<number | 'fit'>('fit');
+  const [containerWidth, setContainerWidth] = useState(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    // observe() delivers an initial measurement, so there's no need to read clientWidth
+    // synchronously here. Where ResizeObserver is absent (jsdom), width stays 0 and the fit zoom
+    // falls back to the default scale.
+    const ro = new ResizeObserver(() => setContainerWidth(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const { minIso, maxIso } = computeDateRange(loqs, relevantResources);
+  const window = monthWindowForIsoRange(minIso, maxIso);
+  const spanDays = Math.max(1, totalWindowWidth(window, 1));
+
+  // At fit, derive the zoom that makes the whole window fill the track area; fall back to the
+  // default scale before the container has been measured (first paint, jsdom with no layout).
+  const fitZoom = containerWidth > 0
+    ? fitZoomForWidth(containerWidth - LABEL_W, spanDays, { min: TIMELINE_ZOOM_MIN, max: TIMELINE_ZOOM_MAX })
+    : TIMELINE_ZOOM_DEFAULT;
+  const effectiveZoom = zoom === 'fit' ? fitZoom : zoom;
+  const pxPerDay = pxPerDayForZoom(effectiveZoom);
+
+  const granularity = timelineGranularity(pxPerDay);
+  const fineTicks = fineAxisTicks(window, granularity);
+  const trackWidth = totalWindowWidth(window, pxPerDay);
+  const today = todayIso();
+  const todayX = xForIsoDate(today, window, pxPerDay);
 
   return (
     <div className="loq-timeline">
-      <p className="loq-timeline-hint">
-        <Icon name="info" size={12} />
-        Drag a bar to move it, drag its edges to resize. Click a LOQ's bar to edit it; expand a row to assign people.
-      </p>
-      <div className="loq-timeline-scroll">
-        <div className="loq-timeline-header" style={{ width: 200 + trackWidth }}>
-          <div className="loq-timeline-corner" />
-          <div className="loq-timeline-months" style={{ width: trackWidth }}>
-            {monthRuns.map((run, i) => <div key={i} className="loq-timeline-month" style={{ width: run.days * DAY_W }}>{run.label}</div>)}
-          </div>
+      <div className="loq-timeline-toolbar">
+        <p className="loq-timeline-hint">
+          <Icon name="info" size={12} />
+          Drag a bar to move it, drag its edges to resize. Click a LOQ's bar to edit it; expand a row to assign people.
+        </p>
+        <div className="loq-timeline-tools">
+          <TimelineZoomControl zoom={effectiveZoom} min={TIMELINE_ZOOM_MIN} max={TIMELINE_ZOOM_MAX} onChange={setZoom} />
+          {zoom !== 'fit' && (
+            <Button variant="ghost" size="sm" icon="timeline" onClick={() => setZoom('fit')}>Fit</Button>
+          )}
         </div>
-        <div className="loq-timeline-header loq-timeline-days" style={{ width: 200 + trackWidth }}>
-          <div className="loq-timeline-corner" />
-          <div className="loq-timeline-day-cells" style={{ width: trackWidth }}>
-            {days.map((d) => (
-              <div key={d} className={`loq-day-cell ${isWeekend(d) ? 'loq-day-weekend' : ''} ${d === today ? 'loq-day-today' : ''}`} style={{ width: DAY_W }}>
-                {Number(d.slice(8, 10))}
+      </div>
+      <div
+        className="loq-timeline-scroll"
+        ref={scrollRef}
+        onWheel={(e: WheelEvent<HTMLDivElement>) => {
+          if (!e.ctrlKey) return;
+          e.preventDefault();
+          setZoom(zoomAfterWheel(effectiveZoom, e.deltaY, { min: TIMELINE_ZOOM_MIN, max: TIMELINE_ZOOM_MAX }));
+        }}
+      >
+        <div className="loq-timeline-inner" style={{ width: LABEL_W + trackWidth, '--loq-label-w': `${LABEL_W}px` } as CSSProperties}>
+          {today >= minIso && today <= maxIso && (
+            <div className="loq-timeline-today-line" style={{ left: LABEL_W + todayX }} title="Today" />
+          )}
+          {granularity !== 'month' && fineTicks.map((iso) => (
+            <div key={`guide-${iso}`} className={`loq-timeline-fine-guide loq-timeline-fine-guide-${granularity}`} style={{ left: LABEL_W + xForIsoDate(iso, window, pxPerDay) }} />
+          ))}
+
+          <div className="loq-timeline-header">
+            <div className="loq-timeline-corner" />
+            <div className="loq-timeline-months" style={{ width: trackWidth }}>
+              {window.map((period) => (
+                <div key={period} className="loq-timeline-month" style={{ width: monthWidthPx(period, pxPerDay) }}>
+                  {formatPeriodLabel(period, { withYear: effectiveZoom >= 130 })}
+                </div>
+              ))}
+            </div>
+          </div>
+          {granularity !== 'month' && (
+            <div className="loq-timeline-header loq-timeline-fine-header">
+              <div className="loq-timeline-corner loq-timeline-corner-fine" />
+              <div className="loq-timeline-fine-row" style={{ width: trackWidth }}>
+                {fineTicks.map((iso) => (
+                  <div key={iso} className="loq-timeline-fine-tick" style={{ left: xForIsoDate(iso, window, pxPerDay) }}>
+                    {isoToDayOfMonth(iso)}
+                  </div>
+                ))}
               </div>
+            </div>
+          )}
+
+          <div className="loq-timeline-rows">
+            {loqs.map((loq) => (
+              <LoqRow
+                key={loq.id}
+                loq={loq}
+                window={window}
+                pxPerDay={pxPerDay}
+                trackWidth={trackWidth}
+                forecast={forecasts.get(loq.id)}
+                onEditLoq={onEditLoq}
+                onRecommit={onRecommit}
+              />
             ))}
           </div>
-        </div>
-        <div className="loq-timeline-rows">
-          {loqs.map((loq) => (
-            <LoqRow
-              key={loq.id}
-              loq={loq}
-              startIso={startIso}
-              trackWidth={trackWidth}
-              forecast={forecasts.get(loq.id)}
-              onEditLoq={onEditLoq}
-              onRecommit={onRecommit}
-            />
-          ))}
         </div>
       </div>
     </div>

@@ -1,10 +1,20 @@
+.loq-timeline-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 8px;
+}
+.loq-timeline-tools { display: flex; align-items: center; gap: 10px; }
+
 .loq-timeline-hint {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 11.5px;
   color: var(--text-tertiary);
-  margin: 0 0 8px;
+  margin: 0;
 }
 
 .loq-timeline-scroll {
@@ -14,6 +24,7 @@
   background: var(--surface-0);
   max-height: calc(100vh - 420px);
 }
+.loq-timeline-inner { position: relative; }
 
 .loq-timeline-header {
   display: flex;
@@ -32,7 +43,7 @@
   flex-shrink: 0;
   background: var(--surface-1);
 }
-.loq-timeline-months, .loq-timeline-day-cells { display: flex; }
+.loq-timeline-months { display: flex; }
 .loq-timeline-month {
   flex-shrink: 0;
   height: 24px;
@@ -47,20 +58,42 @@
   border-right: 1px solid var(--border-subtle, var(--border));
   box-sizing: border-box;
 }
-.loq-day-cell {
-  flex-shrink: 0;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-tertiary);
-  border-right: 1px solid var(--border-subtle, var(--border));
-  box-sizing: border-box;
+
+/* Today marker + fine (week/day) axis — mirrors the project timeline, shown once pxPerDay is high
+ * enough for the sub-ticks to be legible (see timelineGranularity). */
+.loq-timeline-today-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  z-index: 3;
+  opacity: 0.65;
+  pointer-events: none;
 }
-.loq-day-weekend { background: var(--surface-1); }
-.loq-day-today { color: var(--accent); font-weight: 700; box-shadow: inset 0 -2px 0 var(--accent); }
+.loq-timeline-fine-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-strong);
+  z-index: 1;
+  pointer-events: none;
+}
+.loq-timeline-fine-guide-week { opacity: 0.28; }
+.loq-timeline-fine-guide-day { opacity: 0.16; }
+.loq-timeline-fine-header { top: 24px; }
+.loq-timeline-corner-fine { height: 18px; }
+.loq-timeline-fine-row { position: relative; height: 18px; }
+.loq-timeline-fine-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 9px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 
 .loq-timeline-rows { position: relative; }
 .loq-tl-group { border-bottom: 1px solid var(--border); }

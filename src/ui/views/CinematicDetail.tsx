@@ -393,6 +393,7 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
             <span className="panel-sub">Drag to move or resize committed windows and person assignments</span>
           </div>
           <LoqTimeline
+            key={cinematic.id}
             cinematicId={cinematic.id}
             onEditLoq={setEditingLoq}
             onRecommit={(loq, initialStart, initialFinish) => setRecommitTarget({ loq, initialStart, initialFinish })}

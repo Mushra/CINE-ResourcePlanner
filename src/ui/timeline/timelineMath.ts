@@ -1,5 +1,33 @@
 import type { Period } from '../../domain/types';
-import { addMonths, comparePeriod, parsePeriod, periodFromDate, todayPeriod } from '../../domain/periods';
+import { addMonths, comparePeriod, parsePeriod, periodFromDate, periodFromISODate, periodRange, todayPeriod } from '../../domain/periods';
+
+/** px/day for a zoom percentage. 100% = 3px/day — the project timeline's "Compact" scale. The one
+ * place the project↔schedule zoom scale is defined, so both views zoom identically. */
+export function pxPerDayForZoom(zoom: number): number {
+  return 3 * (zoom / 100);
+}
+
+/** Zoom % whose pxPerDay makes `spanDays` exactly fill `availableWidthPx`, clamped to [min, max].
+ * Pure (no layout) so it's unit-testable; callers measure the container and pass its width. A
+ * non-positive width (unknown span / pre-layout) yields <= 0 and clamps to `min`. */
+export function fitZoomForWidth(availableWidthPx: number, spanDays: number, { min, max }: { min: number; max: number }): number {
+  if (spanDays <= 0) return max;
+  const zoom = (availableWidthPx / spanDays / 3) * 100;
+  return Math.max(min, Math.min(max, zoom));
+}
+
+/** New zoom after one Ctrl+wheel step, clamped — shared by both timelines' wheel handlers so they
+ * zoom at the same rate. */
+export function zoomAfterWheel(zoom: number, deltaY: number, { min, max }: { min: number; max: number }): number {
+  return Math.max(min, Math.min(max, zoom - deltaY * 0.2));
+}
+
+/** Month window (inclusive Period list) spanning two ISO dates — the Schedule view's equivalent of
+ * buildTimelineWindow, but anchored on an explicit date range rather than today. Empty if either
+ * date is unparseable or max < min. */
+export function monthWindowForIsoRange(minIso: string, maxIso: string): Period[] {
+  return periodRange(periodFromISODate(minIso), periodFromISODate(maxIso));
+}
 
 export function daysInMonth(period: Period): number {
   const { year, month0 } = parsePeriod(period);
