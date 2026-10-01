@@ -1,8 +1,9 @@
-import { Fragment, useMemo, useState, type CSSProperties, type WheelEvent } from 'react';
+import { Fragment, useMemo, useRef, useState, type CSSProperties, type WheelEvent } from 'react';
 import { useStore } from '../../store/useStore';
 import { useUiStore, TIMELINE_ZOOM_MIN, TIMELINE_ZOOM_MAX } from '../../store/useUiStore';
 import { buildTimelineWindow, fineAxisTicks, isoDiffDays, isoToDayOfMonth, monthWidthPx, pxPerDayForZoom, timelineGranularity, timelineLabelColumnWidth, totalWindowWidth, xForIsoDate, zoomAfterWheel, type TimelineGranularity } from './timelineMath';
 import { TimelineZoomControl } from './TimelineZoomControl';
+import { useZoomAtCursor } from './useZoomAtCursor';
 import { addMonths, comparePeriod, formatPeriodLabel, periodFromISODate, periodRange, todayPeriod } from '../../domain/periods';
 import { ProjectBar } from './ProjectBar';
 import { formatNum, hexToRgba } from './AllocationCell';
@@ -448,6 +449,9 @@ export function Timeline() {
     return timelineLabelColumnWidth(labelEntries, { min: 200, max: 440 });
   }, [scheduled, engine, poolById, activePoolIds, personStaffingByProject, bodyFontFamily]);
 
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const zoomAtCursor = useZoomAtCursor(scrollRef, labelWidth, totalWidth);
+
   if (projects.length === 0) {
     return (
       <EmptyState
@@ -521,10 +525,14 @@ export function Timeline() {
 
       <div
         className="tl-scroll"
+        ref={scrollRef}
         onWheel={(e: WheelEvent<HTMLDivElement>) => {
           if (!e.ctrlKey) return;
           e.preventDefault();
-          setZoom(zoomAfterWheel(zoom, e.deltaY, { min: TIMELINE_ZOOM_MIN, max: TIMELINE_ZOOM_MAX }));
+          const next = zoomAfterWheel(zoom, e.deltaY, { min: TIMELINE_ZOOM_MIN, max: TIMELINE_ZOOM_MAX });
+          if (next === zoom) return;
+          zoomAtCursor(e);
+          setZoom(next);
         }}
       >
         <div className="tl-scroll-inner" style={{ width: labelWidth + totalWidth, '--tl-label-w': `${labelWidth}px` } as CSSProperties}>

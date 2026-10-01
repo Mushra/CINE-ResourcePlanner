@@ -3,10 +3,11 @@ import { useStore } from '../../store/useStore';
 import { TIMELINE_ZOOM_MIN, TIMELINE_ZOOM_MAX, TIMELINE_ZOOM_DEFAULT } from '../../store/useUiStore';
 import {
   fineAxisTicks, fitZoomForWidth, isoAddDays, isoDiffDays, isoToDayOfMonth, monthWidthPx, monthWindowForIsoRange,
-  pxPerDayForZoom, timelineGranularity, totalWindowWidth, xForIsoDate, zoomAfterWheel,
+  padWindowToWidth, pxPerDayForZoom, timelineGranularity, totalWindowWidth, xForIsoDate, zoomAfterWheel,
 } from '../timeline/timelineMath';
 import { formatPeriodLabel } from '../../domain/periods';
 import { TimelineZoomControl } from '../timeline/TimelineZoomControl';
+import { useZoomAtCursor } from '../timeline/useZoomAtCursor';
 import { loqEffectiveFinish } from '../../engine/loqRollup';
 import type { LoqForecast } from '../../engine/loqForecast';
 import { Icon } from './Icon';
@@ -358,22 +359,30 @@ export function LoqTimeline({ cinematicId, onEditLoq, onRecommit }: {
   }, []);
 
   const { minIso, maxIso } = computeDateRange(loqs, relevantResources);
-  const window = monthWindowForIsoRange(minIso, maxIso);
-  const spanDays = Math.max(1, totalWindowWidth(window, 1));
+  // The base window is just the content range (±2 weeks); fit zoom is derived from it so "Fit"
+  // frames exactly the plan.
+  const baseWindow = monthWindowForIsoRange(minIso, maxIso);
+  const spanDays = Math.max(1, totalWindowWidth(baseWindow, 1));
+  const availableWidth = Math.max(0, containerWidth - LABEL_W);
 
   // At fit, derive the zoom that makes the whole window fill the track area; fall back to the
   // default scale before the container has been measured (first paint, jsdom with no layout).
   const fitZoom = containerWidth > 0
-    ? fitZoomForWidth(containerWidth - LABEL_W, spanDays, { min: TIMELINE_ZOOM_MIN, max: TIMELINE_ZOOM_MAX })
+    ? fitZoomForWidth(availableWidth, spanDays, { min: TIMELINE_ZOOM_MIN, max: TIMELINE_ZOOM_MAX })
     : TIMELINE_ZOOM_DEFAULT;
   const effectiveZoom = zoom === 'fit' ? fitZoom : zoom;
   const pxPerDay = pxPerDayForZoom(effectiveZoom);
+
+  // Once zoomed out below the fit level the content no longer reaches the right edge — extend the
+  // grid with empty trailing months so the table keeps filling the viewport (no dead space).
+  const window = padWindowToWidth(baseWindow, pxPerDay, availableWidth);
 
   const granularity = timelineGranularity(pxPerDay);
   const fineTicks = fineAxisTicks(window, granularity);
   const trackWidth = totalWindowWidth(window, pxPerDay);
   const today = todayIso();
   const todayX = xForIsoDate(today, window, pxPerDay);
+  const zoomAtCursor = useZoomAtCursor(scrollRef, LABEL_W, trackWidth);
 
   return (
     <div className="loq-timeline">
@@ -395,11 +404,14 @@ export function LoqTimeline({ cinematicId, onEditLoq, onRecommit }: {
         onWheel={(e: WheelEvent<HTMLDivElement>) => {
           if (!e.ctrlKey) return;
           e.preventDefault();
-          setZoom(zoomAfterWheel(effectiveZoom, e.deltaY, { min: TIMELINE_ZOOM_MIN, max: TIMELINE_ZOOM_MAX }));
+          const next = zoomAfterWheel(effectiveZoom, e.deltaY, { min: TIMELINE_ZOOM_MIN, max: TIMELINE_ZOOM_MAX });
+          if (next === effectiveZoom) return;
+          zoomAtCursor(e); // anchor the zoom on the pointer (capture before the zoom changes width)
+          setZoom(next);
         }}
       >
         <div className="loq-timeline-inner" style={{ width: LABEL_W + trackWidth, '--loq-label-w': `${LABEL_W}px` } as CSSProperties}>
-          {today >= minIso && today <= maxIso && (
+          {todayX >= 0 && todayX <= trackWidth && (
             <div className="loq-timeline-today-line" style={{ left: LABEL_W + todayX }} title="Today" />
           )}
           {granularity !== 'month' && fineTicks.map((iso) => (

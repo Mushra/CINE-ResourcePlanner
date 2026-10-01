@@ -29,6 +29,24 @@ export function monthWindowForIsoRange(minIso: string, maxIso: string): Period[]
   return periodRange(periodFromISODate(minIso), periodFromISODate(maxIso));
 }
 
+/** Extends `window` with trailing months until it spans at least `minWidthPx` at the given pxPerDay,
+ * so zooming out past the point where the content fills the viewport keeps the month grid extending
+ * to the right edge instead of leaving dead space. No-op when the window already covers the width
+ * (e.g. at the fit zoom) or minWidthPx <= 0. */
+export function padWindowToWidth(window: Period[], pxPerDay: number, minWidthPx: number): Period[] {
+  if (window.length === 0 || minWidthPx <= 0 || pxPerDay <= 0) return window;
+  const result = [...window];
+  let width = totalWindowWidth(result, pxPerDay);
+  let guard = 0;
+  while (width < minWidthPx && guard < 600) {
+    const next = addMonths(result[result.length - 1], 1);
+    result.push(next);
+    width += monthWidthPx(next, pxPerDay);
+    guard += 1;
+  }
+  return result;
+}
+
 export function daysInMonth(period: Period): number {
   const { year, month0 } = parsePeriod(period);
   return new Date(year, month0 + 1, 0).getDate();

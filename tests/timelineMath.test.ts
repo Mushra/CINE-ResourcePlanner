@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   fineAxisTicks, fitZoomForWidth, formatIsoDateShort, isoAddMonths, monthWindowForIsoRange,
-  pxPerDayForZoom, timelineGranularity, zoomAfterWheel,
+  padWindowToWidth, pxPerDayForZoom, timelineGranularity, totalWindowWidth, zoomAfterWheel,
 } from '../src/ui/timeline/timelineMath';
 import type { Period } from '../src/domain/types';
 
@@ -107,6 +107,27 @@ describe('monthWindowForIsoRange', () => {
 
   it('is empty when the range is inverted', () => {
     expect(monthWindowForIsoRange('2026-11-01', '2026-09-01')).toEqual([]);
+  });
+});
+
+describe('padWindowToWidth', () => {
+  const window: Period[] = ['2026-04', '2026-05']; // 30 + 31 = 61 days
+
+  it('appends trailing months until the window spans at least the given width', () => {
+    // At 3px/day the base window is 183px; filling 600px needs more months (May -> Jun, Jul, ...).
+    const padded = padWindowToWidth(window, 3, 600);
+    expect(totalWindowWidth(padded, 3)).toBeGreaterThanOrEqual(600);
+    expect(padded.slice(0, 2)).toEqual(window); // original months kept, in order
+    expect(padded[2]).toBe('2026-06'); // continues contiguously after the last month
+  });
+
+  it('is a no-op when the window already covers the width (e.g. at the fit zoom)', () => {
+    expect(padWindowToWidth(window, 3, 100)).toEqual(window);
+  });
+
+  it('is a no-op for a non-positive width or empty window', () => {
+    expect(padWindowToWidth(window, 3, 0)).toEqual(window);
+    expect(padWindowToWidth([], 3, 600)).toEqual([]);
   });
 });
 
