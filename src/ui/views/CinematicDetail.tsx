@@ -18,6 +18,7 @@ import { suggestDisciplineForRows } from '../../domain/loqDiscovery';
 import { ConfirmButton } from '../components/ConfirmButton';
 import { EmptyState } from '../components/EmptyState';
 import { CinematicFormDrawer, type CinematicFormValue } from '../components/CinematicFormDrawer';
+import { LoqFormDrawer, type LoqFormValue } from '../components/LoqFormDrawer';
 import { LoqTimeline } from '../components/LoqTimeline';
 import { RecommitDialog } from '../components/RecommitDialog';
 import { VarianceDialog } from '../components/VarianceDialog';
@@ -123,25 +124,29 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const backToProject = useUiStore((s) => s.backToProject);
   const openLoq = useUiStore((s) => s.openLoq);
   const [editing, setEditing] = useState(false);
+  const [newLoq, setNewLoq] = useState(false);
   const [recommitTarget, setRecommitTarget] = useState<{ loq: Loq; initialStart: string | null; initialFinish: string | null } | null>(null);
   const [varianceTarget, setVarianceTarget] = useState<Loq | null>(null);
   const [focus, setFocus] = useState<string>('ALL');
 
-  /** Create a blank LOQ (defaults mirror the old New-LOQ drawer) and open its page to fill in. */
+  /** Open a creation draft, not a row: "New LOQ" used to persist an empty-type LOQ immediately, so
+   * opening then cancelling left a blank LOQ polluting every rollup/forecast (A15). The draft now
+   * lives purely in the LoqFormDrawer's local state — nothing is written until the planner validates
+   * it (discipline + type required), after which createLoq runs once and we open the new LOQ's page.
+   * Other creation flows (MS Project import, Jira discovery) are unaffected — they bring real data. */
   function handleNewLoq(): void {
+    setNewLoq(true);
+  }
+
+  function createLoqFromDraft(value: LoqFormValue): void {
     const created = createLoq({
       cinematicId: cinematic!.id,
-      disciplineId: disciplines[0]?.id ?? '',
-      jiraKey: null,
-      type: '',
-      status: 'TODO',
-      estimateDays: null,
+      ...value,
       committedStart: null,
       committedFinish: null,
       actualFinish: null,
-      dodRef: '',
-      paused: false,
     });
+    setNewLoq(false);
     openLoq(created.id, cinematic!.id);
   }
 
@@ -425,6 +430,14 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
             updateCinematic({ ...cinematic, ...value });
             setEditing(false);
           }}
+        />
+      )}
+
+      {newLoq && (
+        <LoqFormDrawer
+          disciplines={disciplines}
+          onClose={() => setNewLoq(false)}
+          onSave={createLoqFromDraft}
         />
       )}
 

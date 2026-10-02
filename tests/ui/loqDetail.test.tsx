@@ -41,7 +41,7 @@ function makeLoq(cinematicId: string, disciplineId: string, over: Record<string,
 }
 
 describe('CinematicDetail — LOQ list', () => {
-  it('shows an empty state, then New LOQ creates a LOQ and opens its page', async () => {
+  it('New LOQ opens a creation draft and only persists a validated LOQ, then opens its page', async () => {
     await seedStore();
     const { cinematic } = seedProjectAndCinematic();
     useUiStore.getState().openCinematic(cinematic.id);
@@ -50,11 +50,37 @@ describe('CinematicDetail — LOQ list', () => {
     expect(screen.getByText('No LOQs yet. Add one to start scheduling this cinematic.')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'New LOQ' }));
+    // A15: opening the draft must not persist anything yet (the old flow created an empty-type row here).
+    expect(useStore.getState().data.loqs).toHaveLength(0);
+    expect(useUiStore.getState().view).toBe('cinematic-detail');
+
+    // The draft requires a type before it can be created.
+    const create = screen.getByRole('button', { name: 'Create LOQ' });
+    expect(create).toBeDisabled();
+    await user.type(screen.getByLabelText('Type'), 'L1');
+    await user.click(screen.getByRole('button', { name: 'Create LOQ' }));
 
     const created = useStore.getState().data.loqs.find((l) => l.cinematicId === cinematic.id);
     expect(created).toBeDefined();
+    expect(created!.type).toBe('L1');
     expect(useUiStore.getState().view).toBe('loq-detail');
     expect(useUiStore.getState().selectedLoqId).toBe(created!.id);
+  });
+
+  it('New LOQ then Cancel leaves no LOQ behind (A15)', async () => {
+    await seedStore();
+    const { cinematic } = seedProjectAndCinematic();
+    useUiStore.getState().openCinematic(cinematic.id);
+    const { user } = renderView(<CinematicDetail cinematicId={cinematic.id} />);
+
+    await user.click(screen.getByRole('button', { name: 'New LOQ' }));
+    await user.type(screen.getByLabelText('Type'), 'L1'); // even a half-filled draft…
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    // …is discarded: no row persisted, still on the cinematic, nothing to clean up.
+    expect(useStore.getState().data.loqs).toHaveLength(0);
+    expect(useUiStore.getState().view).toBe('cinematic-detail');
+    expect(screen.getByText('No LOQs yet. Add one to start scheduling this cinematic.')).toBeInTheDocument();
   });
 
   it('clicking a LOQ row opens the dedicated LOQ page', async () => {
