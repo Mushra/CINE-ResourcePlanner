@@ -909,9 +909,10 @@ export const useStore = create<StoreState>((set, get) => {
       const hotlineLabel = get().jiraConfigs.find((c) => c.projectId === projectId)?.hotlineLabel ?? DEFAULT_HOTLINE_LABEL;
       const report = applyJiraBindings(db, batch, projectId, confirmed, hotlineLabel);
       persist();
+      const depNote = report.dependenciesLinked > 0 ? `, ${report.dependenciesLinked} dependenc${report.dependenciesLinked === 1 ? 'y' : 'ies'}` : '';
       get().toast(
         'success',
-        `Jira sync: ${report.cinematicsLinked} cinematic${report.cinematicsLinked === 1 ? '' : 's'} linked, ${report.loqsLinked} LOQ${report.loqsLinked === 1 ? '' : 's'} linked`,
+        `Jira sync: ${report.cinematicsLinked} cinematic${report.cinematicsLinked === 1 ? '' : 's'} linked, ${report.loqsLinked} LOQ${report.loqsLinked === 1 ? '' : 's'} linked${depNote}`,
       );
       return report;
     },

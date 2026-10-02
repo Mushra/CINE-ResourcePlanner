@@ -748,6 +748,37 @@ export function deleteLoqDependency(db: PlannerDatabase, dependencyId: string): 
   db.exec('DELETE FROM loq_dependencies WHERE id = ?', [dependencyId]);
 }
 
+/** Mirrors the Jira "Blocks" graph into loq_dependencies (delete-then-insert, scoped to
+ * source='jira'): every prior Jira-derived edge is dropped and the given set re-inserted, so a sync
+ * always reflects current Jira state and stale edges never linger — exactly like
+ * replaceCinematicRelatedIssues. Edges whose (predecessor, successor) pair already exists under
+ * another source ('override'/'template', i.e. user- or template-owned) are skipped, never
+ * overwritten — a manual/MS Project predecessor always wins over the Jira mirror. Returns the number
+ * of edges actually inserted. Callers must have de-duped and cycle-checked the input first. */
+export function replaceJiraLoqDependencies(
+  db: PlannerDatabase,
+  edges: Pick<LoqDependency, 'predecessorLoqId' | 'successorLoqId' | 'type' | 'lagDays'>[],
+): number {
+  db.exec("DELETE FROM loq_dependencies WHERE source = 'jira'");
+  const existing = new Set(
+    db
+      .query<{ predecessor_loq_id: string; successor_loq_id: string }>('SELECT predecessor_loq_id, successor_loq_id FROM loq_dependencies')
+      .map((r) => `${r.predecessor_loq_id}::${r.successor_loq_id}`),
+  );
+  let inserted = 0;
+  for (const edge of edges) {
+    const pair = `${edge.predecessorLoqId}::${edge.successorLoqId}`;
+    if (existing.has(pair)) continue; // keep the user/template-owned edge; never clobber it
+    db.exec(
+      `INSERT INTO loq_dependencies (id, predecessor_loq_id, successor_loq_id, type, lag_days, source, template_id) VALUES (?, ?, ?, ?, ?, 'jira', NULL)`,
+      [newId('ldep'), edge.predecessorLoqId, edge.successorLoqId, edge.type, edge.lagDays],
+    );
+    existing.add(pair);
+    inserted++;
+  }
+  return inserted;
+}
+
 // ---------------------------------------------------------------------------
 // Dependency templates
 // ---------------------------------------------------------------------------

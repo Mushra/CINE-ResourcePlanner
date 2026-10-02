@@ -30,6 +30,7 @@ function issue(overrides: Partial<NormalizedJiraIssue> = {}): NormalizedJiraIssu
     scopeValue: null,
     epicLinkKey: null,
     linkedIssueKeys: [],
+    issueLinks: [],
     updatedAt: null,
     ...overrides,
   };

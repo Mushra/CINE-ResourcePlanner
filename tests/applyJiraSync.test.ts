@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { PlannerDatabase } from '../src/db/database';
 import { applyJiraBindings, type ConfirmedJiraBindings } from '../src/db/applyJiraSync';
-import { createCinematic, createDiscipline, createLoq, createProject, loadPlanningData } from '../src/db/repository';
+import { createCinematic, createDiscipline, createLoq, createLoqDependency, createProject, loadPlanningData } from '../src/db/repository';
 import type { NormalizedJiraBatch, NormalizedJiraIssue } from '../src/import/jiraSync';
 
 function issue(overrides: Partial<NormalizedJiraIssue> = {}): NormalizedJiraIssue {
   return {
     key: 'PROD-1', summary: '', issueType: 'Task', status: 'In Progress', labels: [], assignee: 'Alice',
-    startDate: null, dueDate: '2026-10-01', resolutionDate: null, parentKey: null, updatedAt: '2026-09-20T00:00:00Z',
+    startDate: null, dueDate: '2026-10-01', resolutionDate: null, parentKey: null,
+    cinematicName: null, loqTarget: null, scopeValue: null, epicLinkKey: null, linkedIssueKeys: [], issueLinks: [],
+    updatedAt: '2026-09-20T00:00:00Z',
     ...overrides,
   };
 }
@@ -145,5 +147,103 @@ describe('applyJiraBindings', () => {
     const report2 = applyJiraBindings(db, { issues: [bug], warnings: [] }, project.id, { cinematics: {}, loqs: {} });
     expect(report2.relatedIssuesLinked).toBe(1);
     expect(loadPlanningData(db).cinematicRelatedIssues.filter((r) => r.cinematicId === cine.id).map((r) => r.jiraKey)).toEqual(['PROD-201']);
+  });
+});
+
+describe('applyJiraBindings — Jira "Blocks" → dependencies (source=jira mirror)', () => {
+  const link = (direction: 'inward' | 'outward', key: string) => ({ typeName: 'Blocks', direction, key });
+
+  /** Seeds a project + one cinematic + N LOQs each bound to a jiraKey, returning helpers to resolve
+   * dependency rows (loqId pairs) back to the readable jiraKey pairs. */
+  async function seedBoundLoqs(db: PlannerDatabase, keys: string[]) {
+    const project = await seedProject(db);
+    const discipline = createDiscipline(db, { name: 'Animation', color: '#4f7cff' });
+    const cine = createCinematic(db, { projectId: project.id, name: 'Seq010', jiraKey: null, targetDate: null, notes: '' });
+    const loqByKey = new Map<string, string>(); // jiraKey -> loqId
+    for (const key of keys) {
+      const loq = createLoq(db, {
+        cinematicId: cine.id, disciplineId: discipline.id, jiraKey: key, type: 'L1', status: 'TODO',
+        estimateDays: 3, committedStart: null, committedFinish: null, actualFinish: null, dodRef: '',
+      });
+      loqByKey.set(key, loq.id);
+    }
+    const keyByLoqId = new Map([...loqByKey].map(([k, id]) => [id, k]));
+    const depKeyPairs = () =>
+      loadPlanningData(db)
+        .loqDependencies.map((d) => ({
+          pred: keyByLoqId.get(d.predecessorLoqId) ?? d.predecessorLoqId,
+          succ: keyByLoqId.get(d.successorLoqId) ?? d.successorLoqId,
+          source: d.source,
+          lagDays: d.lagDays,
+        }))
+        .sort((a, b) => `${a.pred}${a.succ}`.localeCompare(`${b.pred}${b.succ}`));
+    return { project, cine, loqByKey, depKeyPairs };
+  }
+
+  const noBindings: ConfirmedJiraBindings = { cinematics: {}, loqs: {} };
+
+  it('mirrors outward "blocking" and inward "is blocked by" links into finish_to_start edges, de-duped', async () => {
+    const db = await PlannerDatabase.createNew();
+    const { project, depKeyPairs } = await seedBoundLoqs(db, ['OVR-1', 'OVR-2', 'OVR-3']);
+
+    const batch: NormalizedJiraBatch = {
+      issues: [
+        issue({ key: 'OVR-1', issueLinks: [link('outward', 'OVR-2')] }), // OVR-1 blocks OVR-2
+        issue({ key: 'OVR-2', issueLinks: [link('inward', 'OVR-1')] }), // same edge seen from the other end
+        issue({ key: 'OVR-3', issueLinks: [link('inward', 'OVR-2')] }), // OVR-2 blocks OVR-3
+      ],
+      warnings: [],
+    };
+    const report = applyJiraBindings(db, batch, project.id, noBindings);
+    expect(report.dependenciesLinked).toBe(2);
+    expect(report.dependenciesSkippedCycle).toBe(0);
+    expect(depKeyPairs()).toEqual([
+      { pred: 'OVR-1', succ: 'OVR-2', source: 'jira', lagDays: 0 },
+      { pred: 'OVR-2', succ: 'OVR-3', source: 'jira', lagDays: 0 },
+    ]);
+  });
+
+  it('full-replaces the source=jira set on re-sync, dropping edges Jira no longer reports', async () => {
+    const db = await PlannerDatabase.createNew();
+    const { project, depKeyPairs } = await seedBoundLoqs(db, ['OVR-1', 'OVR-2']);
+
+    applyJiraBindings(db, { issues: [issue({ key: 'OVR-1', issueLinks: [link('outward', 'OVR-2')] })], warnings: [] }, project.id, noBindings);
+    expect(depKeyPairs()).toHaveLength(1);
+
+    // OVR-1 no longer blocks anything → the mirrored edge is removed.
+    const report2 = applyJiraBindings(db, { issues: [issue({ key: 'OVR-1', issueLinks: [] })], warnings: [] }, project.id, noBindings);
+    expect(report2.dependenciesLinked).toBe(0);
+    expect(depKeyPairs()).toHaveLength(0);
+  });
+
+  it('never overwrites a user/override edge with the Jira mirror', async () => {
+    const db = await PlannerDatabase.createNew();
+    const { project, loqByKey, depKeyPairs } = await seedBoundLoqs(db, ['OVR-1', 'OVR-2']);
+    // A manual/MS Project predecessor already exists on the same pair, with a non-zero lag.
+    createLoqDependency(db, { predecessorLoqId: loqByKey.get('OVR-1')!, successorLoqId: loqByKey.get('OVR-2')!, type: 'finish_to_start', lagDays: 5, source: 'override', templateId: null });
+
+    const report = applyJiraBindings(db, { issues: [issue({ key: 'OVR-1', issueLinks: [link('outward', 'OVR-2')] })], warnings: [] }, project.id, noBindings);
+    expect(report.dependenciesLinked).toBe(0); // skipped — the override wins
+    expect(depKeyPairs()).toEqual([{ pred: 'OVR-1', succ: 'OVR-2', source: 'override', lagDays: 5 }]);
+  });
+
+  it('skips a Blocks edge whose other end is not a bound LOQ in this project', async () => {
+    const db = await PlannerDatabase.createNew();
+    const { project, depKeyPairs } = await seedBoundLoqs(db, ['OVR-1']);
+    const report = applyJiraBindings(db, { issues: [issue({ key: 'OVR-1', issueLinks: [link('outward', 'OVR-999')] })], warnings: [] }, project.id, noBindings);
+    expect(report.dependenciesLinked).toBe(0);
+    expect(depKeyPairs()).toHaveLength(0);
+  });
+
+  it('skips a Blocks edge that would close a cycle, leaving the existing edge intact', async () => {
+    const db = await PlannerDatabase.createNew();
+    const { project, loqByKey, depKeyPairs } = await seedBoundLoqs(db, ['OVR-1', 'OVR-2']);
+    // Existing override edge OVR-2 → OVR-1; Jira now claims OVR-1 blocks OVR-2 (the reverse) → a cycle.
+    createLoqDependency(db, { predecessorLoqId: loqByKey.get('OVR-2')!, successorLoqId: loqByKey.get('OVR-1')!, type: 'finish_to_start', lagDays: 0, source: 'override', templateId: null });
+
+    const report = applyJiraBindings(db, { issues: [issue({ key: 'OVR-1', issueLinks: [link('outward', 'OVR-2')] })], warnings: [] }, project.id, noBindings);
+    expect(report.dependenciesSkippedCycle).toBe(1);
+    expect(report.dependenciesLinked).toBe(0);
+    expect(depKeyPairs()).toEqual([{ pred: 'OVR-2', succ: 'OVR-1', source: 'override', lagDays: 0 }]);
   });
 });

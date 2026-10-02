@@ -348,6 +348,7 @@ function JiraApplyReportView({ fileName, report, onClose, children }: { fileName
       <ul className="import-summary">
         <li>{report.cinematicsLinked} cinematic{report.cinematicsLinked === 1 ? '' : 's'} linked</li>
         <li>{report.loqsLinked} LOQ{report.loqsLinked === 1 ? '' : 's'} linked</li>
+        {report.dependenciesLinked > 0 && <li>{report.dependenciesLinked} dependenc{report.dependenciesLinked === 1 ? 'y' : 'ies'} mirrored from Jira</li>}
       </ul>
       {(report.cinematicsSkippedOtherProject > 0 || report.loqsSkippedOtherProject > 0) && (
         <div className="import-note">

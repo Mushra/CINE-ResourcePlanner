@@ -66,6 +66,7 @@ describe('parseJiraSearchResponse', () => {
         scopeValue: null,
         epicLinkKey: null,
         linkedIssueKeys: [],
+        issueLinks: [],
         updatedAt: '2026-09-20T10:23:00.000+0000',
       },
       {
@@ -84,6 +85,7 @@ describe('parseJiraSearchResponse', () => {
         scopeValue: null,
         epicLinkKey: null,
         linkedIssueKeys: [],
+        issueLinks: [],
         updatedAt: '2026-09-28T08:00:00.000+0000',
       },
     ]);
@@ -149,6 +151,37 @@ describe('parseJiraSearchResponse', () => {
     const batch = parseJiraSearchResponse(raw, NATIVE_ONLY);
     expect(batch.issues[0].linkedIssueKeys).toEqual(['OVR-1001', 'OVR-1002']);
     expect(batch.issues[1].linkedIssueKeys).toEqual([]);
+  });
+
+  it('captures typed, direction-aware issue links in issueLinks (keeping both inward and outward)', () => {
+    // Real OVR-65109 shape: a LOQ "blocking" its downstream LOQs (outward) and "is blocked by" its
+    // upstream ones (inward), plus a Child-Issue parent tie that is NOT a Blocks dependency. The typed
+    // view keeps every link with a resolvable key; dependency import filters to "Blocks" downstream.
+    const raw: JiraRawSearchResponse = {
+      issues: [
+        {
+          key: 'OVR-65109',
+          fields: {
+            summary: 'Car-Anim-L0',
+            issuelinks: [
+              { type: { name: 'Blocks', inward: 'is blocked by', outward: 'blocking' }, outwardIssue: { key: 'OVR-65110' } },
+              { type: { name: 'Blocks', inward: 'is blocked by', outward: 'blocking' }, inwardIssue: { key: 'OVR-65113' } },
+              { type: { name: 'Child-Issue' }, inwardIssue: { key: 'OVR-58028' } },
+              null, // defensive: a null link entry must not throw
+              { outwardIssue: { key: 'OVR-NOPE' } }, // no type.name → skipped
+            ],
+          },
+        },
+      ],
+    };
+    const batch = parseJiraSearchResponse(raw, NATIVE_ONLY);
+    expect(batch.issues[0].issueLinks).toEqual([
+      { typeName: 'Blocks', direction: 'outward', key: 'OVR-65110' },
+      { typeName: 'Blocks', direction: 'inward', key: 'OVR-65113' },
+      { typeName: 'Child-Issue', direction: 'inward', key: 'OVR-58028' },
+    ]);
+    // linkedIssueKeys (epic→LOQ discovery) is unaffected: still outward keys only, type-agnostic.
+    expect(batch.issues[0].linkedIssueKeys).toEqual(['OVR-65110', 'OVR-NOPE']);
   });
 
   it('reads the start date from the configured custom field, falling back to null when unmapped', () => {

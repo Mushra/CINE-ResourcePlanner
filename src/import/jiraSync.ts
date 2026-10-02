@@ -28,6 +28,18 @@ export interface JiraFieldMapping {
   scopeField: string | null;
 }
 
+/** One typed Jira issue link, direction-aware. `key` is the issue at the other end; `direction` is
+ * 'outward' when this issue points out via the link (Jira's `outwardIssue`, e.g. "blocking") and
+ * 'inward' when it is pointed at (`inwardIssue`, e.g. "is blocked by"). `typeName` is the raw link-
+ * type name as Jira returns it (e.g. "Blocks") — matched case-insensitively downstream, never
+ * localized or filtered here. Separate from `linkedIssueKeys` (which the epic→LOQ discovery owns and
+ * must stay type-agnostic); this is the typed view that dependency import reads. */
+export interface NormalizedJiraLink {
+  typeName: string;
+  direction: 'inward' | 'outward';
+  key: string;
+}
+
 export interface NormalizedJiraIssue {
   key: string;
   summary: string;
@@ -64,6 +76,11 @@ export interface NormalizedJiraIssue {
    * native fields.parent is empty on both, so this is the only structural epic→LOQ signal. Empty
    * array when the field is absent/unrequested. */
   linkedIssueKeys: string[];
+  /** Every issue link on this issue, with its type name and direction preserved — the typed
+   * counterpart to linkedIssueKeys. Dependency import reads this to isolate "Blocks" edges; the
+   * epic→LOQ discovery deliberately ignores it and uses linkedIssueKeys instead. Empty when the
+   * field is absent/unrequested. */
+  issueLinks: NormalizedJiraLink[];
   updatedAt: string | null;
 }
 
@@ -86,7 +103,11 @@ interface JiraRawIssue {
     duedate?: string | null;
     resolutiondate?: string | null;
     parent?: { key?: string } | null;
-    issuelinks?: Array<{ outwardIssue?: { key?: string } | null; inwardIssue?: { key?: string } | null } | null> | null;
+    issuelinks?: Array<{
+      type?: { name?: string } | null;
+      outwardIssue?: { key?: string } | null;
+      inwardIssue?: { key?: string } | null;
+    } | null> | null;
     updated?: string | null;
     [customField: string]: unknown;
   };
@@ -147,6 +168,7 @@ export function parseJiraSearchResponse(raw: JiraRawSearchResponse, mapping: Jir
             .map((link) => (typeof link?.outwardIssue?.key === 'string' ? link.outwardIssue.key : null))
             .filter((k): k is string => k !== null)
         : [],
+      issueLinks: parseIssueLinks(fields.issuelinks),
       updatedAt: typeof fields.updated === 'string' ? fields.updated : null,
     });
   }
@@ -160,6 +182,27 @@ export function parseJiraSearchResponse(raw: JiraRawSearchResponse, mapping: Jir
 function toIsoDate(value: unknown): string | null {
   if (typeof value !== 'string' || value.length < 10) return null;
   return value.slice(0, 10);
+}
+
+/** Normalizes `fields.issuelinks` into typed, direction-aware edges, keeping only links that carry
+ * both a type name and a resolvable issue key. A single Jira link object holds exactly one of
+ * `outwardIssue`/`inwardIssue` (the end that is *not* this issue), so each yields one edge. Defensive
+ * against the loose raw shape — any malformed entry is skipped rather than throwing. */
+type RawIssueLink = NonNullable<NonNullable<JiraRawIssue['fields']>['issuelinks']>[number];
+function parseIssueLinks(raw: RawIssueLink[] | null | undefined): NormalizedJiraLink[] {
+  if (!Array.isArray(raw)) return [];
+  const links: NormalizedJiraLink[] = [];
+  for (const link of raw) {
+    const typeName = link?.type?.name;
+    if (typeof typeName !== 'string') continue;
+    if (typeof link?.outwardIssue?.key === 'string') {
+      links.push({ typeName, direction: 'outward', key: link.outwardIssue.key });
+    }
+    if (typeof link?.inwardIssue?.key === 'string') {
+      links.push({ typeName, direction: 'inward', key: link.inwardIssue.key });
+    }
+  }
+  return links;
 }
 
 /** Defensive reader for a Jira picklist/select custom field: Server/DC returns `{ value: "..." }`

@@ -179,7 +179,7 @@ CREATE TABLE IF NOT EXISTS loq_dependencies (
   successor_loq_id    TEXT NOT NULL REFERENCES loqs(id) ON DELETE CASCADE,
   type                TEXT NOT NULL DEFAULT 'finish_to_start',
   lag_days            INTEGER NOT NULL DEFAULT 0,
-  source              TEXT NOT NULL DEFAULT 'override',  -- 'template' | 'override'
+  source              TEXT NOT NULL DEFAULT 'override',  -- 'template' | 'override' | 'jira'
   template_id         TEXT REFERENCES dependency_templates(id) ON DELETE SET NULL,
   UNIQUE (predecessor_loq_id, successor_loq_id)
 );

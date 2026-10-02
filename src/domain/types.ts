@@ -166,7 +166,10 @@ export type LoqStatus = 'TODO' | 'IN_PROGRESS' | 'TO_REVIEW' | 'BLOCKED' | 'DONE
  * constraining to a union, see docs/DATA_MODEL.md and INTEGRATIONS.md. */
 export type LoqType = string;
 
-export type DependencySource = 'template' | 'override';
+/** 'template' = materialized from a DependencyTemplate; 'override' = manual or MS Project import
+ * (user-owned, never auto-overwritten); 'jira' = mirrored from Jira "Blocks" issue links, fully
+ * replaced on every sync (see applyJiraBindings) — treated read-only in the UI. */
+export type DependencySource = 'template' | 'override' | 'jira';
 
 /** Canonical scheduling-relation set; only 'finish_to_start' is currently produced (the DDL
  * default) — the others exist for forward compatibility as dependency modeling matures. */

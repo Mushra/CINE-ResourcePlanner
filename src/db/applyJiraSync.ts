@@ -1,13 +1,21 @@
 // Writes confirmed Jira bindings (see src/domain/jiraBinding.ts for how they were proposed) into
 // exactly one Project — same non-negotiable scoping rule as applyMppImport.ts: a jiraKey already
 // claimed by a Cinematic/LOQ under a *different* project is never reassigned, only skipped with a
-// warning. Signal-only: this never writes loqs.status or any committed/forecast date — Jira never
-// silently overwrites the plan (see docs/INTEGRATIONS.md §3). Date/status comparison lives in the
-// jira_inconsistency sanity check instead.
+// warning. Signal-only for the plan's own fields: this never writes loqs.status or any committed/
+// forecast date — Jira never silently overwrites the plan (see docs/INTEGRATIONS.md §3). The one
+// structural exception is dependencies: Jira "Blocks" issue links are mirrored into loq_dependencies
+// as source='jira' edges (full-replaced every sync), never touching user/template-owned edges.
+// Date/status comparison lives in the jira_inconsistency sanity check instead.
 import type { PlannerDatabase } from './database';
-import { loadPlanningData, replaceCinematicRelatedIssues, updateCinematic, updateLoq, upsertCinematicJiraSyncState, upsertJiraSyncState } from './repository';
+import { loadPlanningData, replaceCinematicRelatedIssues, replaceJiraLoqDependencies, updateCinematic, updateLoq, upsertCinematicJiraSyncState, upsertJiraSyncState } from './repository';
 import type { NormalizedJiraBatch } from '../import/jiraSync';
 import { DEFAULT_HOTLINE_LABEL, resolveRelatedIssuesByCinematic } from '../domain/relatedIssues';
+import { wouldCreateCycle } from '../domain/loqGraph';
+import type { DependencyType, LoqDependency } from '../domain/types';
+
+/** Jira link-type name (case-insensitive) that maps to a scheduling dependency. The outward side
+ * ("blocking") is the predecessor, the inward side ("is blocked by") the successor. */
+const BLOCKS_LINK_TYPE = 'blocks';
 
 /** cinematicId/loqId -> confirmed Jira key, or null for "don't link" (a proposal the user rejected). */
 export interface ConfirmedJiraBindings {
@@ -21,6 +29,10 @@ export interface JiraApplyReport {
   loqsLinked: number;
   loqsSkippedOtherProject: number;
   relatedIssuesLinked: number;
+  /** source='jira' dependency edges inserted this sync (after de-dup, cycle and collision skips). */
+  dependenciesLinked: number;
+  /** Jira "Blocks" edges dropped because they'd close a cycle in the dependency DAG. */
+  dependenciesSkippedCycle: number;
   warnings: string[];
 }
 
@@ -39,6 +51,8 @@ export function applyJiraBindings(
     loqsLinked: 0,
     loqsSkippedOtherProject: 0,
     relatedIssuesLinked: 0,
+    dependenciesLinked: 0,
+    dependenciesSkippedCycle: 0,
     warnings,
   };
 
@@ -129,6 +143,47 @@ export function applyJiraBindings(
     replaceCinematicRelatedIssues(db, cinematic.id, related);
     report.relatedIssuesLinked += related.length;
   }
+
+  // Dependencies: mirror the Jira "Blocks" graph into source='jira' edges. Re-read the plan so the
+  // jiraKey→loqId map reflects exactly what the binding loops just committed (skipped collisions
+  // included, since those LOQs never got a key). Both endpoints must resolve to a LOQ in THIS
+  // project; cross-project or unbound ends are dropped. Full-replace via replaceJiraLoqDependencies.
+  const bound = loadPlanningData(db);
+  const projectCinematicIds = new Set(bound.cinematics.filter((c) => c.projectId === targetProjectId).map((c) => c.id));
+  const loqIdByKeyInProject = new Map<string, string>();
+  for (const l of bound.loqs) {
+    if (l.jiraKey && projectCinematicIds.has(l.cinematicId)) loqIdByKeyInProject.set(l.jiraKey, l.id);
+  }
+
+  // Cycle-guard against the surviving non-jira edges (the jira ones are about to be replaced).
+  const accumulator = bound.loqDependencies
+    .filter((d) => d.source !== 'jira')
+    .map((d) => ({ predecessorLoqId: d.predecessorLoqId, successorLoqId: d.successorLoqId }));
+  const seen = new Set<string>();
+  const jiraEdges: Pick<LoqDependency, 'predecessorLoqId' | 'successorLoqId' | 'type' | 'lagDays'>[] = [];
+  const FINISH_TO_START: DependencyType = 'finish_to_start';
+  for (const issue of batch.issues) {
+    const selfLoqId = loqIdByKeyInProject.get(issue.key);
+    if (!selfLoqId) continue;
+    for (const link of issue.issueLinks ?? []) {
+      if (link.typeName.toLowerCase() !== BLOCKS_LINK_TYPE) continue;
+      const otherLoqId = loqIdByKeyInProject.get(link.key);
+      if (!otherLoqId) continue;
+      const predecessorLoqId = link.direction === 'outward' ? selfLoqId : otherLoqId;
+      const successorLoqId = link.direction === 'outward' ? otherLoqId : selfLoqId;
+      if (predecessorLoqId === successorLoqId) continue;
+      const pair = `${predecessorLoqId}::${successorLoqId}`;
+      if (seen.has(pair)) continue; // same edge seen from the other issue's inward link
+      if (wouldCreateCycle(accumulator, predecessorLoqId, successorLoqId)) {
+        report.dependenciesSkippedCycle++;
+        continue;
+      }
+      seen.add(pair);
+      accumulator.push({ predecessorLoqId, successorLoqId });
+      jiraEdges.push({ predecessorLoqId, successorLoqId, type: FINISH_TO_START, lagDays: 0 });
+    }
+  }
+  report.dependenciesLinked = replaceJiraLoqDependencies(db, jiraEdges);
 
   return report;
 }
