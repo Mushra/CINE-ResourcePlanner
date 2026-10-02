@@ -582,7 +582,78 @@ describe('getSanityChecks — LOQ forecast (at risk, root cause, early opportuni
 
     expect(getSanityChecks(engine).filter((c) => c.category === 'loq_early_opportunity')).toHaveLength(0);
   });
+});
 
+describe('getSanityChecks — loq_overdue (A05 santé croisée avec les dates)', () => {
+  const NOW = '2026-10-02';
+
+  it('fires for an active LOQ past its committed finish — even with zero declared variance', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id, name: 'Seq01' });
+    // No variance at all: the deadline alone is breached, so the absence of a slip must NOT read on-track.
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'IN_PROGRESS', committedFinish: '2026-09-10' });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1] }));
+
+    const checks = getSanityChecks(engine, [], NOW).filter((c) => c.category === 'loq_overdue');
+    expect(checks).toHaveLength(1);
+    expect(checks[0]).toMatchObject({ severity: 'critical', projectId: p1.id, disciplineId: animation.id, loqId: l1.id });
+    expect(checks[0].impact).toContain('2026-09-10');
+    expect(checks[0].impact).toContain('22d');
+  });
+
+  it('does not fire before the committed finish is reached', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'IN_PROGRESS', committedFinish: '2026-12-01' });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1] }));
+
+    expect(getSanityChecks(engine, [], NOW).filter((c) => c.category === 'loq_overdue')).toHaveLength(0);
+  });
+
+  it('does not fire for a terminal (Done/Cut) LOQ — a finished LOQ is never overdue', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const done = loq({ cinematicId: cine.id, disciplineId: animation.id, type: 'L1', status: 'DONE', committedFinish: '2026-09-10' });
+    const cut = loq({ cinematicId: cine.id, disciplineId: animation.id, type: 'L2', status: 'CUT', committedFinish: '2026-09-10' });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [done, cut] }));
+
+    expect(getSanityChecks(engine, [], NOW).filter((c) => c.category === 'loq_overdue')).toHaveLength(0);
+  });
+
+  it('still fires when the LOQ is voluntarily paused — a pause never masks a breached deadline', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'IN_PROGRESS', committedFinish: '2026-09-10', paused: true });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1] }));
+
+    expect(getSanityChecks(engine, [], NOW).filter((c) => c.category === 'loq_overdue')).toHaveLength(1);
+  });
+
+  it('honours the effective Jira status — a Jira-mirrored Done suppresses the overdue alert', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    // Plan still says IN_PROGRESS, but Jira reports Done: the effective status is terminal → not overdue.
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'IN_PROGRESS', committedFinish: '2026-09-10', jiraKey: 'OVR-9' });
+    const state = jiraSyncState({ loqId: l1.id, jiraStatus: 'Done' });
+
+    const engine = new PlanningEngine(
+      planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1], jiraSyncStates: [state] }),
+    );
+
+    expect(getSanityChecks(engine, [jiraConfig({ projectId: p1.id })], NOW).filter((c) => c.category === 'loq_overdue')).toHaveLength(0);
+  });
+});
+
+describe('getSanityChecks — dependency contradiction', () => {
   it('flags loq_dependency_contradiction when a LOQ is declared done before its prerequisite can finish', () => {
     const animation = discipline({ name: 'Animation' });
     const p1 = project({ name: 'Alpha' });

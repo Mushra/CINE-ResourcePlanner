@@ -5,7 +5,7 @@ import { getForecastWindowPeriods } from './forecast';
 import { impactedLoqIds } from './loqForecast';
 import { hasValidEstimate } from './loqRollup';
 import { comparePeriod, formatPeriodLabel, periodFromISODate, periodRange } from '../domain/periods';
-import { deriveProjectStatus } from '../domain/projectStatus';
+import { deriveProjectStatus, localTodayIso } from '../domain/projectStatus';
 import { buildEffectiveStatusMap, cinematicStatus, statusResolverFrom, isTerminalStatus, type StatusResolver } from './watchtower';
 import { CANONICAL_STATUS_LABEL, resolveJiraStatus } from '../domain/jiraStatusMap';
 import { jiraMatchKey } from '../domain/jiraBinding';
@@ -25,6 +25,7 @@ export type CheckCategory =
   | 'over_allocated_person'
   | 'capacity_conflict_cinematic'
   | 'loq_at_risk'
+  | 'loq_overdue'
   | 'loq_root_cause'
   | 'loq_early_opportunity'
   | 'loq_dependency_contradiction'
@@ -68,8 +69,15 @@ export function buildJiraToleranceMap(configs: JiraProjectConfig[]): Map<string,
  * per-project date tolerance and the effective (Jira-mirrored) LOQ status that gates the at-risk /
  * inconsistency checks (see docs/INTEGRATIONS.md §3). Omitted callers (exports, non-Jira views) get
  * defaults, keeping every pre-Jira call site unchanged.
+ *
+ * `now` is the injectable observation date (ISO yyyy-mm-dd, defaults to today) used by the
+ * deadline-sensitive checks (loq_overdue) so tests can pin "today" deterministically (A05).
  */
-export function getSanityChecks(engine: PlanningEngine, jiraConfigs: JiraProjectConfig[] = []): SanityCheck[] {
+export function getSanityChecks(
+  engine: PlanningEngine,
+  jiraConfigs: JiraProjectConfig[] = [],
+  now: string = localTodayIso(),
+): SanityCheck[] {
   const checks: SanityCheck[] = [];
   const periods = engine.allKnownPeriods();
   const toleranceDaysByProjectId = buildJiraToleranceMap(jiraConfigs);
@@ -85,6 +93,7 @@ export function getSanityChecks(engine: PlanningEngine, jiraConfigs: JiraProject
   checks.push(...checkOverAllocatedPeople(engine));
   checks.push(...checkCinematicCapacityConflict(engine));
   checks.push(...checkLoqAtRisk(engine, statusResolver));
+  checks.push(...checkLoqOverdue(engine, statusResolver, now));
   checks.push(...checkLoqRootCause(engine));
   checks.push(...checkLoqEarlyOpportunity(engine));
   checks.push(...checkLoqDependencyContradiction(engine, statusResolver));
@@ -327,6 +336,37 @@ function checkLoqAtRisk(engine: PlanningEngine, statusOf: StatusResolver): Sanit
       loqId,
       message: `${loqLabel(engine, loqId)} is forecast to finish ${forecast.deltaDays}d late`,
       impact: `Forecast finish ${forecast.forecastFinish ?? '—'} vs. committed ${forecast.committedFinish ?? '—'} (source: ${forecast.source})`,
+    });
+  }
+  return checks;
+}
+
+/** loq_overdue (A05 "santé croisée avec les dates"): a LOQ whose committed finish is already past the
+ * observation date and that is NOT done per its effective (Jira-mirrored) status — a breached deadline.
+ * Unlike loq_at_risk (a forecast slip), this fires even with zero declared variance, so the mere
+ * absence of a variance can never let a missed deadline read as on-track. A voluntary pause does not
+ * suppress it (a pause never masks a delivery threat); a terminal LOQ (Done/Cut per the effective
+ * status) is finished and never overdue. */
+function checkLoqOverdue(engine: PlanningEngine, statusOf: StatusResolver, now: string): SanityCheck[] {
+  const checks: SanityCheck[] = [];
+  for (const [loqId, forecast] of engine.getLoqForecasts()) {
+    const loq = engine.loq(loqId);
+    if (!loq || isTerminalStatus(statusOf(loq))) continue;
+    const committed = forecast.committedFinish;
+    if (!committed || committed >= now) continue;
+    const overdueDays = daysBetween(committed, now);
+    const project = engine.loqProject(loqId);
+    checks.push({
+      id: `loq-overdue:${loqId}`,
+      severity: 'critical',
+      category: 'loq_overdue',
+      projectId: project?.id,
+      projectName: project?.name,
+      disciplineId: loq.disciplineId,
+      disciplineName: engine.discipline(loq.disciplineId)?.name,
+      loqId,
+      message: `${loqLabel(engine, loqId)} is past its committed finish and not done`,
+      impact: `Committed finish ${committed} is ${overdueDays}d overdue and the LOQ is still ${CANONICAL_STATUS_LABEL[statusOf(loq)]} — deliver or re-commit`,
     });
   }
   return checks;

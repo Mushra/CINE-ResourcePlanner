@@ -70,12 +70,15 @@ describe('Dashboard', () => {
       actualFinish: null,
       dodRef: '',
     };
-    const a = createLoq({ ...base, type: 'L1', committedStart: '2026-09-01', committedFinish: '2026-09-10' });
-    const b = createLoq({ ...base, type: 'L2', committedStart: '2026-09-11', committedFinish: '2026-09-20' });
-    const c = createLoq({ ...base, type: 'L3', committedStart: '2026-09-21', committedFinish: '2026-09-30' });
+    // Committed windows are ahead of the scenario's "today" (2026-10-02) so the chain exercises only
+    // root-cause forecast propagation, not the separate deadline-breach path (loq_overdue, A05 — which
+    // would otherwise add a flat overdue row per past-due LOQ and duplicate the chain's labels).
+    const a = createLoq({ ...base, type: 'L1', committedStart: '2026-11-01', committedFinish: '2026-11-10' });
+    const b = createLoq({ ...base, type: 'L2', committedStart: '2026-11-11', committedFinish: '2026-11-20' });
+    const c = createLoq({ ...base, type: 'L3', committedStart: '2026-11-21', committedFinish: '2026-11-30' });
     createLoqDependency({ predecessorLoqId: a.id, successorLoqId: b.id, type: 'finish_to_start', lagDays: 0, source: 'override', templateId: null });
     createLoqDependency({ predecessorLoqId: b.id, successorLoqId: c.id, type: 'finish_to_start', lagDays: 0, source: 'override', templateId: null });
-    declareVariance(a.id, { category: 'TECHNICAL_ISSUE', expectedFinish: '2026-09-15', comment: 'Render farm outage' });
+    declareVariance(a.id, { category: 'TECHNICAL_ISSUE', expectedFinish: '2026-11-15', comment: 'Render farm outage' });
 
     renderView(<Dashboard />);
 

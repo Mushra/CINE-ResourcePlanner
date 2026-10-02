@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { useStore } from '../../../store/useStore';
 import { useUiStore, type MatrixGroupBy } from '../../../store/useUiStore';
 import {
-  CINEMATIC_STATUS_LABEL, HEALTH_LABEL, HEALTH_ORDER, buildEffectiveStatusMap, cellBlockedLoqs,
-  cinematicHealth, cinematicStatus, representativeLoq, statusResolverFrom, worstDiscipline,
+  CINEMATIC_STATUS_LABEL, HEALTH_LABEL, HEALTH_ORDER, buildEffectiveStatusMap, buildStatusSourceMap, cellBlockedLoqs,
+  cinematicHealth, cinematicStatus, representativeLoq, statusConfidenceFrom, statusResolverFrom, worstDiscipline,
   type CinematicOverallStatus,
 } from '../../../engine/watchtower';
 import { CANONICAL_STATUS_LABEL, UNMAPPED, type EffectiveStatus } from '../../../domain/jiraStatusMap';
@@ -72,6 +72,10 @@ export function CinematicsMatrix({ project, checks }: { project: Project; checks
   const forecasts = engine.getLoqForecasts();
   const effectiveStatusMap = buildEffectiveStatusMap(engine, jiraConfigs);
   const statusOf = statusResolverFrom(effectiveStatusMap);
+  // A05: thread per-LOQ confidence so a cinematic whose current status we can't confirm reads
+  // "Unknown" rather than a bare "On track". Observation date defaults to today.
+  const confidenceOf = statusConfidenceFrom(buildStatusSourceMap(engine, jiraConfigs));
+  const healthCtx = { confidenceOf };
   const levels = [...new Set(loqs.map((l) => l.type))].sort();
   const attentionCountByCinematic = new Map<string, number>();
   for (const check of checks) {
@@ -81,7 +85,7 @@ export function CinematicsMatrix({ project, checks }: { project: Project; checks
 
   function passesFilters(cinematic: Cinematic): boolean {
     if (search && !cinematic.name.toLowerCase().includes(search.toLowerCase())) return false;
-    const health = cinematicHealth(cinematic.id, usedDisciplineIds, loqs, forecasts, statusOf);
+    const health = cinematicHealth(cinematic.id, usedDisciplineIds, loqs, forecasts, statusOf, healthCtx);
     if (healthFilter && !(health && healthFilter.has(health))) return false;
     if (disciplineFilter) {
       const hasAny = usedDisciplineIds.some((id) => disciplineFilter.has(id) && representativeLoq(loqs, cinematic.id, id, statusOf));
@@ -106,8 +110,8 @@ export function CinematicsMatrix({ project, checks }: { project: Project; checks
     if (sort.col === 'name') return [...rows].sort((a, b) => mul * a.name.localeCompare(b.name));
     if (sort.col === 'health') {
       return [...rows].sort((a, b) => {
-        const ah = cinematicHealth(a.id, usedDisciplineIds, loqs, forecasts, statusOf);
-        const bh = cinematicHealth(b.id, usedDisciplineIds, loqs, forecasts, statusOf);
+        const ah = cinematicHealth(a.id, usedDisciplineIds, loqs, forecasts, statusOf, healthCtx);
+        const bh = cinematicHealth(b.id, usedDisciplineIds, loqs, forecasts, statusOf, healthCtx);
         const ai = ah ? HEALTH_ORDER.indexOf(ah) : HEALTH_ORDER.length;
         const bi = bh ? HEALTH_ORDER.indexOf(bh) : HEALTH_ORDER.length;
         return mul * (ai - bi);
@@ -128,7 +132,7 @@ export function CinematicsMatrix({ project, checks }: { project: Project; checks
 
   function groupKeyAndLabel(cinematic: Cinematic): { key: string; label: string } {
     if (groupBy === 'health') {
-      const h = cinematicHealth(cinematic.id, usedDisciplineIds, loqs, forecasts, statusOf);
+      const h = cinematicHealth(cinematic.id, usedDisciplineIds, loqs, forecasts, statusOf, healthCtx);
       return h ? { key: h, label: HEALTH_LABEL[h] } : { key: NO_LOQS_KEY, label: 'No LOQs yet' };
     }
     if (groupBy === 'status') {
@@ -136,7 +140,7 @@ export function CinematicsMatrix({ project, checks }: { project: Project; checks
       return s ? { key: s, label: CINEMATIC_STATUS_LABEL[s] } : { key: NO_LOQS_KEY, label: 'No LOQs yet' };
     }
     // discipline
-    const worst = worstDiscipline(cinematic.id, usedDisciplineIds, loqs, forecasts, statusOf);
+    const worst = worstDiscipline(cinematic.id, usedDisciplineIds, loqs, forecasts, statusOf, healthCtx);
     return worst ? { key: worst, label: disciplineName(worst) } : { key: NO_LOQS_KEY, label: 'No LOQs yet' };
   }
 
@@ -175,7 +179,7 @@ export function CinematicsMatrix({ project, checks }: { project: Project; checks
   }
 
   function renderRow(cinematic: Cinematic) {
-    const health = cinematicHealth(cinematic.id, usedDisciplineIds, loqs, forecasts, statusOf);
+    const health = cinematicHealth(cinematic.id, usedDisciplineIds, loqs, forecasts, statusOf, healthCtx);
     const issueCount = attentionCountByCinematic.get(cinematic.id) ?? 0;
     return (
       <tr key={cinematic.id}>

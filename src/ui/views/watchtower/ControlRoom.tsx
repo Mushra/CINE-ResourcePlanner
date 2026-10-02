@@ -4,9 +4,10 @@ import { useUiStore } from '../../../store/useUiStore';
 import { isoAddMonths, isoDiffDays } from '../../timeline/timelineMath';
 import { localTodayIso } from '../../../domain/projectStatus';
 import {
-  HEALTH_LABEL, HEALTH_ORDER, buildEffectiveStatusMap, cinematicHealth, deriveLoqHealth, healthCounts,
-  isTerminalStatus, loqLevelDistribution, loqStatusLabel, projectAttention, representativeLoq, statusResolverFrom,
-  type AttentionItem, type StatusResolver, type WatchtowerHealth,
+  HEALTH_LABEL, HEALTH_ORDER, buildEffectiveStatusMap, buildStatusSourceMap, cinematicHealth, deriveLoqHealth,
+  healthCounts, isTerminalStatus, loqLevelDistribution, loqStatusLabel, projectAttention, representativeLoq,
+  statusConfidenceFrom, statusResolverFrom,
+  type AttentionItem, type StatusConfidenceResolver, type StatusResolver, type WatchtowerHealth,
 } from '../../../engine/watchtower';
 import { Collapsible } from '../../components/Collapsible';
 import { EmptyState } from '../../components/EmptyState';
@@ -42,14 +43,18 @@ export function ControlRoom({ project, checks }: { project: Project; checks: San
   const disciplineName = (id: string) => disciplines.find((d) => d.id === id)?.name ?? id;
   const forecasts = engine.getLoqForecasts();
   const statusOf = statusResolverFrom(buildEffectiveStatusMap(engine, jiraConfigs));
+  // A05: per-LOQ confidence (fresh/stale/absent Jira sync) so health can read "unknown" rather than
+  // asserting on-track from the mere absence of a variance. Observation date defaults to today.
+  const confidenceOf = statusConfidenceFrom(buildStatusSourceMap(engine, jiraConfigs));
+  const healthCtx = { confidenceOf };
 
-  const counts = healthCounts(cinematics, disciplineIds, loqs, forecasts, statusOf);
+  const counts = healthCounts(cinematics, disciplineIds, loqs, forecasts, statusOf, healthCtx);
 
   function itemHealth(item: AttentionItem): WatchtowerHealth | null {
     const disciplineId = item.check.disciplineId;
     if (!item.cinematicId || !disciplineId) return null;
     const loq = representativeLoq(loqs, item.cinematicId, disciplineId, statusOf);
-    return loq ? deriveLoqHealth(loq, forecasts.get(loq.id), statusOf(loq)) : null;
+    return loq ? deriveLoqHealth(loq, forecasts.get(loq.id), statusOf(loq), { confidence: confidenceOf(loq) }) : null;
   }
 
   // Attention Required is planning/Jira issues only — FTE/staffing/capacity issues (source
@@ -72,7 +77,7 @@ export function ControlRoom({ project, checks }: { project: Project; checks: San
   }
 
   const outlookCinematics = healthFilter
-    ? cinematics.filter((c) => cinematicHealth(c.id, disciplineIds, loqs, forecasts, statusOf) === healthFilter)
+    ? cinematics.filter((c) => cinematicHealth(c.id, disciplineIds, loqs, forecasts, statusOf, healthCtx) === healthFilter)
     : cinematics;
 
   const distribution = loqLevelDistribution(cinematics, disciplineIds, loqs, distDiscipline === 'all' ? null : distDiscipline);
@@ -167,6 +172,7 @@ export function ControlRoom({ project, checks }: { project: Project; checks: San
           loqs={loqs}
           forecasts={forecasts}
           statusOf={statusOf}
+          confidenceOf={confidenceOf}
           healthFilter={healthFilter}
           horizon={outlookHorizon}
           onOpenCinematic={openCinematic}
@@ -217,7 +223,7 @@ interface OutlookCell {
 }
 
 function LoqOutlook({
-  cinematics, disciplineIds, disciplineName, loqs, forecasts, statusOf, healthFilter, horizon, onOpenCinematic,
+  cinematics, disciplineIds, disciplineName, loqs, forecasts, statusOf, confidenceOf, healthFilter, horizon, onOpenCinematic,
 }: {
   cinematics: Cinematic[];
   disciplineIds: string[];
@@ -225,6 +231,7 @@ function LoqOutlook({
   loqs: Loq[];
   forecasts: ReadonlyMap<string, LoqForecast>;
   statusOf: StatusResolver;
+  confidenceOf: StatusConfidenceResolver;
   healthFilter: WatchtowerHealth | null;
   horizon: OutlookHorizon;
   onOpenCinematic: (id: string) => void;
@@ -243,7 +250,7 @@ function LoqOutlook({
         const date = forecast?.forecastFinish ?? loq.committedFinish ?? loq.actualFinish ?? null;
         if (!date) return null;
         const overdue = date < today && !isTerminalStatus(statusOf(loq));
-        return { disciplineId, loq, date, health: deriveLoqHealth(loq, forecast, statusOf(loq)), overdue };
+        return { disciplineId, loq, date, health: deriveLoqHealth(loq, forecast, statusOf(loq), { now: today, confidence: confidenceOf(loq) }), overdue };
       })
       // Hide the past: keep future-or-today deliveries within the horizon, plus every overdue one.
       .filter((c): c is OutlookCell => c !== null && (c.overdue || (c.date >= today && (horizonEnd === null || c.date <= horizonEnd)))),

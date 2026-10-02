@@ -3,8 +3,8 @@ import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
 import { getSanityChecks } from '../../engine/validation';
 import {
-  HEALTH_LABEL, buildEffectiveStatusMap, deriveLoqHealth, projectAttention,
-  statusResolverFrom, type AttentionItem,
+  HEALTH_LABEL, buildEffectiveStatusMap, buildStatusSourceMap, deriveLoqHealth, projectAttention,
+  statusConfidenceFrom, statusResolverFrom, type AttentionItem, type JiraStatusSource,
 } from '../../engine/watchtower';
 import { impactedLoqIds } from '../../engine/loqForecast';
 import {
@@ -35,6 +35,18 @@ function loqStatusCell(loq: Loq, effective: EffectiveStatus | undefined): { clas
 /** Deep-link to a single issue's page. */
 function jiraBrowseUrl(baseUrl: string, key: string): string {
   return `${baseUrl.replace(/\/$/, '')}/browse/${key}`;
+}
+
+/** Human-readable "where this LOQ's status comes from and how fresh it is" (A05 req: display source
+ * and freshness). An unbound LOQ is the plan's own; a bound one reports its last Jira sync, flagging
+ * a stale/unmapped/never-synced state as uncertain so health's "Unknown" has a visible explanation. */
+function statusSourceLabel(isBound: boolean, source: JiraStatusSource | undefined): { text: string; uncertain: boolean } {
+  if (!isBound) return { text: 'Plan (manual status)', uncertain: false };
+  if (!source) return { text: 'Jira-bound · never synced', uncertain: true };
+  const age = source.ageDays === 0 ? 'today' : `${source.ageDays}d ago`;
+  if (source.kind === 'jira-unmapped') return { text: `Jira · status not mapped (synced ${age})`, uncertain: true };
+  if (source.kind === 'jira-stale') return { text: `Jira · stale (synced ${age})`, uncertain: true };
+  return { text: `Jira · synced ${age}`, uncertain: false };
 }
 
 interface Draft {
@@ -133,10 +145,15 @@ function LoqDetailPage({ loqId }: { loqId: string }) {
   const forecasts = engine.getLoqForecasts();
   const effectiveStatusMap = buildEffectiveStatusMap(engine, jiraConfigs);
   const statusOf = statusResolverFrom(effectiveStatusMap);
+  // A05: per-LOQ Jira confidence (fresh/stale/unmapped/absent) — feeds both the "Unknown" health and
+  // the status-source readout below. Observation date defaults to today.
+  const statusSources = buildStatusSourceMap(engine, jiraConfigs);
+  const confidenceOf = statusConfidenceFrom(statusSources);
   const effectiveStatus = effectiveStatusMap.get(loq.id) ?? null;
   const statusCell = loqStatusCell(loq, effectiveStatus ?? undefined);
   const forecast = forecasts.get(loq.id);
-  const health = deriveLoqHealth(loq, forecast, statusOf(loq));
+  const health = deriveLoqHealth(loq, forecast, statusOf(loq), { confidence: confidenceOf(loq) });
+  const statusSource = statusSourceLabel(Boolean(loq.jiraKey), statusSources.get(loq.id));
   const jiraConfig = project ? jiraConfigs.find((c) => c.projectId === project.id) ?? null : null;
 
   // "Why at risk" — every sanity check that names this LOQ, with its source label (keep all sources,
@@ -160,7 +177,7 @@ function LoqDetailPage({ loqId }: { loqId: string }) {
     .map((d) => ({ dep: d, loq: loqs.find((l) => l.id === d.successorLoqId) }))
     .filter((e): e is DepEdge => Boolean(e.loq));
   const renderDepNode = ({ dep, loq: depLoq }: DepEdge, affected: boolean) => {
-    const h = deriveLoqHealth(depLoq, forecasts.get(depLoq.id), statusOf(depLoq));
+    const h = deriveLoqHealth(depLoq, forecasts.get(depLoq.id), statusOf(depLoq), { confidence: confidenceOf(depLoq) });
     return (
       <button key={dep.id} type="button" className="loq-dep-node loq-dep-node-affected" onClick={() => openLoq(depLoq.id, depLoq.cinematicId)}>
         <div className="loq-dep-name">{disciplineName(depLoq.disciplineId)} {depLoq.type}</div>
@@ -264,6 +281,10 @@ function LoqDetailPage({ loqId }: { loqId: string }) {
         <div className="kv-rows">
           <div className="kv-row"><span className="k">Status</span><span className="v">{statusCell.label}</span></div>
           <div className="kv-row"><span className="k">Health</span><span className={`v health-text health-text-${health}`}>{HEALTH_LABEL[health]}</span></div>
+          <div className="kv-row">
+            <span className="k">Status source</span>
+            <span className={`v${statusSource.uncertain ? ' tbd-text' : ''}`} title="Where this LOQ's status comes from and how fresh it is — a stale, unmapped or missing Jira sync is why health may read Unknown (A05).">{statusSource.text}</span>
+          </div>
           <div className="kv-row"><span className="k">Target</span><span className="v">{loq.committedFinish ?? cinematic?.targetDate ?? '—'}</span></div>
           {forecast && forecast.deltaDays > 0 && forecast.forecastFinish && (
             <div className="kv-row">

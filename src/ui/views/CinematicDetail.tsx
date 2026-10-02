@@ -3,8 +3,8 @@ import { useStore } from '../../store/useStore';
 import { useUiStore } from '../../store/useUiStore';
 import { getSanityChecks, type SanityCheck } from '../../engine/validation';
 import {
-  HEALTH_LABEL, buildEffectiveStatusMap, deriveLoqHealth, projectAttention,
-  representativeLoq, statusResolverFrom, worstDiscipline,
+  HEALTH_LABEL, buildEffectiveStatusMap, buildStatusSourceMap, deriveLoqHealth, projectAttention,
+  representativeLoq, statusConfidenceFrom, statusResolverFrom, worstDiscipline,
   type AttentionItem, type WatchtowerHealth,
 } from '../../engine/watchtower';
 import {
@@ -172,6 +172,9 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const forecasts = engine.getLoqForecasts();
   const effectiveStatusMap = buildEffectiveStatusMap(engine, jiraConfigs);
   const statusOf = statusResolverFrom(effectiveStatusMap);
+  // A05: per-LOQ confidence so an unconfirmable (stale/absent Jira sync) focus LOQ reads "Unknown".
+  const confidenceOf = statusConfidenceFrom(buildStatusSourceMap(engine, jiraConfigs));
+  const healthCtx = { confidenceOf };
   const jiraConfig = project ? jiraConfigs.find((c) => c.projectId === project.id) ?? null : null;
 
   const checks = project ? getSanityChecks(engine, jiraConfigs).filter((c) => c.projectId === project.id) : [];
@@ -182,10 +185,10 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
       .sort((a, b) => SEVERITY_RANK[b.check.severity] - SEVERITY_RANK[a.check.severity])
     : [];
 
-  const focusDisciplineId = focus !== 'ALL' ? focus : worstDiscipline(cinematic.id, disciplineIds, loqs, forecasts, statusOf);
+  const focusDisciplineId = focus !== 'ALL' ? focus : worstDiscipline(cinematic.id, disciplineIds, loqs, forecasts, statusOf, healthCtx);
   const focusDisciplineName = focusDisciplineId ? disciplines.find((d) => d.id === focusDisciplineId)?.name ?? focusDisciplineId : null;
   const focusLoq = focusDisciplineId ? representativeLoq(loqs, cinematic.id, focusDisciplineId, statusOf) : null;
-  const focusHealth: WatchtowerHealth | null = focusLoq ? deriveLoqHealth(focusLoq, forecasts.get(focusLoq.id), statusOf(focusLoq)) : null;
+  const focusHealth: WatchtowerHealth | null = focusLoq ? deriveLoqHealth(focusLoq, forecasts.get(focusLoq.id), statusOf(focusLoq), { confidence: confidenceOf(focusLoq) }) : null;
   const focusForecastFinish = focusLoq ? forecasts.get(focusLoq.id)?.forecastFinish ?? focusLoq.actualFinish ?? null : null;
 
   // Split the related issues by kind, then reduce each to what its widget shows. Resolved/open both

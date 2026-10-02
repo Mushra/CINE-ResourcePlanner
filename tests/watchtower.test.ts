@@ -15,9 +15,14 @@ import type { LoqForecast } from '../src/engine/loqForecast';
 import type { Loq } from '../src/domain/types';
 import { cinematic, discipline, jiraConfig, jiraSyncState, loq, planningData, project } from './fixtures';
 
-function forecast(deltaDays: number): LoqForecast {
-  return { loqId: '', forecastStart: null, forecastFinish: null, committedFinish: null, deltaDays, source: 'committed', rootCauseLoqId: null };
+function forecast(deltaDays: number, committedFinish: string | null = null): LoqForecast {
+  return {
+    loqId: '', forecastStart: null, forecastFinish: null, committedFinish, deltaDays, source: 'committed',
+    rootCauseLoqId: null, opportunityStart: null, opportunityFinish: null, opportunityDays: 0, opportunityRootCauseLoqId: null,
+  };
 }
+
+const NOW = '2026-10-02';
 
 describe('isTerminalStatus', () => {
   it('treats DONE and CUT as terminal, everything else as active', () => {
@@ -30,13 +35,41 @@ describe('isTerminalStatus', () => {
 });
 
 describe('deriveLoqHealth', () => {
-  it('reads a voluntary pause as the calm on-hold, even when late or blocked', () => {
+  it('A05: a voluntary pause absorbs a soft forecast slip (reads on-hold), but never masks a hard threat', () => {
+    // Pause yields to a forecast slip — the hold is the dominant, calming signal there.
     expect(deriveLoqHealth(loq({ paused: true }), forecast(30), 'IN_PROGRESS')).toBe('on-hold');
-    expect(deriveLoqHealth(loq({ paused: true }), forecast(0), 'BLOCKED')).toBe('on-hold');
+    // …but an involuntary BLOCKED outranks the pause: a paused-and-blocked LOQ still reads blocked.
+    expect(deriveLoqHealth(loq({ paused: true }), forecast(0), 'BLOCKED')).toBe('blocked');
+    // …and a breached committed deadline outranks the pause too: a pause can't hide an overdue delivery.
+    expect(deriveLoqHealth(loq({ paused: true }), forecast(0, '2026-09-01'), 'IN_PROGRESS', { now: NOW })).toBe('late');
   });
 
   it('reads an involuntary BLOCKED as the worst health', () => {
     expect(deriveLoqHealth(loq({ paused: false }), forecast(0), 'BLOCKED')).toBe('blocked');
+  });
+
+  it('A05: reads an active LOQ past its committed finish as late, even with zero declared variance', () => {
+    // committedFinish before the observation date, not terminal → late regardless of a flat (0) forecast.
+    expect(deriveLoqHealth(loq(), forecast(0, '2026-09-01'), 'IN_PROGRESS', { now: NOW })).toBe('late');
+    // Not yet overdue (deadline is in the future) → stays on-track.
+    expect(deriveLoqHealth(loq(), forecast(0, '2026-12-01'), 'IN_PROGRESS', { now: NOW })).toBe('on-track');
+  });
+
+  it('A05: a terminal (DONE/CUT) LOQ is never overdue, even past its committed finish', () => {
+    expect(deriveLoqHealth(loq(), forecast(0, '2026-09-01'), 'DONE', { now: NOW })).toBe('on-track');
+    expect(deriveLoqHealth(loq(), forecast(0, '2026-09-01'), 'CUT', { now: NOW })).toBe('on-track');
+  });
+
+  it('A05: reads unconfirmable status as explicit "unknown", not a bare on-track', () => {
+    // Active, no slip, no breach, but the current status can't be confirmed (stale/absent Jira sync).
+    expect(deriveLoqHealth(loq(), forecast(0), 'IN_PROGRESS', { now: NOW, confidence: 'unknown' })).toBe('unknown');
+    // A confirmed (default) status with no variance stays on-track — the absence of a slip asserts nothing on its own.
+    expect(deriveLoqHealth(loq(), forecast(0), 'IN_PROGRESS', { now: NOW })).toBe('on-track');
+  });
+
+  it('A05: a real slip or lead still outranks "unknown" confidence', () => {
+    expect(deriveLoqHealth(loq(), forecast(5), 'IN_PROGRESS', { now: NOW, confidence: 'unknown' })).toBe('late');
+    expect(deriveLoqHealth(loq(), forecast(-2), 'IN_PROGRESS', { now: NOW, confidence: 'unknown' })).toBe('ahead');
   });
 
   it('never reads CUT as late — a cut LOQ is neutral on-track regardless of slip', () => {

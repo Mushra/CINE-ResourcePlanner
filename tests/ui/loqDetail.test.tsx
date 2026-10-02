@@ -342,4 +342,30 @@ describe('LoqDetail — page', () => {
     expect(stored[0].category).toBe('TECHNICAL_ISSUE');
     expect(stored[0].deltaDays).toBe(5);
   });
+
+  it('A05: reads an unbound LOQ status source as the plan, with no uncertainty', async () => {
+    await seedStore();
+    const { discipline, cinematic } = seedProjectAndCinematic();
+    const loq = makeLoq(cinematic.id, discipline.id, { jiraKey: null });
+    useUiStore.getState().openLoq(loq.id, cinematic.id);
+    renderView(<LoqDetail loqId={loq.id} />);
+
+    const sourceValue = screen.getByText('Status source').nextElementSibling as HTMLElement;
+    expect(sourceValue).toHaveTextContent('Plan (manual status)');
+    // A confirmed source must not carry the "uncertain" styling.
+    expect(sourceValue.className).not.toContain('tbd-text');
+  });
+
+  it('A05: flags a Jira-bound but never-synced LOQ as uncertain in the status source', async () => {
+    await seedStore();
+    const { discipline, cinematic } = seedProjectAndCinematic();
+    // Bound to Jira but no sync has ever landed — the current status is unknown, not implicitly on-track.
+    const loq = makeLoq(cinematic.id, discipline.id, { jiraKey: 'ALPHA-900' });
+    useUiStore.getState().openLoq(loq.id, cinematic.id);
+    renderView(<LoqDetail loqId={loq.id} />);
+
+    const sourceValue = screen.getByText('Status source').nextElementSibling as HTMLElement;
+    expect(sourceValue).toHaveTextContent('Jira-bound · never synced');
+    expect(sourceValue.className).toContain('tbd-text');
+  });
 });

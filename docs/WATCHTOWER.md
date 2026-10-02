@@ -47,21 +47,51 @@ integrated"** card (§4).
 
 ## 3. Derivation rules
 
-### 3.1 `deriveLoqHealth(loq, forecast): WatchtowerHealth`
+### 3.1 `deriveLoqHealth(loq, forecast, status?, ctx?): WatchtowerHealth`
 
-`WatchtowerHealth = 'ahead' | 'on-track' | 'at-risk' | 'blocked' | 'late'`. In order:
+`WatchtowerHealth = 'ahead' | 'on-track' | 'on-hold' | 'unknown' | 'at-risk' | 'late' | 'blocked'`
+(7-value scale). `ctx` is `{ now?, confidence? }`: `now` is an **injectable observation date**
+(`yyyy-mm-dd`, defaults to `localTodayIso()`) so deadline-sensitive outcomes are deterministic in
+tests (A05 req 7); `confidence` is `'confirmed' | 'unknown'` (defaults to `'confirmed'`). `status`
+is the **effective** (Jira-mirrored) status, defaulting to `loq.status`.
 
-1. `loq.paused` → **blocked** (a manual production hold always wins, regardless of schedule).
-2. Else by `forecast.deltaDays` (forecast finish vs. committed finish; same sign convention as
+Evaluated in strict order (first match wins) — the ordering encodes A05's "a pause never masks a
+threat, and the mere absence of a variance is never, on its own, On track":
+
+1. `status === 'BLOCKED'` → **blocked** (an involuntary hard block, worst health).
+2. **Overdue** — not terminal (`DONE`/`CUT`) and the committed finish
+   (`forecast.committedFinish ?? loqEffectiveFinish(loq)`) is strictly before `now` → **late**.
+   Fires even with zero declared variance (A05 req 1, 4) and regardless of pause (A05 req 5).
+3. `loq.paused` → **on-hold** (a *voluntary* hold — ranks below BLOCKED and overdue, so it absorbs
+   only soft forecast slips, never a hard threat).
+4. `status === 'CUT'` → **on-track** (a cut LOQ is neutral; never scored late).
+5. `status === 'DONE'` → by delivered `deltaDays`: `> 0` **late**, `< 0` **ahead**, else **on-track**.
+6. Else by `forecast.deltaDays` (forecast finish vs. committed finish, same sign convention as
    `LoqForecast`):
-   - `deltaDays >= 5` → **late** (matches the existing `loq_at_risk` critical threshold).
+   - `deltaDays >= 5` → **late** (matches the `loq_at_risk` critical threshold).
    - `deltaDays > 0` → **at-risk**.
    - `deltaDays < 0` → **ahead**.
-   - `deltaDays === 0` (or no forecast) → **on-track**.
+7. `confidence === 'unknown'` → **unknown** — an active LOQ with no slip and no breach whose current
+   status we *cannot confirm* (stale, unmapped or missing Jira sync) reads an explicit "Unknown"
+   rather than a bare "On track" (A05 req 3, 4). A real slip or lead (step 6) always outranks this.
+8. Else → **on-track**.
 
 This is one documented, tunable function — the threshold of 5 is intentionally kept in sync with
 `getSanityChecks`'s `loq_at_risk` category so "late" in Watchtower and "critical" in the sanity
 checks agree on the same LOQ.
+
+**Confidence & freshness.** `confidence` comes from `statusConfidenceFrom(buildStatusSourceMap(…))`:
+a LOQ bound to Jira is `'confirmed'` only when its last sync is **fresh** (age ≤
+`JIRA_SYNC_FRESHNESS_DAYS`, default **7**) *and* its Jira status maps to a canonical status; a stale,
+unmapped, or never-synced bound LOQ is `'unknown'`. An unbound (manual) LOQ is always `'confirmed'`.
+Health is a *derived* indicator layered on top of the effective status, never a replacement for the
+Jira status itself (A05 req 6); the LOQ page's "Status source" row surfaces the origin and freshness
+behind an Unknown (A05 req 8).
+
+A05 is cross-checked by the `loq_overdue` sanity check (`validation.ts::checkLoqOverdue`), which
+fires the same deadline-breach condition as step 2 as a critical attention item, with the same
+injectable `now` (`getSanityChecks(engine, jiraConfigs, now)`), so the health strip and the Attention
+panel agree on an overdue LOQ.
 
 ### 3.2 `representativeLoq(loqs, cinematicId, disciplineId): Loq | null`
 
@@ -75,9 +105,12 @@ discipline over a cinematic's life — L1, L2, L3, …). Preference order:
 ### 3.3 `cinematicHealth` / `healthCounts`
 
 A Cinematic's overall health is the **worst** health among its active disciplines' representative
-LOQs, using severity order `blocked > late > at-risk > on-track > ahead` (matches the prototype's
-`HORDER`). `healthCounts()` buckets every (Cinematic × Discipline) cell with a representative LOQ
-by health — this is what the Control Room's health strip tiles count, not a count of Cinematics.
+LOQs, using severity order `blocked > late > at-risk > unknown > on-hold > on-track > ahead`
+(`HEALTH_SEVERITY`). `healthCounts()` buckets every (Cinematic × Discipline) cell with a
+representative LOQ by health — this is what the Control Room's health strip tiles count, not a count
+of Cinematics. The rollup helpers (`cellHealth`/`cinematicHealth`/`worstDiscipline`/`healthCounts`)
+take a trailing `ctx: { confidenceOf?, now? }` so per-LOQ confidence and the observation date reach
+`deriveLoqHealth` uniformly.
 
 ### 3.4 `cinematicStatus(cinematicId, disciplineIds, loqs): CinematicOverallStatus | null`
 

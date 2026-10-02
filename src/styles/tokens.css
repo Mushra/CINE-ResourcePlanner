@@ -44,9 +44,11 @@
   --certainty-estimated: #8a9099;
   --certainty-tbd: #c7ccd3;
 
-  /* Watchtower health (5-value scale — see engine/watchtower.ts WatchtowerHealth). Ahead/on-track
+  /* Watchtower health (7-value scale — see engine/watchtower.ts WatchtowerHealth). Ahead/on-track
    * reuse the healthy/info hues; at-risk/blocked reuse warning/critical; late is a distinct hue
-   * since blocked (paused) and late (slipped but still moving) are different situations. */
+   * since blocked (paused) and late (slipped but still moving) are different situations. `unknown`
+   * (A05, "can't currently confirm") is a muted slate, deliberately distinct from the warm neutral
+   * `on-hold` so uncertainty doesn't read as a deliberate pause. */
   --wt-ahead: var(--status-healthy);
   --wt-ahead-bg: var(--status-healthy-bg);
   --wt-ahead-border: var(--status-healthy-border);
@@ -68,6 +70,9 @@
   --wt-on-hold: var(--status-neutral);
   --wt-on-hold-bg: var(--status-neutral-bg);
   --wt-on-hold-border: var(--status-neutral-border);
+  --wt-unknown: #7a8699;
+  --wt-unknown-bg: #eef0f3;
+  --wt-unknown-border: #d4d9e0;
 
   /* Chrome */
   --shadow-sm: 0 1px 2px rgba(20, 22, 28, 0.06);
@@ -126,6 +131,9 @@
   --wt-late: #b579e8;
   --wt-late-bg: #2c1f3d;
   --wt-late-border: #443056;
+  --wt-unknown: #8d99ad;
+  --wt-unknown-bg: #20242c;
+  --wt-unknown-border: #39404d;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
@@ -177,6 +185,9 @@
     --wt-late: #b579e8;
     --wt-late-bg: #2c1f3d;
     --wt-late-border: #443056;
+    --wt-unknown: #8d99ad;
+    --wt-unknown-bg: #20242c;
+    --wt-unknown-border: #39404d;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);

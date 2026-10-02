@@ -25,6 +25,7 @@ function allCheckCategories(): CheckCategory[] {
     'over_allocated_person',
     'capacity_conflict_cinematic',
     'loq_at_risk',
+    'loq_overdue',
     'loq_root_cause',
     'loq_early_opportunity',
     'loq_dependency_contradiction',
@@ -46,6 +47,7 @@ function allCheckCategories(): CheckCategory[] {
       case 'over_allocated_person':
       case 'capacity_conflict_cinematic':
       case 'loq_at_risk':
+      case 'loq_overdue':
       case 'loq_root_cause':
       case 'loq_early_opportunity':
       case 'loq_dependency_contradiction':

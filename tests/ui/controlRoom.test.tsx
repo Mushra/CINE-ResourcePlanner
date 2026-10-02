@@ -38,19 +38,23 @@ function seedProjectWithPlanningAndStaffingIssues() {
       type,
       status: 'TODO',
       estimateDays: 4,
-      committedStart: '2026-09-01',
-      committedFinish: '2026-09-10',
+      // Committed window is ahead of the scenario's "today" (2026-10-02) but inside the project window
+      // and the Control Room's 4-month delivery-outlook horizon, so this fixture exercises only the
+      // forecast-slip (loq_at_risk) path — not the separate deadline-breach (loq_overdue, A05) path,
+      // which has its own coverage in validation.test.ts.
+      committedStart: '2026-11-01',
+      committedFinish: '2026-11-10',
       actualFinish: null,
       dodRef: '',
     });
     // 7 calendar days late — past the 5-day critical threshold (loq_at_risk).
-    declareVariance(loq.id, { category: 'TECHNICAL_ISSUE', expectedFinish: '2026-09-17', comment: 'slip' });
+    declareVariance(loq.id, { category: 'TECHNICAL_ISSUE', expectedFinish: '2026-11-17', comment: 'slip' });
     return loq;
   });
 
   // FTE/staffing gap — 'Production Planning' source, must surface in Staffing, never in Attention Required.
-  setDisciplineRequirement(project.id, discipline.id, '2026-09', 2);
-  setPersonAssignment(person.id, project.id, '2026-09', 1);
+  setDisciplineRequirement(project.id, discipline.id, '2026-11', 2);
+  setPersonAssignment(person.id, project.id, '2026-11', 1);
 
   return { project, cinA, cinB, loqs };
 }

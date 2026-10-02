@@ -5,24 +5,41 @@
 
 import type { Cinematic, JiraProjectConfig, Loq, LoqStatus } from '../domain/types';
 import { CANONICAL_STATUS_LABEL, resolveJiraStatus, type EffectiveStatus } from '../domain/jiraStatusMap';
+import { localTodayIso } from '../domain/projectStatus';
+import { isoDiffDays } from '../ui/timeline/timelineMath';
+import { loqEffectiveFinish } from './loqRollup';
 import type { LoqForecast } from './loqForecast';
 import type { CheckCategory, SanityCheck } from './validation';
 import type { PlanningEngine } from './planning';
 
-export type WatchtowerHealth = 'ahead' | 'on-track' | 'on-hold' | 'at-risk' | 'late' | 'blocked';
+/** `unknown` (A05) is the explicit "we cannot currently confirm this" state — a Jira-bound LOQ whose
+ * authoritative status we can't trust (never synced, stale, or an unmapped Jira status) and which
+ * shows no other definitive signal (not blocked, not overdue, no slip). It is deliberately NOT
+ * `on-track`: the mere absence of a declared variance must never, on its own, assert On track. */
+export type WatchtowerHealth = 'ahead' | 'on-track' | 'on-hold' | 'unknown' | 'at-risk' | 'late' | 'blocked';
 
 /** Display order (best to worst). `on-hold` (a voluntary, planner-set pause) sits between healthy
- * and at-risk — it's a calm parked state, not an alarm; `blocked` (involuntary) is the true worst. */
-export const HEALTH_ORDER: WatchtowerHealth[] = ['ahead', 'on-track', 'on-hold', 'at-risk', 'late', 'blocked'];
+ * and at-risk — it's a calm parked state, not an alarm; `unknown` sits just past it (uncertainty is
+ * more attention-worthy than a known calm state, but a concrete threat still dominates it); `blocked`
+ * (involuntary) is the true worst. */
+export const HEALTH_ORDER: WatchtowerHealth[] = ['ahead', 'on-track', 'on-hold', 'unknown', 'at-risk', 'late', 'blocked'];
 
-/** Severity ranking for "worst of" rollups — blocked is worst. */
+/** Severity ranking for "worst of" rollups — blocked is worst. `unknown` outranks the calm states
+ * (so a cinematic with one unconfirmable discipline surfaces the uncertainty) but yields to any
+ * concrete threat (at-risk/late/blocked), which is known and actionable. */
 const HEALTH_SEVERITY: Record<WatchtowerHealth, number> = {
-  ahead: 0, 'on-track': 1, 'on-hold': 2, 'at-risk': 3, late: 4, blocked: 5,
+  ahead: 0, 'on-track': 1, 'on-hold': 2, unknown: 3, 'at-risk': 4, late: 5, blocked: 6,
 };
 
 export const HEALTH_LABEL: Record<WatchtowerHealth, string> = {
-  ahead: 'Ahead', 'on-track': 'On track', 'on-hold': 'On hold', 'at-risk': 'At risk', late: 'Late', blocked: 'Blocked',
+  ahead: 'Ahead', 'on-track': 'On track', 'on-hold': 'On hold', unknown: 'Unknown', 'at-risk': 'At risk', late: 'Late', blocked: 'Blocked',
 };
+
+/** How many days a Jira sync stays "fresh" before health treats the mirrored status as stale and the
+ * LOQ as unconfirmable. A department-wide default kept here as the single source of truth; a future
+ * shared global config (see the multi-user config direction) can override it via buildStatusSourceMap's
+ * `freshnessDays` argument without touching this constant. */
+export const JIRA_SYNC_FRESHNESS_DAYS = 7;
 
 export const LOQ_STATUS_LABEL: Record<Loq['status'], string> = CANONICAL_STATUS_LABEL;
 
@@ -45,22 +62,68 @@ export function loqStatusLabel(loq: Loq, status: LoqStatus = loq.status): string
   return loq.paused ? 'On hold' : CANONICAL_STATUS_LABEL[status];
 }
 
+/** Confidence in the status/health signal behind a LOQ (A05). `confirmed` = either an unbound LOQ
+ * (the plan is the authority) or a Jira-bound one whose last sync is fresh and whose status maps.
+ * `unknown` = a Jira-bound LOQ we can't currently confirm (never synced, stale, or an unmapped
+ * status). Health never asserts `on-track` from the mere absence of a variance when confidence is
+ * `unknown` — it reads `unknown` instead. */
+export type StatusConfidence = 'confirmed' | 'unknown';
+export type StatusConfidenceResolver = (loq: Loq) => StatusConfidence;
+const ALWAYS_CONFIRMED: StatusConfidenceResolver = () => 'confirmed';
+
+/** Context for deriving health against a point in time with a confidence signal. `now` is the
+ * injectable observation date (ISO yyyy-mm-dd) — defaults to today, overridden in tests for
+ * determinism. `confidence` grades how much we trust the status/health (see StatusConfidence). */
+export interface HealthContext {
+  now?: string;
+  confidence?: StatusConfidence;
+}
+
+/** Rollup-level context threaded through the cell/cinematic aggregates — a per-LOQ confidence
+ * resolver plus the shared observation date. Both optional: omitting them reproduces the pre-A05
+ * behaviour (every LOQ confirmed, observed today). */
+export interface HealthRollupContext {
+  confidenceOf?: StatusConfidenceResolver;
+  now?: string;
+}
+
 /**
- * Health has no stored field anywhere in the schema — derived from the same signals the
- * loq_at_risk check already uses (LoqForecast.deltaDays, threshold 5 = critical) plus the LOQ's own
- * paused flag and (effective) status. Precedence: a voluntary pause reads as the calm `on-hold`
- * (planner parked it — kept out of slip alarms); an involuntary `BLOCKED` reads as the worst
- * `blocked`. A terminal LOQ can only read ahead/on-track/late (`DONE`) or neutral (`CUT`, which is
- * never "late") — "at risk" describes unresolved risk, moot once the work is finished or cut.
+ * Health has no stored field anywhere in the schema — derived from the forecast slip the loq_at_risk
+ * check uses (LoqForecast.deltaDays, threshold 5 = critical), the committed deadline against an
+ * observation date, the LOQ's own paused flag, its (effective) status, and — for Jira-bound rows —
+ * our confidence in that status (A05).
+ *
+ * Precedence, worst-threat-first so a voluntary pause never masks a real delivery threat (A05):
+ *   1. involuntary `BLOCKED` → `blocked`;
+ *   2. a breached committed deadline (committed finish before `now`, not terminal) → `late` — this is
+ *      a factual, already-missed deadline, so it overrides a pause and a "no variance" calm;
+ *   3. a voluntary pause → the calm `on-hold` (a derived forecast slip, where nobody is working the
+ *      parked LOQ, yields to it; the hard threats above do not);
+ *   4. terminal: `CUT` is neutral `on-track` (never "late"); `DONE` scores on the delivered delta;
+ *   5. an active forecast slip → `late` (≥5) / `at-risk` (>0), an advance → `ahead`;
+ *   6. otherwise the only signal is "no variance declared": `on-track` when confirmed, but `unknown`
+ *      when we can't confirm a Jira-bound LOQ — absence of a variance alone never asserts On track.
  */
 export function deriveLoqHealth(
   loq: Loq,
   forecast: LoqForecast | undefined,
   status: LoqStatus = loq.status,
+  ctx: HealthContext = {},
 ): WatchtowerHealth {
-  if (loq.paused) return 'on-hold';
-  if (status === 'BLOCKED') return 'blocked';
+  const now = ctx.now ?? localTodayIso();
+  const confidence = ctx.confidence ?? 'confirmed';
   const delta = forecast?.deltaDays ?? 0;
+  const terminal = status === 'DONE' || status === 'CUT';
+  const committedFinish = forecast?.committedFinish ?? loqEffectiveFinish(loq);
+  const overdue = !terminal && committedFinish != null && committedFinish < now;
+
+  // Hard delivery threats first — a voluntary pause must never hide them (A05).
+  if (status === 'BLOCKED') return 'blocked';
+  if (overdue) return 'late';
+
+  // Voluntary pause: a calm parked state, shown only once no hard threat applies.
+  if (loq.paused) return 'on-hold';
+
   if (status === 'CUT') return 'on-track';
   if (status === 'DONE') {
     if (delta > 0) return 'late';
@@ -70,7 +133,65 @@ export function deriveLoqHealth(
   if (delta >= 5) return 'late';
   if (delta > 0) return 'at-risk';
   if (delta < 0) return 'ahead';
+  // No slip, not overdue, not blocked, not done, not paused: the only signal is the absence of a
+  // declared variance. For a Jira-bound LOQ we can't currently confirm, that is not proof of being on
+  // track — surface the uncertainty (A05). An unbound LOQ or a fresh, mapped sync reads on-track.
+  if (confidence === 'unknown') return 'unknown';
   return 'on-track';
+}
+
+/** Describes how trustworthy a Jira-bound LOQ's mirrored status currently is (A05), for both the
+ * confidence resolver and the LOQ page's "status source / freshness" readout. Only Jira-bound LOQs
+ * that have synced at least once appear in the source map; a bound LOQ that has never synced is
+ * absent (statusConfidenceFrom reads that absence, via loq.jiraKey, as `unknown`). */
+export interface JiraStatusSource {
+  kind: 'jira-fresh' | 'jira-stale' | 'jira-unmapped';
+  /** Jira's last sync timestamp (ISO), as reported by the sync state. */
+  lastSyncedAt: string;
+  /** Whole days from the last sync to the observation date (≥ 0). */
+  ageDays: number;
+}
+
+/**
+ * Per-LOQ freshness/mapping of the Jira-mirrored status, for every bound LOQ that has synced at least
+ * once. `jira-fresh` = synced within the freshness window and the status maps; `jira-stale` = synced
+ * but older than the window; `jira-unmapped` = synced but the raw status isn't covered by the mapping.
+ * Built on read (derive, never store), mirroring buildEffectiveStatusMap.
+ */
+export function buildStatusSourceMap(
+  engine: PlanningEngine,
+  configs: JiraProjectConfig[],
+  now: string = localTodayIso(),
+  freshnessDays: number = JIRA_SYNC_FRESHNESS_DAYS,
+): Map<string, JiraStatusSource> {
+  const mappingByProject = new Map(configs.map((c) => [c.projectId, c.statusMapping]));
+  const result = new Map<string, JiraStatusSource>();
+  for (const { loq, state } of engine.loqsWithJiraSync()) {
+    if (!loq.jiraKey) continue;
+    const cinematic = engine.cinematic(loq.cinematicId);
+    const mapping = cinematic ? mappingByProject.get(cinematic.projectId) ?? null : null;
+    const ageDays = Math.max(0, isoDiffDays(state.lastSyncedAt.slice(0, 10), now));
+    let kind: JiraStatusSource['kind'];
+    if (resolveJiraStatus(state.jiraStatus, mapping) === null) kind = 'jira-unmapped';
+    else if (ageDays > freshnessDays) kind = 'jira-stale';
+    else kind = 'jira-fresh';
+    result.set(loq.id, { kind, lastSyncedAt: state.lastSyncedAt, ageDays });
+  }
+  return result;
+}
+
+/** Turns a status-source map into a per-LOQ confidence resolver (A05). An unbound LOQ (no jiraKey)
+ * is `confirmed` — the plan is its authority. A bound LOQ is `confirmed` only when its source is
+ * `jira-fresh`; a stale/unmapped source, or a bound LOQ absent from the map (never synced), is
+ * `unknown`. A null map confirms everything (callers that don't cross with Jira). */
+export function statusConfidenceFrom(sources: ReadonlyMap<string, JiraStatusSource> | null | undefined): StatusConfidenceResolver {
+  if (!sources) return ALWAYS_CONFIRMED;
+  return (loq) => {
+    if (!loq.jiraKey) return 'confirmed';
+    const src = sources.get(loq.id);
+    if (!src) return 'unknown'; // bound but never synced
+    return src.kind === 'jira-fresh' ? 'confirmed' : 'unknown';
+  };
 }
 
 /**
@@ -184,10 +305,14 @@ export function cellHealth(
   disciplineId: string,
   forecasts: ReadonlyMap<string, LoqForecast>,
   statusOf: StatusResolver = OWN_STATUS,
+  ctx: HealthRollupContext = {},
 ): WatchtowerHealth | null {
   const rep = representativeLoq(loqs, cinematicId, disciplineId, statusOf);
   if (!rep) return null;
-  const repHealth = deriveLoqHealth(rep, forecasts.get(rep.id), statusOf(rep));
+  const repHealth = deriveLoqHealth(rep, forecasts.get(rep.id), statusOf(rep), {
+    now: ctx.now,
+    confidence: ctx.confidenceOf?.(rep),
+  });
   if (cellBlockedLoqs(loqs, cinematicId, disciplineId, statusOf).length === 0) return repHealth;
   return HEALTH_SEVERITY[repHealth] >= HEALTH_SEVERITY.blocked ? repHealth : 'blocked';
 }
@@ -200,10 +325,11 @@ export function cinematicHealth(
   loqs: Loq[],
   forecasts: ReadonlyMap<string, LoqForecast>,
   statusOf: StatusResolver = OWN_STATUS,
+  ctx: HealthRollupContext = {},
 ): WatchtowerHealth | null {
   let worst: WatchtowerHealth | null = null;
   for (const disciplineId of disciplineIds) {
-    const health = cellHealth(loqs, cinematicId, disciplineId, forecasts, statusOf);
+    const health = cellHealth(loqs, cinematicId, disciplineId, forecasts, statusOf, ctx);
     if (health === null) continue;
     if (worst === null || HEALTH_SEVERITY[health] > HEALTH_SEVERITY[worst]) worst = health;
   }
@@ -250,11 +376,12 @@ export function worstDiscipline(
   loqs: Loq[],
   forecasts: ReadonlyMap<string, LoqForecast>,
   statusOf: StatusResolver = OWN_STATUS,
+  ctx: HealthRollupContext = {},
 ): string | null {
   let worstId: string | null = null;
   let worstHealth: WatchtowerHealth | null = null;
   for (const disciplineId of disciplineIds) {
-    const health = cellHealth(loqs, cinematicId, disciplineId, forecasts, statusOf);
+    const health = cellHealth(loqs, cinematicId, disciplineId, forecasts, statusOf, ctx);
     if (health === null) continue;
     if (worstHealth === null || HEALTH_SEVERITY[health] > HEALTH_SEVERITY[worstHealth]) {
       worstHealth = health;
@@ -273,10 +400,11 @@ export function healthCounts(
   loqs: Loq[],
   forecasts: ReadonlyMap<string, LoqForecast>,
   statusOf: StatusResolver = OWN_STATUS,
+  ctx: HealthRollupContext = {},
 ): Record<WatchtowerHealth, number> {
-  const counts: Record<WatchtowerHealth, number> = { ahead: 0, 'on-track': 0, 'on-hold': 0, 'at-risk': 0, late: 0, blocked: 0 };
+  const counts: Record<WatchtowerHealth, number> = { ahead: 0, 'on-track': 0, 'on-hold': 0, unknown: 0, 'at-risk': 0, late: 0, blocked: 0 };
   for (const cinematic of cinematics) {
-    const health = cinematicHealth(cinematic.id, disciplineIds, loqs, forecasts, statusOf);
+    const health = cinematicHealth(cinematic.id, disciplineIds, loqs, forecasts, statusOf, ctx);
     if (health) counts[health] += 1;
   }
   return counts;
@@ -326,7 +454,7 @@ const PRODUCTION_PLANNING_CATEGORIES = new Set<CheckCategory>([
 export function attentionSource(category: CheckCategory): AttentionSource {
   if (JIRA_CATEGORIES.has(category)) return 'Jira';
   if (PRODUCTION_PLANNING_CATEGORIES.has(category)) return 'Production Planning';
-  return 'Watchtower'; // loq_at_risk / loq_root_cause / loq_early_opportunity / invalid_dates / tbd_dates
+  return 'Watchtower'; // loq_at_risk / loq_overdue / loq_root_cause / loq_early_opportunity / loq_dependency_contradiction / invalid_dates / tbd_dates
 }
 
 /** Every sanity check scoped to a project, re-shaped into the prototype's Attention item — the

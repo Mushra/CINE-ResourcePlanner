@@ -89,6 +89,12 @@ const RULES: RuleDoc[] = [
     description: "A LOQ's forecast has slipped past its committed date and isn't yet Done. Critical past a 5-day slip, warning otherwise.",
   },
   {
+    category: 'loq_overdue',
+    title: 'LOQ overdue',
+    severities: ['critical'],
+    description: "A LOQ's committed finish is already past and it isn't Done per its (Jira-mirrored) status — a breached deadline. Fires even with zero declared variance, and a voluntary pause never suppresses it.",
+  },
+  {
     category: 'loq_root_cause',
     title: 'LOQ root cause',
     severities: ['critical'],
