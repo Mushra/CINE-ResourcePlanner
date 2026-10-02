@@ -16,7 +16,7 @@ import { ConfirmButton } from '../components/ConfirmButton';
 import { RecommitDialog } from '../components/RecommitDialog';
 import { VarianceDialog } from '../components/VarianceDialog';
 import { LoqDependencyEditor } from '../components/LoqDependencyEditor';
-import type { Loq, LoqStatus } from '../../domain/types';
+import type { Loq, LoqDependency, LoqStatus } from '../../domain/types';
 
 const STATUS_OPTIONS: { value: LoqStatus; label: string }[] = CANONICAL_STATUSES.map((value) => ({
   value, label: CANONICAL_STATUS_LABEL[value],
@@ -61,7 +61,7 @@ function draftFromLoq(loq: Loq): Draft {
 
 /**
  * Dedicated page for a single LOQ — recreates the HTML prototype's LOQ view (breadcrumb, status
- * header, "why at risk", downstream-dependency graph, execution facts) plus inline editing that
+ * header, "why at risk", upstream+downstream dependency graph, execution facts) plus inline editing that
  * replaces the old LoqFormDrawer. Reachable from the Cinematics Matrix cell and the Cinematic Detail
  * LOQ table (both call openLoq). Jira-bound status is mirrored read-only; committed dates change only
  * via the attributed RecommitDialog; forecast gaps are declared via VarianceDialog.
@@ -129,13 +129,30 @@ export function LoqDetail({ loqId }: { loqId: string }) {
       .filter((item) => item.check.loqId === loq.id)
     : [];
 
-  // Downstream dependencies — direct successors, flagged AFFECTED when this LOQ is the root cause of
-  // their forecast slip.
+  // Dependencies, both directions: upstream predecessors ("blocked by") and downstream successors.
+  // A successor is flagged AFFECTED when this LOQ is the root cause of its forecast slip. Each edge is
+  // kept alongside its LOQ so the panel can tag Jira-mirrored edges (source==='jira').
+  type DepEdge = { dep: LoqDependency; loq: Loq };
   const impacted = new Set(impactedLoqIds(loq.id, forecasts));
-  const successors = dependencies
+  const predecessors: DepEdge[] = dependencies
+    .filter((d) => d.successorLoqId === loq.id)
+    .map((d) => ({ dep: d, loq: loqs.find((l) => l.id === d.predecessorLoqId) }))
+    .filter((e): e is DepEdge => Boolean(e.loq));
+  const successors: DepEdge[] = dependencies
     .filter((d) => d.predecessorLoqId === loq.id)
-    .map((d) => loqs.find((l) => l.id === d.successorLoqId))
-    .filter((l): l is Loq => Boolean(l));
+    .map((d) => ({ dep: d, loq: loqs.find((l) => l.id === d.successorLoqId) }))
+    .filter((e): e is DepEdge => Boolean(e.loq));
+  const renderDepNode = ({ dep, loq: depLoq }: DepEdge, affected: boolean) => {
+    const h = deriveLoqHealth(depLoq, forecasts.get(depLoq.id), statusOf(depLoq));
+    return (
+      <button key={dep.id} type="button" className="loq-dep-node loq-dep-node-affected" onClick={() => openLoq(depLoq.id, depLoq.cinematicId)}>
+        <div className="loq-dep-name">{disciplineName(depLoq.disciplineId)} {depLoq.type}</div>
+        <div className={`health-text health-text-${h}`}>{HEALTH_LABEL[h]}</div>
+        {dep.source === 'jira' && <div className="loq-dep-tag">Jira</div>}
+        {affected && <div className="loq-dep-tag loq-dep-tag-affected">Affected</div>}
+      </button>
+    );
+  };
 
   const canSave = draft.disciplineId.trim().length > 0 && draft.type.trim().length > 0;
   const dirty = JSON.stringify(draft) !== JSON.stringify(draftFromLoq(loq));
@@ -198,6 +215,14 @@ export function LoqDetail({ loqId }: { loqId: string }) {
           <span className="panel-sub">Direct dependencies and affected LOQs</span>
         </div>
         <div className="loq-dep-graph">
+          {predecessors.length > 0 && (
+            <>
+              <div className="loq-dep-row">
+                {predecessors.map((edge) => renderDepNode(edge, false))}
+              </div>
+              <div className="loq-dep-arrow"><Icon name="arrow-left" size={14} /><span>Blocked by</span></div>
+            </>
+          )}
           <div className="loq-dep-node loq-dep-node-current">
             <div className="loq-dep-name">{loqLabel}</div>
             <div className={`health-text health-text-${health}`}>{HEALTH_LABEL[health]}</div>
@@ -207,20 +232,13 @@ export function LoqDetail({ loqId }: { loqId: string }) {
             <>
               <div className="loq-dep-arrow"><Icon name="arrow-left" size={14} /><span>Downstream</span></div>
               <div className="loq-dep-row">
-                {successors.map((succ) => {
-                  const succHealth = deriveLoqHealth(succ, forecasts.get(succ.id), statusOf(succ));
-                  return (
-                    <button key={succ.id} type="button" className="loq-dep-node loq-dep-node-affected" onClick={() => openLoq(succ.id, succ.cinematicId)}>
-                      <div className="loq-dep-name">{disciplineName(succ.disciplineId)} {succ.type}</div>
-                      <div className={`health-text health-text-${succHealth}`}>{HEALTH_LABEL[succHealth]}</div>
-                      {impacted.has(succ.id) && <div className="loq-dep-tag loq-dep-tag-affected">Affected</div>}
-                    </button>
-                  );
-                })}
+                {successors.map((edge) => renderDepNode(edge, impacted.has(edge.loq.id)))}
               </div>
             </>
           )}
-          {successors.length === 0 && <p className="empty-inline">No downstream LOQs depend on this one.</p>}
+          {predecessors.length === 0 && successors.length === 0 && (
+            <p className="empty-inline">No upstream or downstream LOQs depend on this one.</p>
+          )}
         </div>
       </div>
 

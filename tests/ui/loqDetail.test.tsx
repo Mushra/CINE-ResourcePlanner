@@ -113,6 +113,24 @@ describe('LoqDetail — page', () => {
     expect(screen.getByText(/— \/ 4 days \(consumed\/estimated\)/)).toBeInTheDocument();
   });
 
+  it('shows an upstream predecessor as a "Blocked by" dependency', async () => {
+    await seedStore();
+    const { discipline, cinematic } = seedProjectAndCinematic();
+    const upstream = makeLoq(cinematic.id, discipline.id, { type: 'L1' });
+    const current = makeLoq(cinematic.id, discipline.id, { type: 'L2' });
+    useStore.getState().createLoqDependency({
+      predecessorLoqId: upstream.id, successorLoqId: current.id, type: 'finish_to_start', lagDays: 0, source: 'jira', templateId: null,
+    });
+    useUiStore.getState().openLoq(current.id, cinematic.id);
+    renderView(<LoqDetail loqId={current.id} />);
+
+    const depPanel = screen.getByText('Direct dependencies and affected LOQs').closest('.panel') as HTMLElement;
+    expect(within(depPanel).getByText('Blocked by')).toBeInTheDocument();
+    expect(within(depPanel).getByText('Animation L1')).toBeInTheDocument();
+    // Jira-mirrored edges carry a source tag so they read as read-only.
+    expect(within(depPanel).getByText('Jira')).toBeInTheDocument();
+  });
+
   it('edits status + estimate inline and Save persists via updateLoq', async () => {
     await seedStore();
     const { discipline, cinematic } = seedProjectAndCinematic();
