@@ -100,6 +100,7 @@ export class PlanningEngine {
   private readonly cinematicJiraSyncStatesByCinematicId: Map<string, CinematicJiraSyncState>;
   private readonly loqsByCinematicId: Map<string, Loq[]>;
   private readonly dependenciesByPredecessor: Map<string, LoqDependency[]>;
+  private readonly dependenciesBySuccessor: Map<string, LoqDependency[]>;
   private loqForecastsCache: Map<string, LoqForecast> | null = null;
   private loqForecastsByCinematicCache: Map<string, Map<string, LoqForecast>> | null = null;
 
@@ -177,10 +178,15 @@ export class PlanningEngine {
     }
 
     this.dependenciesByPredecessor = new Map();
+    this.dependenciesBySuccessor = new Map();
     for (const dep of data.loqDependencies) {
-      const list = this.dependenciesByPredecessor.get(dep.predecessorLoqId) ?? [];
-      list.push(dep);
-      this.dependenciesByPredecessor.set(dep.predecessorLoqId, list);
+      const predList = this.dependenciesByPredecessor.get(dep.predecessorLoqId) ?? [];
+      predList.push(dep);
+      this.dependenciesByPredecessor.set(dep.predecessorLoqId, predList);
+
+      const succList = this.dependenciesBySuccessor.get(dep.successorLoqId) ?? [];
+      succList.push(dep);
+      this.dependenciesBySuccessor.set(dep.successorLoqId, succList);
     }
   }
 
@@ -496,6 +502,12 @@ export class PlanningEngine {
    * loq_early_opportunity to gate on "has a downstream dependent that could be pulled earlier". */
   loqHasDownstreamDependency(loqId: string): boolean {
     return (this.dependenciesByPredecessor.get(loqId)?.length ?? 0) > 0;
+  }
+
+  /** The dependency edges where this LOQ is the successor — its direct prerequisites. Used by the
+   * A04 dependency-contradiction check to compare a declared completion against upstream forecasts. */
+  loqPredecessors(loqId: string): LoqDependency[] {
+    return this.dependenciesBySuccessor.get(loqId) ?? [];
   }
 
   /** Every LOQ that has been linked and synced with Jira at least once, paired with its latest

@@ -101,6 +101,12 @@ const RULES: RuleDoc[] = [
     description: 'A LOQ is forecast (or actually finished) ahead of its committed date and has a downstream dependent that could be pulled earlier — a flag only, never applied automatically.',
   },
   {
+    category: 'loq_dependency_contradiction',
+    title: 'Dependency contradiction',
+    severities: ['critical'],
+    description: 'A LOQ is declared finished (an explicit actual finish, or an effective Done status) before one of its prerequisites is forecast to finish — a logical impossibility. Flagged, never auto-corrected: the declared reality stays visible for a human to reconcile the declaration or the dependency.',
+  },
+  {
     category: 'invalid_estimate',
     title: 'Invalid estimate',
     severities: ['warning'],

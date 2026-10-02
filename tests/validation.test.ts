@@ -582,6 +582,41 @@ describe('getSanityChecks — LOQ forecast (at risk, root cause, early opportuni
 
     expect(getSanityChecks(engine).filter((c) => c.category === 'loq_early_opportunity')).toHaveLength(0);
   });
+
+  it('flags loq_dependency_contradiction when a LOQ is declared done before its prerequisite can finish', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id, name: 'Seq01' });
+    // Prerequisite is forecast to finish Oct 30, but the successor has been declared finished Oct 12.
+    const pred = loq({ cinematicId: cine.id, disciplineId: animation.id, type: 'L1', committedStart: '2026-10-20', committedFinish: '2026-10-30' });
+    const succ = loq({ cinematicId: cine.id, disciplineId: animation.id, type: 'L2', committedStart: '2026-10-01', committedFinish: '2026-10-12', actualFinish: '2026-10-12', status: 'DONE' });
+    const dep = loqDependency({ predecessorLoqId: pred.id, successorLoqId: succ.id });
+
+    const engine = new PlanningEngine(
+      planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [pred, succ], loqDependencies: [dep] }),
+    );
+
+    const checks = getSanityChecks(engine).filter((c) => c.category === 'loq_dependency_contradiction');
+    expect(checks).toHaveLength(1);
+    expect(checks[0].severity).toBe('critical');
+    expect(checks[0].loqId).toBe(succ.id);
+    expect(checks[0].impact).toContain('2026-10-30');
+  });
+
+  it('does not flag a contradiction when the prerequisite actually finished before the declaration', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id, name: 'Seq01' });
+    const pred = loq({ cinematicId: cine.id, disciplineId: animation.id, type: 'L1', committedStart: '2026-10-01', committedFinish: '2026-10-10', actualFinish: '2026-10-11', status: 'DONE' });
+    const succ = loq({ cinematicId: cine.id, disciplineId: animation.id, type: 'L2', committedStart: '2026-10-12', committedFinish: '2026-10-20', actualFinish: '2026-10-15', status: 'DONE' });
+    const dep = loqDependency({ predecessorLoqId: pred.id, successorLoqId: succ.id });
+
+    const engine = new PlanningEngine(
+      planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [pred, succ], loqDependencies: [dep] }),
+    );
+
+    expect(getSanityChecks(engine).filter((c) => c.category === 'loq_dependency_contradiction')).toHaveLength(0);
+  });
 });
 
 describe('getSanityChecks — jira_inconsistency', () => {

@@ -196,6 +196,26 @@ describe('LoqDetail — page', () => {
     expect(events[0].reason).toBe('Initial commitment');
   });
 
+  it('shows an upstream advance as a non-committed "Potential earliest" possibility, not a pulled-in commitment (A04)', async () => {
+    await seedStore();
+    const { discipline, cinematic } = seedProjectAndCinematic();
+    const upstream = makeLoq(cinematic.id, discipline.id, { type: 'L1', committedStart: '2026-09-01', committedFinish: '2026-09-10' });
+    const current = makeLoq(cinematic.id, discipline.id, { type: 'L2', committedStart: '2026-09-11', committedFinish: '2026-09-20' });
+    useStore.getState().createLoqDependency({
+      predecessorLoqId: upstream.id, successorLoqId: current.id, type: 'finish_to_start', lagDays: 0, source: 'jira', templateId: null,
+    });
+    // Upstream now forecast to finish 3 days early — an opportunity, never an automatic advance.
+    useStore.getState().declareVariance(upstream.id, { category: 'TECHNICAL_ISSUE', expectedFinish: '2026-09-07', comment: 'ahead' });
+
+    useUiStore.getState().openLoq(current.id, cinematic.id);
+    renderView(<LoqDetail loqId={current.id} />);
+
+    // The committed target is unchanged — the forecast was NOT pulled in.
+    expect(screen.getByText('2026-09-20')).toBeInTheDocument();
+    // The possibility is surfaced, clearly framed as needing a decision.
+    expect(screen.getByText(/could finish by 2026-09-16 \(4d earlier\).*possibility, needs a decision/)).toBeInTheDocument();
+  });
+
   it('hides the "Why is this LOQ at risk?" panel when the LOQ has no attention items', async () => {
     await seedStore();
     const { discipline, cinematic } = seedProjectAndCinematic();

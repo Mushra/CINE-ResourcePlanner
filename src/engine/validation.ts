@@ -27,6 +27,7 @@ export type CheckCategory =
   | 'loq_at_risk'
   | 'loq_root_cause'
   | 'loq_early_opportunity'
+  | 'loq_dependency_contradiction'
   | 'invalid_estimate'
   | 'jira_inconsistency';
 
@@ -86,6 +87,7 @@ export function getSanityChecks(engine: PlanningEngine, jiraConfigs: JiraProject
   checks.push(...checkLoqAtRisk(engine, statusResolver));
   checks.push(...checkLoqRootCause(engine));
   checks.push(...checkLoqEarlyOpportunity(engine));
+  checks.push(...checkLoqDependencyContradiction(engine, statusResolver));
   checks.push(...checkInvalidEstimate(engine, statusResolver));
   checks.push(...checkJiraInconsistency(engine, toleranceDaysByProjectId, statusMappingByProjectId));
   checks.push(...checkCinematicEpicDivergence(engine, statusMappingByProjectId, statusResolver));
@@ -381,6 +383,44 @@ function checkLoqEarlyOpportunity(engine: PlanningEngine): SanityCheck[] {
       message: `${loqLabel(engine, loqId)} could finish ${-forecast.deltaDays}d early`,
       impact: `Forecast finish ${forecast.forecastFinish ?? '—'} vs. committed ${forecast.committedFinish ?? '—'} — a downstream LOQ could be pulled earlier if re-committed`,
     });
+  }
+  return checks;
+}
+
+/** loq_dependency_contradiction (A04): a LOQ a human has declared finished (an explicit actualFinish,
+ * or an effective status of DONE) while one of its prerequisites is still forecast to finish LATER —
+ * a logical impossibility. We never auto-correct it (no commitment or status is rewritten): the
+ * declared reality stays visible, flagged, for a human to reconcile the declaration or the dependency.
+ * A prerequisite that genuinely finished on/before the declared date is consistent and never flagged. */
+function checkLoqDependencyContradiction(engine: PlanningEngine, statusOf: StatusResolver): SanityCheck[] {
+  const checks: SanityCheck[] = [];
+  const forecasts = engine.getLoqForecasts();
+  for (const [loqId, forecast] of forecasts) {
+    const loq = engine.loq(loqId);
+    if (!loq) continue;
+    // The successor's declared completion date: an explicit actual finish, else — only when the LOQ
+    // is effectively DONE — its committed finish. A LOQ not declared finished can't contradict a date.
+    const declaredFinish = loq.actualFinish ?? (statusOf(loq) === 'DONE' ? forecast.committedFinish : null);
+    if (!declaredFinish) continue;
+    for (const dep of engine.loqPredecessors(loqId)) {
+      const predForecast = forecasts.get(dep.predecessorLoqId);
+      if (!predForecast?.forecastFinish) continue;
+      // Only a prerequisite still forecast to land strictly AFTER the declared finish is a contradiction.
+      if (daysBetween(declaredFinish, predForecast.forecastFinish) <= 0) continue;
+      const project = engine.loqProject(loqId);
+      checks.push({
+        id: `loq-dependency-contradiction:${loqId}:${dep.predecessorLoqId}`,
+        severity: 'critical',
+        category: 'loq_dependency_contradiction',
+        projectId: project?.id,
+        projectName: project?.name,
+        disciplineId: loq.disciplineId,
+        disciplineName: engine.discipline(loq.disciplineId)?.name,
+        loqId,
+        message: `${loqLabel(engine, loqId)} is declared finished before its prerequisite ${loqLabel(engine, dep.predecessorLoqId)} can finish`,
+        impact: `Declared finish ${declaredFinish} is before the prerequisite's forecast finish ${predForecast.forecastFinish} — reconcile the declaration or the dependency`,
+      });
+    }
   }
   return checks;
 }

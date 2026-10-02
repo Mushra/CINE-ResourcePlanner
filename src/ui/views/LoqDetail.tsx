@@ -135,7 +135,8 @@ function LoqDetailPage({ loqId }: { loqId: string }) {
   const statusOf = statusResolverFrom(effectiveStatusMap);
   const effectiveStatus = effectiveStatusMap.get(loq.id) ?? null;
   const statusCell = loqStatusCell(loq, effectiveStatus ?? undefined);
-  const health = deriveLoqHealth(loq, forecasts.get(loq.id), statusOf(loq));
+  const forecast = forecasts.get(loq.id);
+  const health = deriveLoqHealth(loq, forecast, statusOf(loq));
   const jiraConfig = project ? jiraConfigs.find((c) => c.projectId === project.id) ?? null : null;
 
   // "Why at risk" — every sanity check that names this LOQ, with its source label (keep all sources,
@@ -264,6 +265,22 @@ function LoqDetailPage({ loqId }: { loqId: string }) {
           <div className="kv-row"><span className="k">Status</span><span className="v">{statusCell.label}</span></div>
           <div className="kv-row"><span className="k">Health</span><span className={`v health-text health-text-${health}`}>{HEALTH_LABEL[health]}</span></div>
           <div className="kv-row"><span className="k">Target</span><span className="v">{loq.committedFinish ?? cinematic?.targetDate ?? '—'}</span></div>
+          {forecast && forecast.deltaDays > 0 && forecast.forecastFinish && (
+            <div className="kv-row">
+              <span className="k">Forecast</span>
+              <span className="v health-text health-text-at-risk">
+                {forecast.forecastFinish} ({forecast.deltaDays}d late{forecast.source === 'propagated' ? ', from upstream' : ''})
+              </span>
+            </div>
+          )}
+          {forecast && forecast.opportunityDays > 0 && forecast.opportunityFinish && (
+            <div className="kv-row">
+              <span className="k">Potential earliest</span>
+              <span className="v tbd-text" title="A possibility if the upstream advance holds and resources allow — not committed, not applied automatically.">
+                could finish by {forecast.opportunityFinish} ({forecast.opportunityDays}d earlier) — possibility, needs a decision
+              </span>
+            </div>
+          )}
           <div className="kv-row"><span className="k">Effort</span><span className="v">— / {loq.estimateDays ?? '—'} days (consumed/estimated)</span></div>
           <div className="kv-row"><span className="k">Versions</span><span className="v tbd-text">—</span></div>
           <div className="kv-row">
