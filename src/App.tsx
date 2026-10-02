@@ -58,7 +58,7 @@ function App() {
         {view === 'settings' && <SettingsView />}
         {view === 'person-detail' && selectedPersonId && <PersonDetail personId={selectedPersonId} />}
         {view === 'cinematic-detail' && selectedCinematicId && <CinematicDetail cinematicId={selectedCinematicId} />}
-        {view === 'loq-detail' && selectedLoqId && <LoqDetail loqId={selectedLoqId} />}
+        {view === 'loq-detail' && selectedLoqId && <LoqDetail key={selectedLoqId} loqId={selectedLoqId} />}
       </AppShell>
       <Toaster />
     </>

@@ -65,8 +65,19 @@ function draftFromLoq(loq: Loq): Draft {
  * replaces the old LoqFormDrawer. Reachable from the Cinematics Matrix cell and the Cinematic Detail
  * LOQ table (both call openLoq). Jira-bound status is mirrored read-only; committed dates change only
  * via the attributed RecommitDialog; forecast gaps are declared via VarianceDialog.
+ *
+ * The exported component is a thin wrapper that keys the real page on loqId: navigating straight from
+ * one LOQ to another (e.g. clicking a dependency node, which only swaps the loqId prop without
+ * unmounting) must give the next LOQ a brand-new draft and fresh dialog state. Without the key, the
+ * stale draft of the previously-viewed LOQ would survive, flip the form "dirty", and let Save overwrite
+ * the new LOQ with the old one's values. Keying here makes the page self-safe no matter how it's
+ * reached — it does not rely on App also supplying a key.
  */
 export function LoqDetail({ loqId }: { loqId: string }) {
+  return <LoqDetailPage key={loqId} loqId={loqId} />;
+}
+
+function LoqDetailPage({ loqId }: { loqId: string }) {
   const loq = useStore((s) => s.data.loqs.find((l) => l.id === loqId));
   const cinematic = useStore((s) => s.data.cinematics.find((c) => c.id === loq?.cinematicId));
   const project = useStore((s) => s.data.projects.find((p) => p.id === cinematic?.projectId));

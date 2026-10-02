@@ -180,6 +180,102 @@ describe('LoqDetail — page', () => {
     expect(screen.queryByRole('heading', { name: 'Why is this LOQ at risk?' })).not.toBeInTheDocument();
   });
 
+  it('navigating directly from one LOQ to another swaps every field — no draft bleeds across', async () => {
+    await seedStore();
+    const { discipline, cinematic } = seedProjectAndCinematic();
+    const l1 = makeLoq(cinematic.id, discipline.id, {
+      type: 'L1', status: 'DONE', estimateDays: 5, jiraKey: 'ALPHA-101', dodRef: 'dod-one',
+    });
+    const l2 = makeLoq(cinematic.id, discipline.id, {
+      type: 'L2', status: 'IN_PROGRESS', estimateDays: 8, jiraKey: 'ALPHA-102', dodRef: 'dod-two',
+    });
+    useUiStore.getState().openLoq(l1.id, cinematic.id);
+    const { rerender } = renderView(<LoqDetail loqId={l1.id} />);
+
+    expect((screen.getByLabelText('Type') as HTMLInputElement).value).toBe('L1');
+    expect((screen.getByLabelText('Status') as HTMLSelectElement).value).toBe('DONE');
+    expect((screen.getByLabelText('Estimate (days)') as HTMLInputElement).value).toBe('5');
+    expect((screen.getByLabelText('Jira key') as HTMLInputElement).value).toBe('ALPHA-101');
+    expect((screen.getByLabelText('Definition of done') as HTMLTextAreaElement).value).toBe('dod-one');
+
+    // Same mounted element, new loqId — exactly what clicking a dependency node does.
+    useUiStore.getState().openLoq(l2.id, cinematic.id);
+    rerender(<LoqDetail loqId={l2.id} />);
+
+    expect((screen.getByLabelText('Type') as HTMLInputElement).value).toBe('L2');
+    expect((screen.getByLabelText('Status') as HTMLSelectElement).value).toBe('IN_PROGRESS');
+    expect((screen.getByLabelText('Estimate (days)') as HTMLInputElement).value).toBe('8');
+    expect((screen.getByLabelText('Jira key') as HTMLInputElement).value).toBe('ALPHA-102');
+    expect((screen.getByLabelText('Definition of done') as HTMLTextAreaElement).value).toBe('dod-two');
+
+    // And back again — the draft tracks whichever LOQ is shown.
+    useUiStore.getState().openLoq(l1.id, cinematic.id);
+    rerender(<LoqDetail loqId={l1.id} />);
+    expect((screen.getByLabelText('Type') as HTMLInputElement).value).toBe('L1');
+    expect((screen.getByLabelText('Jira key') as HTMLInputElement).value).toBe('ALPHA-101');
+  });
+
+  it('Save stays disabled after navigating to another LOQ without editing it', async () => {
+    await seedStore();
+    const { discipline, cinematic } = seedProjectAndCinematic();
+    const l1 = makeLoq(cinematic.id, discipline.id, { type: 'L1', estimateDays: 5 });
+    const l2 = makeLoq(cinematic.id, discipline.id, { type: 'L2', estimateDays: 8 });
+    useUiStore.getState().openLoq(l1.id, cinematic.id);
+    const { rerender } = renderView(<LoqDetail loqId={l1.id} />);
+
+    rerender(<LoqDetail loqId={l2.id} />);
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+  });
+
+  it('an unsaved edit on one LOQ never transfers to — or is saved onto — the next', async () => {
+    await seedStore();
+    const { discipline, cinematic } = seedProjectAndCinematic();
+    const l1 = makeLoq(cinematic.id, discipline.id, { type: 'L1', estimateDays: 5 });
+    const l2 = makeLoq(cinematic.id, discipline.id, { type: 'L2', estimateDays: 8 });
+    useUiStore.getState().openLoq(l1.id, cinematic.id);
+    const { user, rerender } = renderView(<LoqDetail loqId={l1.id} />);
+
+    // Dirty L1's draft but do NOT save it.
+    const estimate = screen.getByLabelText('Estimate (days)');
+    await user.clear(estimate);
+    await user.type(estimate, '99');
+
+    // Navigate to L2, change nothing, and save.
+    rerender(<LoqDetail loqId={l2.id} />);
+    expect((screen.getByLabelText('Estimate (days)') as HTMLInputElement).value).toBe('8');
+    const save = screen.getByRole('button', { name: 'Save changes' });
+    expect(save).toBeDisabled();
+
+    // L2 keeps its own value; L1's abandoned 99 never reached the store.
+    expect(useStore.getState().data.loqs.find((l) => l.id === l2.id)!.estimateDays).toBe(8);
+    expect(useStore.getState().data.loqs.find((l) => l.id === l1.id)!.estimateDays).toBe(5);
+  });
+
+  it('editing and saving L2 does not touch any field of L1', async () => {
+    await seedStore();
+    const { discipline, cinematic } = seedProjectAndCinematic();
+    const l1 = makeLoq(cinematic.id, discipline.id, { type: 'L1', status: 'TODO', estimateDays: 5, jiraKey: 'ALPHA-101' });
+    const l2 = makeLoq(cinematic.id, discipline.id, { type: 'L2', status: 'TODO', estimateDays: 8, jiraKey: 'ALPHA-102' });
+    useUiStore.getState().openLoq(l2.id, cinematic.id);
+    const { user, rerender } = renderView(<LoqDetail loqId={l2.id} />);
+
+    await user.selectOptions(screen.getByLabelText('Status'), 'IN_PROGRESS');
+    const estimate = screen.getByLabelText('Estimate (days)');
+    await user.clear(estimate);
+    await user.type(estimate, '12');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    const storedL1 = useStore.getState().data.loqs.find((l) => l.id === l1.id)!;
+    expect(storedL1).toMatchObject({ type: 'L1', status: 'TODO', estimateDays: 5, jiraKey: 'ALPHA-101' });
+    const storedL2 = useStore.getState().data.loqs.find((l) => l.id === l2.id)!;
+    expect(storedL2).toMatchObject({ status: 'IN_PROGRESS', estimateDays: 12 });
+
+    // Returning to L1 shows its untouched values.
+    rerender(<LoqDetail loqId={l1.id} />);
+    expect((screen.getByLabelText('Estimate (days)') as HTMLInputElement).value).toBe('5');
+    expect((screen.getByLabelText('Status') as HTMLSelectElement).value).toBe('TODO');
+  });
+
   it('declares a variance on the LOQ through the dedicated dialog', async () => {
     await seedStore();
     const { discipline, cinematic } = seedProjectAndCinematic();
