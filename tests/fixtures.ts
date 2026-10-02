@@ -189,6 +189,7 @@ export function loqResource(overrides: Partial<LoqResource> = {}): LoqResource {
     startDate: null,
     finishDate: null,
     fte: 1,
+    source: 'manual',
     ...overrides,
   };
 }

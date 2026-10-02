@@ -146,11 +146,12 @@ export function loadPlanningData(db: PlannerDatabase): PlanningData {
     }));
 
   const loqResources = db
-    .query<{ id: string; loq_id: string; person_id: string; start_date: string | null; finish_date: string | null; fte: number }>(
+    .query<{ id: string; loq_id: string; person_id: string; start_date: string | null; finish_date: string | null; fte: number; source: string | null }>(
       'SELECT * FROM loq_resources',
     )
     .map((r): LoqResource => ({
       id: r.id, loqId: r.loq_id, personId: r.person_id, startDate: r.start_date, finishDate: r.finish_date, fte: r.fte,
+      source: (r.source as LoqResource['source']) ?? 'manual',
     }));
 
   const loqDependencies = db
@@ -702,19 +703,22 @@ export function listLoqCommitmentEvents(db: PlannerDatabase, loqId: string): Loq
 // than an upsert keyed on the pair.
 // ---------------------------------------------------------------------------
 
-export function createLoqResource(db: PlannerDatabase, input: Omit<LoqResource, 'id'>): LoqResource {
+// `source` defaults to 'manual' so every existing caller (manual UI, seed, tests) stays unchanged;
+// only the .mpp import passes 'mpp' to mark the rows its reconciliation pass owns.
+export function createLoqResource(db: PlannerDatabase, input: Omit<LoqResource, 'id' | 'source'> & { source?: LoqResource['source'] }): LoqResource {
   const id = newId('lres');
+  const source = input.source ?? 'manual';
   db.exec(
-    'INSERT INTO loq_resources (id, loq_id, person_id, start_date, finish_date, fte) VALUES (?, ?, ?, ?, ?, ?)',
-    [id, input.loqId, input.personId, input.startDate, input.finishDate, input.fte],
+    'INSERT INTO loq_resources (id, loq_id, person_id, start_date, finish_date, fte, source) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [id, input.loqId, input.personId, input.startDate, input.finishDate, input.fte, source],
   );
-  return { ...input, id };
+  return { ...input, id, source };
 }
 
 export function updateLoqResource(db: PlannerDatabase, resource: LoqResource): void {
   db.exec(
-    'UPDATE loq_resources SET loq_id=?, person_id=?, start_date=?, finish_date=?, fte=? WHERE id=?',
-    [resource.loqId, resource.personId, resource.startDate, resource.finishDate, resource.fte, resource.id],
+    'UPDATE loq_resources SET loq_id=?, person_id=?, start_date=?, finish_date=?, fte=?, source=? WHERE id=?',
+    [resource.loqId, resource.personId, resource.startDate, resource.finishDate, resource.fte, resource.source, resource.id],
   );
 }
 

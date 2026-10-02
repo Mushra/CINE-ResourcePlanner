@@ -170,7 +170,8 @@ CREATE TABLE IF NOT EXISTS loq_resources (
   person_id    TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
   start_date   TEXT,                        -- ISO date; null = not yet scheduled
   finish_date  TEXT,                         -- ISO date; null = not yet scheduled
-  fte          REAL NOT NULL DEFAULT 1.0    -- share of this person's time during this window
+  fte          REAL NOT NULL DEFAULT 1.0,   -- share of this person's time during this window
+  source       TEXT NOT NULL DEFAULT 'manual' -- 'manual' | 'mpp'; only 'mpp' rows a .mpp re-import may update/remove (see v13->v14)
 );
 
 CREATE TABLE IF NOT EXISTS loq_dependencies (

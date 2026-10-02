@@ -158,7 +158,11 @@ function MppImportReportView({ fileName, report, onClose }: { fileName: string |
         <li>{report.disciplinesCreated} discipline{report.disciplinesCreated === 1 ? '' : 's'} created</li>
         <li>{report.loqsCreated} LOQ{report.loqsCreated === 1 ? '' : 's'} created, {report.loqsUpdated} updated</li>
         <li>{report.peopleCreated} people created, {report.peopleMatched} matched to existing people</li>
-        <li>{report.resourcesLinked} resource assignment{report.resourcesLinked === 1 ? '' : 's'} linked</li>
+        <li>
+          {report.resourcesLinked} resource assignment{report.resourcesLinked === 1 ? '' : 's'} linked
+          {report.resourcesUpdated > 0 ? `, ${report.resourcesUpdated} updated` : ''}
+          {report.resourcesRemoved > 0 ? `, ${report.resourcesRemoved} removed` : ''}
+        </li>
         <li>{report.dependenciesCreated} dependenc{report.dependenciesCreated === 1 ? 'y' : 'ies'} created</li>
       </ul>
       {report.loqsSkippedOtherProject > 0 && (

@@ -17,9 +17,12 @@ import {
   createLoqResource,
   createPerson,
   createPool,
+  deleteLoqResource,
   loadPlanningData,
   updateLoq,
+  updateLoqResource,
 } from './repository';
+import type { LoqResource } from '../domain/types';
 import type { NormalizedMppImport } from '../import/mppImport';
 
 export type MppDisciplineResolution = { kind: 'existing'; id: string } | { kind: 'new'; name: string; color: string };
@@ -33,7 +36,12 @@ export interface MppApplyReport {
   loqsSkippedOtherProject: number;
   peopleCreated: number;
   peopleMatched: number;
+  /** Import-owned assignment rows newly inserted this run. */
   resourcesLinked: number;
+  /** Import-owned assignment rows reconciled in place (rate or window changed) rather than duplicated. */
+  resourcesUpdated: number;
+  /** Import-owned assignment rows deleted because the source no longer lists them. */
+  resourcesRemoved: number;
   dependenciesCreated: number;
   dependenciesSkippedCycle: number;
   warnings: string[];
@@ -60,6 +68,8 @@ export function applyMppImport(
     peopleCreated: 0,
     peopleMatched: 0,
     resourcesLinked: 0,
+    resourcesUpdated: 0,
+    resourcesRemoved: 0,
     dependenciesCreated: 0,
     dependenciesSkippedCycle: 0,
     warnings,
@@ -245,15 +255,96 @@ export function applyMppImport(
     }
   }
 
-  // --- Resource assignments: only for LOQs that actually resolved into this project. ---
+  // --- Resource assignments: reconciled, not blindly re-inserted, so re-importing the same plan is
+  // idempotent (the A03 bug: every re-import duplicated every assignment, doubling the load). The
+  // MS Project JSON carries no stable per-assignment id, so the reconciliation key is the natural
+  // one — (LOQ, person) within this import's own 'mpp'-sourced rows:
+  //   * a window present in both source and DB (same person+dates) is kept, its fte refreshed if the
+  //     rate changed;
+  //   * a single (LOQ, person) whose window moved is updated in place (rate/date reconciled), not
+  //     duplicated;
+  //   * a (LOQ, person) the source no longer lists is removed (explicit source removal);
+  //   * a genuinely ambiguous multi-window case (several source windows AND several DB windows for
+  //     one person that don't line up by date) is never silently deleted — the new windows are added
+  //     and a warning flags it for review.
+  // Manual rows (source !== 'mpp') and rows on LOQs this import didn't touch are left strictly alone,
+  // as are historical duplicates of uncertain origin (all migrated to 'manual' in v13->v14). ---
+  const touchedLoqIds = new Set(loqIdByJiraKey.values());
+  const existingMppByLoqPerson = new Map<string, LoqResource[]>();
+  const pairKey = (loqId: string, personId: string) => `${loqId}\u0000${personId}`;
+  for (const r of data.loqResources) {
+    if (r.source !== 'mpp' || !touchedLoqIds.has(r.loqId)) continue;
+    const key = pairKey(r.loqId, r.personId);
+    const list = existingMppByLoqPerson.get(key) ?? [];
+    list.push(r);
+    existingMppByLoqPerson.set(key, list);
+  }
+
+  // Resolve every incoming assignment (keeping resolvePersonId's match/create side effects) and
+  // group by (LOQ, person); any (LOQ, person) absent from this map but present in the DB is a removal.
+  interface IncomingAssignment { jiraKey: string; personName: string; start: string | null; finish: string | null; fte: number }
+  const incomingByLoqPerson = new Map<string, IncomingAssignment[]>();
+  const incomingPairKeys = new Set<string>();
   for (const res of normalized.resources) {
     const loqId = loqIdByJiraKey.get(res.jiraKey);
     if (!loqId) continue; // the LOQ was skipped (other project) or its discipline was unmapped
     const groupHint = res.personGroup ? disciplineIdByCode.get(res.personGroup) ?? null : null;
     const loqDisciplineHint = disciplineIdByCode.get(disciplineCodeByJiraKey.get(res.jiraKey) ?? '') ?? null;
     const personId = resolvePersonId(res.personName, groupHint ?? loqDisciplineHint);
-    createLoqResource(db, { loqId, personId, startDate: res.start, finishDate: res.finish, fte: res.fte });
-    report.resourcesLinked++;
+    const key = pairKey(loqId, personId);
+    incomingPairKeys.add(key);
+    const list = incomingByLoqPerson.get(key) ?? [];
+    list.push({ jiraKey: res.jiraKey, personName: res.personName, start: res.start, finish: res.finish, fte: res.fte });
+    incomingByLoqPerson.set(key, list);
+  }
+
+  const sameWindow = (r: LoqResource, inc: IncomingAssignment) => r.startDate === inc.start && r.finishDate === inc.finish;
+
+  for (const [key, incoming] of incomingByLoqPerson) {
+    const [loqId, personId] = key.split('\u0000');
+    const existing = existingMppByLoqPerson.get(key) ?? [];
+    const consumed = new Set<string>();
+    const leftIncoming: IncomingAssignment[] = [];
+
+    // Exact pass: a source window that still matches a DB window by date is kept; refresh fte only.
+    for (const inc of incoming) {
+      const match = existing.find((r) => !consumed.has(r.id) && sameWindow(r, inc));
+      if (!match) { leftIncoming.push(inc); continue; }
+      consumed.add(match.id);
+      if (match.fte !== inc.fte) {
+        updateLoqResource(db, { ...match, fte: inc.fte });
+        report.resourcesUpdated++;
+      }
+    }
+    const leftExisting = existing.filter((r) => !consumed.has(r.id));
+
+    if (leftIncoming.length === 1 && leftExisting.length === 1) {
+      // The one window for this person moved — reconcile it in place rather than delete + recreate.
+      updateLoqResource(db, { ...leftExisting[0], startDate: leftIncoming[0].start, finishDate: leftIncoming[0].finish, fte: leftIncoming[0].fte });
+      report.resourcesUpdated++;
+    } else if (leftExisting.length === 0) {
+      for (const inc of leftIncoming) {
+        createLoqResource(db, { loqId, personId, startDate: inc.start, finishDate: inc.finish, fte: inc.fte, source: 'mpp' });
+        report.resourcesLinked++;
+      }
+    } else if (leftIncoming.length === 0) {
+      // Source dropped this person's remaining window(s) on this LOQ — an explicit removal.
+      for (const r of leftExisting) { deleteLoqResource(db, r.id); report.resourcesRemoved++; }
+    } else {
+      // Ambiguous: several source windows AND several DB windows that don't line up by date. Add the
+      // new ones but never silently delete the existing — flag it for a human instead.
+      for (const inc of leftIncoming) {
+        createLoqResource(db, { loqId, personId, startDate: inc.start, finishDate: inc.finish, fte: inc.fte, source: 'mpp' });
+        report.resourcesLinked++;
+      }
+      warnings.push(`${incoming[0].personName} has multiple imported assignment windows on ${incoming[0].jiraKey} that don't line up with the existing ones — added the new window(s) and left the previous ones in place for review rather than overwriting them.`);
+    }
+  }
+
+  // Removal pass for people entirely absent from this import on a LOQ it did touch.
+  for (const [key, existing] of existingMppByLoqPerson) {
+    if (incomingPairKeys.has(key)) continue;
+    for (const r of existing) { deleteLoqResource(db, r.id); report.resourcesRemoved++; }
   }
 
   // --- Dependencies: only when both endpoints resolved into this project's LOQs. ---

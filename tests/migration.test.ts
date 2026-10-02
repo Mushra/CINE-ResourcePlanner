@@ -218,7 +218,7 @@ describe('v6 -> v7 migration', () => {
   it('a fresh database has all 8 new tables and the current schema_version', async () => {
     const db = await PlannerDatabase.createNew();
     expect(db.getSetting('schema_version')).toBe(SCHEMA_VERSION);
-    expect(SCHEMA_VERSION).toBe('13');
+    expect(SCHEMA_VERSION).toBe('14');
 
     const tables = new Set(db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table'").map((r) => r.name));
     for (const t of V7_TABLES) expect(tables.has(t)).toBe(true);
@@ -230,7 +230,7 @@ describe('v6 -> v7 migration', () => {
     expect(cinematicColumns).toEqual(expect.arrayContaining(['jira_key']));
 
     const loqResourceColumns = db.query<{ name: string }>('PRAGMA table_info(loq_resources)').map((c) => c.name);
-    expect(loqResourceColumns).toEqual(expect.arrayContaining(['start_date', 'finish_date', 'fte']));
+    expect(loqResourceColumns).toEqual(expect.arrayContaining(['start_date', 'finish_date', 'fte', 'source'])); // v14: provenance
 
     const jiraColumns = db.query<{ name: string; pk: number }>('PRAGMA table_info(jira_sync_state)');
     expect(jiraColumns.find((c) => c.name === 'loq_id')?.pk).toBe(1);
@@ -620,5 +620,23 @@ describe('v11 -> v12 migration', () => {
     // Existing data survives the version bump.
     const engine = new PlanningEngine(loadPlanningData(db), BASE_SCENARIO_ID);
     expect(engine.getRequiredCapacity(poolId, '2026-04')).toBe(2.5);
+  });
+});
+
+describe('v13 -> v14 migration', () => {
+  it('adds loq_resources.source and defaults every pre-existing row to manual', async () => {
+    // A pre-v14 DB (built at v7, migrated forward) carries a loq_resources row with no provenance.
+    const { bytes, loqId } = await buildV7Bytes();
+    const db = await PlannerDatabase.openFromBytes(bytes);
+
+    expect(db.getSetting('schema_version')).toBe(SCHEMA_VERSION);
+    const columns = db.query<{ name: string }>('PRAGMA table_info(loq_resources)').map((c) => c.name);
+    expect(columns).toContain('source');
+
+    // The legacy row is treated as 'manual' — the conservative default a re-import never deletes.
+    const rows = db.query<{ source: string }>('SELECT source FROM loq_resources WHERE loq_id = ?', [loqId]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].source).toBe('manual');
+    expect(loadPlanningData(db).loqResources.every((r) => r.source === 'manual')).toBe(true);
   });
 });

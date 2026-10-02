@@ -38,7 +38,11 @@ async function getSqlJs(): Promise<SqlJsStatic> {
 // v13 adds the cinematic_related_issues table (Hotline/QA-bug issues per Cinematic) — likewise a
 // plain additive table created on every applySchema; migrateV12toV13() just records the bump. See
 // CinematicRelatedIssue in types.ts and domain/relatedIssues.ts.
-export const SCHEMA_VERSION = '13';
+// v14 adds loq_resources.source ('manual' | 'mpp') so a .mpp re-import can reconcile the rows it
+// owns in place instead of blindly re-inserting duplicates. Existing rows become 'manual' — their
+// true origin is unknown, and 'manual' is the safe default (reconciliation never deletes or
+// overwrites a manual row). A plain column add, see migrateV13toV14() below.
+export const SCHEMA_VERSION = '14';
 
 /** Thin wrapper around a sql.js Database: schema bootstrap, typed helpers, byte export. */
 export class PlannerDatabase {
@@ -195,6 +199,7 @@ export class PlannerDatabase {
     if (Number(from) < 11) this.migrateV10toV11();
     if (Number(from) < 12) this.migrateV11toV12();
     if (Number(from) < 13) this.migrateV12toV13();
+    if (Number(from) < 14) this.migrateV13toV14();
   }
 
   /**
@@ -517,6 +522,19 @@ export class PlannerDatabase {
         raw_snapshot     TEXT NOT NULL DEFAULT '{}'
       );
     `);
+  }
+
+  /**
+   * v14 adds loq_resources.source so a .mpp re-import owns and reconciles only its own rows. Guarded
+   * on the column already existing (a fresh v14 DB gets it from schemaSql, which runs before
+   * migrate()). Existing rows take the column's 'manual' default — their origin is genuinely unknown,
+   * and 'manual' is the conservative choice: reconciliation leaves manual rows alone, so no
+   * historical row (including a duplicate from the pre-v14 blind-insert bug) is ever auto-removed.
+   */
+  private migrateV13toV14(): void {
+    const columns = this.query<{ name: string }>('PRAGMA table_info(loq_resources)');
+    if (columns.some((c) => c.name === 'source')) return;
+    this.db.exec("ALTER TABLE loq_resources ADD COLUMN source TEXT NOT NULL DEFAULT 'manual';");
   }
 
   private migrateV12toV13(): void {

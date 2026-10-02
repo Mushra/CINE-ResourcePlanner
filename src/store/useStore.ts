@@ -235,7 +235,7 @@ interface StoreState {
    * vs. the given expectedFinish, and never recomputed. */
   declareVariance: (loqId: string, input: { category: string; expectedFinish: string; comment: string }) => void;
 
-  createLoqResource: (input: Omit<LoqResource, 'id'>) => LoqResource;
+  createLoqResource: (input: Omit<LoqResource, 'id' | 'source'> & { source?: LoqResource['source'] }) => LoqResource;
   updateLoqResource: (resource: LoqResource) => void;
   deleteLoqResource: (resourceId: string) => void;
 

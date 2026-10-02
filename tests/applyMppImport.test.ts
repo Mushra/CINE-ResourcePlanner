@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PlannerDatabase } from '../src/db/database';
 import { applyMppImport, suggestDisciplineMatches, type MppDisciplineResolution } from '../src/db/applyMppImport';
-import { createDiscipline, createPerson, createProject, loadPlanningData } from '../src/db/repository';
+import { createDiscipline, createLoqResource, createPerson, createProject, loadPlanningData } from '../src/db/repository';
 import type { NormalizedMppImport } from '../src/import/mppImport';
 
 function baseImport(overrides: Partial<NormalizedMppImport> = {}): NormalizedMppImport {
@@ -92,21 +92,129 @@ describe('applyMppImport', () => {
       priority: 'medium', notes: '', isDispo: false,
     });
 
-    applyMppImport(db, baseImport(), project.id, AUTO_CREATE_ANIM);
+    const first = applyMppImport(db, baseImport(), project.id, AUTO_CREATE_ANIM);
     const second = applyMppImport(db, baseImport(), project.id, AUTO_CREATE_ANIM);
+    const third = applyMppImport(db, baseImport(), project.id, AUTO_CREATE_ANIM);
 
+    expect(first.resourcesLinked).toBe(1);
     expect(second.loqsCreated).toBe(0);
     expect(second.loqsUpdated).toBe(2);
     expect(second.cinematicsCreated).toBe(0);
     expect(second.dependenciesCreated).toBe(1); // upsert, not a duplicate row
+    // The A03 fix: an unchanged re-import touches no assignment rows at all.
+    expect(second.resourcesLinked).toBe(0);
+    expect(second.resourcesUpdated).toBe(0);
+    expect(second.resourcesRemoved).toBe(0);
+    expect(third.resourcesLinked).toBe(0);
 
     const data = loadPlanningData(db);
     expect(data.cinematics).toHaveLength(1);
     expect(data.loqs).toHaveLength(2);
     expect(data.loqDependencies).toHaveLength(1);
+    // Three identical imports leave a single assignment at its original load — never doubled/tripled.
+    expect(data.loqResources).toHaveLength(1);
+    expect(data.loqResources[0]).toMatchObject({ fte: 1, source: 'mpp' });
     const loq1 = data.loqs.find((l) => l.jiraKey === 'OVR-1')!;
     const events = data.loqCommitmentEvents.filter((e) => e.loqId === loq1.id);
     expect(events).toHaveLength(1); // dates unchanged on re-import — no second event appended
+  });
+
+  it('reconciles a changed assignment rate in place rather than adding a duplicate window', async () => {
+    const db = await PlannerDatabase.createNew();
+    const project = createProject(db, {
+      name: 'Movie A', status: 'active', startDate: null, startCertainty: 'tbd', endDate: null, endCertainty: 'tbd',
+      priority: 'medium', notes: '', isDispo: false,
+    });
+    applyMppImport(db, baseImport(), project.id, AUTO_CREATE_ANIM);
+
+    const rerate = baseImport();
+    rerate.resources[0]!.fte = 0.5; // same person, same window, lower load
+    const report = applyMppImport(db, rerate, project.id, AUTO_CREATE_ANIM);
+
+    expect(report.resourcesLinked).toBe(0);
+    expect(report.resourcesUpdated).toBe(1);
+    const data = loadPlanningData(db);
+    expect(data.loqResources).toHaveLength(1);
+    expect(data.loqResources[0]).toMatchObject({ fte: 0.5 });
+  });
+
+  it('reconciles a moved assignment window in place (date change), keeping a single row', async () => {
+    const db = await PlannerDatabase.createNew();
+    const project = createProject(db, {
+      name: 'Movie A', status: 'active', startDate: null, startCertainty: 'tbd', endDate: null, endCertainty: 'tbd',
+      priority: 'medium', notes: '', isDispo: false,
+    });
+    applyMppImport(db, baseImport(), project.id, AUTO_CREATE_ANIM);
+
+    const moved = baseImport();
+    moved.resources[0]!.start = '2025-02-03';
+    moved.resources[0]!.finish = '2025-02-14';
+    const report = applyMppImport(db, moved, project.id, AUTO_CREATE_ANIM);
+
+    expect(report.resourcesUpdated).toBe(1);
+    expect(report.resourcesRemoved).toBe(0);
+    const data = loadPlanningData(db);
+    expect(data.loqResources).toHaveLength(1);
+    expect(data.loqResources[0]).toMatchObject({ startDate: '2025-02-03', finishDate: '2025-02-14' });
+  });
+
+  it('removes an import-owned assignment the source no longer lists', async () => {
+    const db = await PlannerDatabase.createNew();
+    const project = createProject(db, {
+      name: 'Movie A', status: 'active', startDate: null, startCertainty: 'tbd', endDate: null, endCertainty: 'tbd',
+      priority: 'medium', notes: '', isDispo: false,
+    });
+    applyMppImport(db, baseImport(), project.id, AUTO_CREATE_ANIM);
+    expect(loadPlanningData(db).loqResources).toHaveLength(1);
+
+    const withoutResources = baseImport({ resources: [] }); // same LOQs, assignment dropped upstream
+    const report = applyMppImport(db, withoutResources, project.id, AUTO_CREATE_ANIM);
+
+    expect(report.resourcesRemoved).toBe(1);
+    expect(loadPlanningData(db).loqResources).toHaveLength(0);
+  });
+
+  it('never deletes or overwrites a manually-added assignment on a re-imported LOQ', async () => {
+    const db = await PlannerDatabase.createNew();
+    const project = createProject(db, {
+      name: 'Movie A', status: 'active', startDate: null, startCertainty: 'tbd', endDate: null, endCertainty: 'tbd',
+      priority: 'medium', notes: '', isDispo: false,
+    });
+    applyMppImport(db, baseImport(), project.id, AUTO_CREATE_ANIM);
+    const data0 = loadPlanningData(db);
+    const loq1 = data0.loqs.find((l) => l.jiraKey === 'OVR-1')!;
+    // A planner hand-adds a second person on the same LOQ — default source 'manual'.
+    const manualPerson = createPerson(db, { name: 'Manual Hire', poolId: null, capacityFte: 1, active: true, notes: '', team: '', site: '' });
+    createLoqResource(db, { loqId: loq1.id, personId: manualPerson.id, startDate: '2025-01-06', finishDate: '2025-01-20', fte: 0.25 });
+
+    // A re-import (even one that drops its own assignment) must leave the manual row untouched.
+    applyMppImport(db, baseImport({ resources: [] }), project.id, AUTO_CREATE_ANIM);
+
+    const after = loadPlanningData(db);
+    const manualRows = after.loqResources.filter((r) => r.source === 'manual');
+    expect(manualRows).toHaveLength(1);
+    expect(manualRows[0]).toMatchObject({ personId: manualPerson.id, fte: 0.25 });
+  });
+
+  it('preserves two legitimately distinct windows for the same person across a re-import', async () => {
+    const db = await PlannerDatabase.createNew();
+    const project = createProject(db, {
+      name: 'Movie A', status: 'active', startDate: null, startCertainty: 'tbd', endDate: null, endCertainty: 'tbd',
+      priority: 'medium', notes: '', isDispo: false,
+    });
+    const twoWindows = baseImport({
+      resources: [
+        { jiraKey: 'OVR-1', personName: 'Antony Cartot', personGroup: 'ANIM', start: '2025-01-06', finish: '2025-01-20', fte: 1 },
+        { jiraKey: 'OVR-1', personName: 'Antony Cartot', personGroup: 'ANIM', start: '2025-03-03', finish: '2025-03-14', fte: 0.5 },
+      ],
+    });
+    applyMppImport(db, twoWindows, project.id, AUTO_CREATE_ANIM);
+    expect(loadPlanningData(db).loqResources).toHaveLength(2);
+
+    const second = applyMppImport(db, twoWindows, project.id, AUTO_CREATE_ANIM);
+    expect(second.resourcesLinked).toBe(0);
+    expect(second.resourcesRemoved).toBe(0);
+    expect(loadPlanningData(db).loqResources).toHaveLength(2); // both disjoint windows kept, not merged
   });
 
   it('appends a new commitment event when the re-imported dates changed', async () => {
