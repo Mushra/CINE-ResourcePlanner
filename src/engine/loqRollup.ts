@@ -47,10 +47,10 @@ function workingDaysBetween(startIso: string, finishIso: string): number {
  * UP to the whole working day that contains the finish — 0.5d from Monday finishes Monday, 1.5d from
  * Monday finishes Tuesday, 1.5d from Friday finishes Monday — while callers keep the exact fractional
  * n for load math (we never round the estimate itself). n === 0 keeps the start date; negative, NaN,
- * Infinity, an unparseable start, or a duration so large it overflows the Date range all yield null
- * (no usable window). Computed arithmetically — no per-day loop — so even an absurd n returns at once
- * rather than spinning (the integer-loop version froze on any fractional n, since count === n never
- * held for, say, n = 1.5).
+ * Infinity, an unparseable start, or a duration so large the finish falls outside the supported
+ * yyyy-mm-dd range all yield null (no usable window). Computed arithmetically — no per-day loop — so
+ * even an absurd n returns at once rather than spinning (the integer-loop version froze on any
+ * fractional n, since count === n never held for, say, n = 1.5).
  */
 function addWorkingDays(startIso: string, n: number): string | null {
   const parsed = parseIso(startIso);
@@ -66,7 +66,12 @@ function addWorkingDays(startIso: string, n: number): string | null {
   const remaining = workingDays - 1; // the effective start already is working day 1
   const extraDays = Math.floor(remaining / 5) * 7 + ((dow + (remaining % 5) > 5) ? (remaining % 5) + 2 : (remaining % 5));
   const finish = new Date(t + extraDays * DAY);
-  return Number.isNaN(finish.getTime()) ? null : finish.toISOString().slice(0, 10);
+  if (Number.isNaN(finish.getTime())) return null;
+  // A finish past year 9999 (or before year 1000) serialises as the expanded "+0YYYYYY-MM-DD" /
+  // "-00YYYY" form, not the yyyy-mm-dd the rest of the app relies on — treat it as out of range so a
+  // huge estimate yields no window rather than a malformed date like "+013525-12".
+  const iso = finish.toISOString().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : null;
 }
 
 /** Parses yyyy-mm-dd into a UTC [year, monthIndex, day] tuple, or null when the string is not a real
@@ -91,11 +96,23 @@ function periodWithinWindow(period: Period, startIso: string | null, finishIso: 
   return comparePeriod(period, startPeriod) >= 0 && comparePeriod(period, finishPeriod) <= 0;
 }
 
+/** Whether a LOQ's estimateDays is a usable measure: a finite, non-negative number (or null, meaning
+ * "unset"). A NaN/Infinity/negative estimate — however it got into the data — is NOT usable and must
+ * never feed an aggregate as if it were. Exported so the validation layer can surface it (an invalid
+ * estimate stays identifiable, rather than being silently swallowed as a 0). */
+export function hasValidEstimate(loq: Pick<Loq, 'estimateDays'>): boolean {
+  return loq.estimateDays == null || (Number.isFinite(loq.estimateDays) && loq.estimateDays >= 0);
+}
+
 /** Demand intensity for one LOQ, or 0 if it can't be placed/sized (see docs/PLANNING_ENGINE.md §1). */
 function loqDemandIntensity(loq: Loq): number {
   if (!loq.committedStart || loq.estimateDays == null) return 0;
+  // A non-finite or negative estimate never contaminates the rollup — even with an explicit finish,
+  // where it would otherwise divide into NaN/negative demand. It contributes nothing and is flagged
+  // separately (see hasValidEstimate / the invalid_estimate sanity check).
+  if (!Number.isFinite(loq.estimateDays) || loq.estimateDays < 0) return 0;
   const finish = loq.committedFinish ?? addWorkingDays(loq.committedStart, loq.estimateDays);
-  if (!finish) return 0; // no derivable finish (negative/absurd estimate, bad start) → no demand
+  if (!finish) return 0; // no derivable finish (absurd estimate, bad start) → no demand
   const days = workingDaysBetween(loq.committedStart, finish);
   if (days <= 0) return 0;
   return loq.estimateDays / days;

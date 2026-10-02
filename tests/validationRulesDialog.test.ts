@@ -27,6 +27,7 @@ function allCheckCategories(): CheckCategory[] {
     'loq_at_risk',
     'loq_root_cause',
     'loq_early_opportunity',
+    'invalid_estimate',
     'jira_inconsistency',
   ];
   for (const category of categories) {
@@ -46,6 +47,7 @@ function allCheckCategories(): CheckCategory[] {
       case 'loq_at_risk':
       case 'loq_root_cause':
       case 'loq_early_opportunity':
+      case 'invalid_estimate':
       case 'jira_inconsistency':
         break;
       default: {

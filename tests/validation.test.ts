@@ -451,6 +451,46 @@ describe('getSanityChecks — LOQ forecast (at risk, root cause, early opportuni
     expect(checks.filter((c) => c.category === 'loq_early_opportunity')).toHaveLength(0);
   });
 
+  it('emits invalid_estimate for a NaN estimate so the bad data stays identifiable', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id, name: 'Seq01' });
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, committedStart: '2026-10-05', committedFinish: '2026-10-06', estimateDays: Number.NaN });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [l1] }));
+
+    const checks = getSanityChecks(engine).filter((c) => c.category === 'invalid_estimate');
+    expect(checks).toHaveLength(1);
+    expect(checks[0]).toMatchObject({ severity: 'warning', projectId: p1.id, disciplineId: animation.id, loqId: l1.id });
+  });
+
+  it('emits invalid_estimate for a negative estimate but not for a valid (fractional or null) one', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const bad = loq({ cinematicId: cine.id, disciplineId: animation.id, type: 'L1', estimateDays: -5 });
+    const fractional = loq({ cinematicId: cine.id, disciplineId: animation.id, type: 'L2', estimateDays: 1.5 });
+    const unset = loq({ cinematicId: cine.id, disciplineId: animation.id, type: 'L3', estimateDays: null });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [bad, fractional, unset] }));
+
+    const checks = getSanityChecks(engine).filter((c) => c.category === 'invalid_estimate');
+    expect(checks).toHaveLength(1);
+    expect(checks[0].loqId).toBe(bad.id);
+  });
+
+  it('does not flag invalid_estimate once the LOQ is terminal (Done/Cut)', () => {
+    const animation = discipline({ name: 'Animation' });
+    const p1 = project({ name: 'Alpha' });
+    const cine = cinematic({ projectId: p1.id });
+    const done = loq({ cinematicId: cine.id, disciplineId: animation.id, type: 'L1', status: 'DONE', estimateDays: Number.NaN });
+    const cut = loq({ cinematicId: cine.id, disciplineId: animation.id, type: 'L2', status: 'CUT', estimateDays: -3 });
+
+    const engine = new PlanningEngine(planningData({ disciplines: [animation], projects: [p1], cinematics: [cine], loqs: [done, cut] }));
+
+    expect(getSanityChecks(engine).filter((c) => c.category === 'invalid_estimate')).toHaveLength(0);
+  });
+
   it('emits a single loq_root_cause naming the downstream impact, not a separate check per LOQ', () => {
     const animation = discipline({ name: 'Animation' });
     const p1 = project({ name: 'Alpha' });

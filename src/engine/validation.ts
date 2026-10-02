@@ -3,6 +3,7 @@ import { personMatchKey } from '../domain/identity';
 import { PlanningEngine, UNASSIGNED_DISCIPLINE_ID, round2 } from './planning';
 import { getForecastWindowPeriods } from './forecast';
 import { impactedLoqIds } from './loqForecast';
+import { hasValidEstimate } from './loqRollup';
 import { comparePeriod, formatPeriodLabel, periodFromISODate, periodRange } from '../domain/periods';
 import { deriveProjectStatus } from '../domain/projectStatus';
 import { buildEffectiveStatusMap, cinematicStatus, statusResolverFrom, isTerminalStatus, type StatusResolver } from './watchtower';
@@ -26,6 +27,7 @@ export type CheckCategory =
   | 'loq_at_risk'
   | 'loq_root_cause'
   | 'loq_early_opportunity'
+  | 'invalid_estimate'
   | 'jira_inconsistency';
 
 export interface SanityCheck {
@@ -84,6 +86,7 @@ export function getSanityChecks(engine: PlanningEngine, jiraConfigs: JiraProject
   checks.push(...checkLoqAtRisk(engine, statusResolver));
   checks.push(...checkLoqRootCause(engine));
   checks.push(...checkLoqEarlyOpportunity(engine));
+  checks.push(...checkInvalidEstimate(engine, statusResolver));
   checks.push(...checkJiraInconsistency(engine, toleranceDaysByProjectId, statusMappingByProjectId));
   checks.push(...checkCinematicEpicDivergence(engine, statusMappingByProjectId, statusResolver));
   checks.push(...checkCinematicBindingCoherence(engine));
@@ -377,6 +380,35 @@ function checkLoqEarlyOpportunity(engine: PlanningEngine): SanityCheck[] {
       loqId,
       message: `${loqLabel(engine, loqId)} could finish ${-forecast.deltaDays}d early`,
       impact: `Forecast finish ${forecast.forecastFinish ?? '—'} vs. committed ${forecast.committedFinish ?? '—'} — a downstream LOQ could be pulled earlier if re-committed`,
+    });
+  }
+  return checks;
+}
+
+/** invalid_estimate: a LOQ whose estimateDays is present but not a usable number — NaN, Infinity or
+ * negative (however it got into the data: a bad import, a corrupt edit). Such a value can't size the
+ * LOQ, so the rollup excludes it (counts it as 0 demand — see hasValidEstimate / loqDemandIntensity).
+ * This surfaces that silent exclusion so the bad data stays identifiable and correctable rather than
+ * masquerading as a reliable zero. Terminal LOQs (Done/Cut) are skipped — their estimate no longer
+ * drives any planning. A null estimate is "unset", not invalid, and is never flagged here. */
+function checkInvalidEstimate(engine: PlanningEngine, statusOf: StatusResolver): SanityCheck[] {
+  const checks: SanityCheck[] = [];
+  for (const loqId of engine.getLoqForecasts().keys()) {
+    const loq = engine.loq(loqId);
+    if (!loq || loq.estimateDays == null || hasValidEstimate(loq)) continue;
+    if (isTerminalStatus(statusOf(loq))) continue;
+    const project = engine.loqProject(loqId);
+    checks.push({
+      id: `invalid-estimate:${loqId}`,
+      severity: 'warning',
+      category: 'invalid_estimate',
+      projectId: project?.id,
+      projectName: project?.name,
+      disciplineId: loq.disciplineId,
+      disciplineName: engine.discipline(loq.disciplineId)?.name,
+      loqId,
+      message: `${loqLabel(engine, loqId)} has an invalid estimate`,
+      impact: `Estimate "${String(loq.estimateDays)}" days isn't a usable number — it's excluded from demand (counts as 0 FTE) until corrected`,
     });
   }
   return checks;

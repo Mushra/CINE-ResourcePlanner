@@ -224,6 +224,51 @@ describe('loqEffectiveFinish — implicit finish from a (possibly fractional) es
   });
 });
 
+describe('loqEffectiveFinish — a huge estimate yields no window, never a malformed date', () => {
+  it('returns null for a multi-million-day estimate rather than an expanded-year string like "+013525-12"', () => {
+    // Exact repro: start 2026-10-05, no explicit finish, estimate 3,000,000 days. The derived finish
+    // lands in year ~13525, whose toISOString serialises as "+013525-12-…", not yyyy-mm-dd.
+    const finish = loqEffectiveFinish(loq({ committedStart: '2026-10-05', committedFinish: null, estimateDays: 3_000_000 }));
+    expect(finish).toBeNull();
+  });
+
+  it('an in-range estimate still derives a normal yyyy-mm-dd finish', () => {
+    const finish = loqEffectiveFinish(loq({ committedStart: '2026-10-05', committedFinish: null, estimateDays: 5 }));
+    expect(finish).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe('getCinematicDisciplineRollup — an invalid estimate never contaminates demand, even with an explicit finish', () => {
+  const anim = discipline({ name: 'Animation' });
+
+  it('a NaN estimate with an explicit committedFinish yields 0 demand, not NaN', () => {
+    // Exact repro: start 2026-10-05, explicit finish 2026-10-06, estimate NaN. With a committedFinish
+    // the old guard (estimateDays == null) didn't catch NaN, so NaN/days propagated into the rollup.
+    const l = loq({ cinematicId: CINE, disciplineId: anim.id, committedStart: '2026-10-05', committedFinish: '2026-10-06', estimateDays: Number.NaN });
+    const demand = find(getCinematicDisciplineRollup(CINE, [l], [], [anim], '2026-10'), anim.id)?.demand;
+    expect(demand).toBe(0);
+    expect(Number.isNaN(demand)).toBe(false);
+  });
+
+  it('a negative estimate with an explicit committedFinish yields 0 demand, not a negative number', () => {
+    const l = loq({ cinematicId: CINE, disciplineId: anim.id, committedStart: '2026-10-05', committedFinish: '2026-10-30', estimateDays: -5 });
+    const demand = find(getCinematicDisciplineRollup(CINE, [l], [], [anim], '2026-10'), anim.id)?.demand ?? 0;
+    expect(demand).toBe(0);
+  });
+
+  it('an Infinity estimate with an explicit committedFinish yields 0 demand', () => {
+    const l = loq({ cinematicId: CINE, disciplineId: anim.id, committedStart: '2026-10-05', committedFinish: '2026-10-30', estimateDays: Number.POSITIVE_INFINITY });
+    const demand = find(getCinematicDisciplineRollup(CINE, [l], [], [anim], '2026-10'), anim.id)?.demand;
+    expect(demand).toBe(0);
+  });
+
+  it('a valid fractional estimate is still honoured alongside an explicit finish (regression guard)', () => {
+    // 2026-09-01 (Tue) .. 2026-09-15 (Tue) = 11 working days; 5.5 / 11 = 0.5.
+    const l = loq({ cinematicId: CINE, disciplineId: anim.id, committedStart: '2026-09-01', committedFinish: '2026-09-15', estimateDays: 5.5 });
+    expect(find(getCinematicDisciplineRollup(CINE, [l], [], [anim], '2026-09'), anim.id)?.demand).toBe(0.5);
+  });
+});
+
 describe('getCinematicDisciplineRollup — fractional estimate, implicit finish', () => {
   it('preserves the fractional estimate in the demand intensity (1.5 over a 2-day window → 0.75, not 1)', () => {
     const anim = discipline({ name: 'Animation' });

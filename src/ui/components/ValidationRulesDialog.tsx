@@ -101,6 +101,12 @@ const RULES: RuleDoc[] = [
     description: 'A LOQ is forecast (or actually finished) ahead of its committed date and has a downstream dependent that could be pulled earlier — a flag only, never applied automatically.',
   },
   {
+    category: 'invalid_estimate',
+    title: 'Invalid estimate',
+    severities: ['warning'],
+    description: "A LOQ's estimate is present but not a usable number (NaN, infinite or negative) — it can't size the LOQ, so it's excluded from demand (counts as 0) until corrected. Flagged so the bad value stays visible rather than masquerading as a reliable zero. Done/Cut LOQs are not flagged.",
+  },
+  {
     category: 'jira_inconsistency',
     title: 'Jira inconsistency',
     severities: ['critical', 'warning', 'info'],
