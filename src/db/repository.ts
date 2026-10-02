@@ -779,6 +779,43 @@ export function replaceJiraLoqDependencies(
   return inserted;
 }
 
+/** Materializes the dependency-flow edges for ONE cinematic (delete-then-insert, scoped to
+ * source='template' AND to that cinematic's LOQs): the cinematic's prior template edges are dropped
+ * and the given set re-inserted. Scoping the DELETE to `cinematicLoqIds` on both ends keeps
+ * re-materializing one cinematic from ever disturbing another's template edges. Pairs already owned by
+ * a non-template edge are skipped (defensive — computeTemplateEdges already excludes them), so a
+ * manual/MS Project/Jira edge is never overwritten. Returns the number inserted; callers must have
+ * de-duped and cycle-checked the input (computeTemplateEdges does). */
+export function replaceTemplateDependenciesForCinematic(
+  db: PlannerDatabase,
+  cinematicLoqIds: string[],
+  edges: (Pick<LoqDependency, 'predecessorLoqId' | 'successorLoqId' | 'type' | 'lagDays'> & { templateId: string })[],
+): number {
+  if (cinematicLoqIds.length === 0) return 0;
+  const placeholders = cinematicLoqIds.map(() => '?').join(', ');
+  db.exec(
+    `DELETE FROM loq_dependencies WHERE source = 'template' AND predecessor_loq_id IN (${placeholders}) AND successor_loq_id IN (${placeholders})`,
+    [...cinematicLoqIds, ...cinematicLoqIds],
+  );
+  const existing = new Set(
+    db
+      .query<{ predecessor_loq_id: string; successor_loq_id: string }>('SELECT predecessor_loq_id, successor_loq_id FROM loq_dependencies')
+      .map((r) => `${r.predecessor_loq_id}::${r.successor_loq_id}`),
+  );
+  let inserted = 0;
+  for (const edge of edges) {
+    const pair = `${edge.predecessorLoqId}::${edge.successorLoqId}`;
+    if (existing.has(pair)) continue; // keep the user/jira-owned edge; never clobber it
+    db.exec(
+      `INSERT INTO loq_dependencies (id, predecessor_loq_id, successor_loq_id, type, lag_days, source, template_id) VALUES (?, ?, ?, ?, ?, 'template', ?)`,
+      [newId('ldep'), edge.predecessorLoqId, edge.successorLoqId, edge.type, edge.lagDays, edge.templateId],
+    );
+    existing.add(pair);
+    inserted++;
+  }
+  return inserted;
+}
+
 // ---------------------------------------------------------------------------
 // Dependency templates
 // ---------------------------------------------------------------------------

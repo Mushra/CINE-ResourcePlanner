@@ -6,6 +6,7 @@
 import type { Cinematic, Discipline, Loq, LoqDependency } from '../domain/types';
 import { genericPoolName, isGenericPoolName, normalizeKey, personMatchKey } from '../domain/identity';
 import { wouldCreateCycle } from '../domain/loqGraph';
+import { materializeCinematicFlow } from './applyDependencyFlow';
 import type { PlannerDatabase } from './database';
 import {
   createCinematic,
@@ -167,6 +168,7 @@ export function applyMppImport(
   for (const l of data.loqs) if (l.jiraKey) existingLoqByJiraKey.set(l.jiraKey, l);
   const loqIdByJiraKey = new Map<string, string>();
   const disciplineCodeByJiraKey = new Map<string, string>();
+  const touchedCinematicIds = new Set<string>();
 
   for (const loqInput of normalized.loqs) {
     disciplineCodeByJiraKey.set(loqInput.jiraKey, loqInput.disciplineCode);
@@ -206,6 +208,7 @@ export function applyMppImport(
       updateLoq(db, updated);
       existingLoqByJiraKey.set(loqInput.jiraKey, updated);
       loqIdByJiraKey.set(loqInput.jiraKey, existing.id);
+      touchedCinematicIds.add(cinematicId);
       report.loqsUpdated++;
     } else {
       const cinematicId = resolveCinematicId(loqInput.cinematicName);
@@ -237,6 +240,7 @@ export function applyMppImport(
       updateLoq(db, withDates);
       existingLoqByJiraKey.set(loqInput.jiraKey, withDates);
       loqIdByJiraKey.set(loqInput.jiraKey, created.id);
+      touchedCinematicIds.add(cinematicId);
       report.loqsCreated++;
     }
   }
@@ -267,6 +271,11 @@ export function applyMppImport(
     loqDependencies.push({ predecessorLoqId, successorLoqId });
     report.dependenciesCreated++;
   }
+
+  // --- Dependency flow: materialize the global template edges for every cinematic this import
+  // touched. Runs after the MS Project predecessors above so those override edges are already in place
+  // and template edges never clobber them (computeTemplateEdges skips owned pairs). ---
+  for (const cinematicId of touchedCinematicIds) materializeCinematicFlow(db, cinematicId);
 
   return report;
 }

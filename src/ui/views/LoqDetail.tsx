@@ -80,6 +80,7 @@ export function LoqDetail({ loqId }: { loqId: string }) {
   const updateLoq = useStore((s) => s.updateLoq);
   const deleteLoq = useStore((s) => s.deleteLoq);
   const refreshCinematicView = useStore((s) => s.refreshCinematicView);
+  const applyDependencyFlow = useStore((s) => s.applyDependencyFlow);
 
   const navigate = useUiStore((s) => s.navigate);
   const openProject = useUiStore((s) => s.openProject);
@@ -96,10 +97,14 @@ export function LoqDetail({ loqId }: { loqId: string }) {
 
   const cinematicId = loq?.cinematicId;
   // Live-refresh the owning cinematic on open — mirrors CinematicDetail so the Jira-mirrored status is
-  // current without a full project sync. Guarded/silent in a browser tab.
+  // current without a full project sync. Guarded/silent in a browser tab. Also re-materialize the
+  // dependency flow (pure-DB, no-op when already current) so the "Blocked by" graph reflects the latest
+  // templates even without a Jira connection — applyDependencyFlow only persists when something changed.
   useEffect(() => {
-    if (cinematicId) void refreshCinematicView(cinematicId);
-  }, [cinematicId, refreshCinematicView]);
+    if (!cinematicId) return;
+    applyDependencyFlow(cinematicId);
+    void refreshCinematicView(cinematicId);
+  }, [cinematicId, applyDependencyFlow, refreshCinematicView]);
 
   if (!loq) {
     return (

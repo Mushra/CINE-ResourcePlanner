@@ -18,6 +18,7 @@ import {
   createLoqCommitmentEvent as repoCreateLoqCommitmentEvent,
   createVarianceEvent as repoCreateVarianceEvent,
   createLoqDependency as repoCreateLoqDependency, updateLoqDependency as repoUpdateLoqDependency, deleteLoqDependency as repoDeleteLoqDependency,
+  createDependencyTemplate as repoCreateDependencyTemplate, updateDependencyTemplate as repoUpdateDependencyTemplate, deleteDependencyTemplate as repoDeleteDependencyTemplate,
   setJiraConfig as repoSetJiraConfig, listJiraConfigs as repoListJiraConfigs,
   replaceCinematicRelatedIssues as repoReplaceCinematicRelatedIssues,
   upsertJiraSyncState as repoUpsertJiraSyncState, deleteJiraSyncState as repoDeleteJiraSyncState,
@@ -26,6 +27,7 @@ import {
 import { applyRpmImport, type ImportMode } from '../db/applyImport';
 import { applyMppImport, type MppApplyReport, type MppDisciplineResolution } from '../db/applyMppImport';
 import { applyJiraBindings, type ConfirmedJiraBindings, type JiraApplyReport } from '../db/applyJiraSync';
+import { materializeCinematicFlow, materializeAllFlow } from '../db/applyDependencyFlow';
 import { seedDemoData } from '../db/seed';
 import { getStoredFileName, loadAutosave, saveAutosave, setStoredFileName } from '../persistence/indexeddb';
 import * as files from '../persistence/files';
@@ -38,7 +40,7 @@ import { parseJiraSearchResponse, defaultJiraFieldMapping, type JiraRawSearchRes
 import { DEFAULT_HOTLINE_LABEL, relatedIssuesForCinematic } from '../domain/relatedIssues';
 import { discoverMissingLoqs, resolveDiscoveryKeywords, disciplineKey, type DiscoveredLoq } from '../domain/loqDiscovery';
 import { PlanningEngine, round2 } from '../engine/planning';
-import type { Cinematic, CinematicJiraSyncState, CinematicRelatedIssue, Discipline, JiraProjectConfig, Loq, LoqDependency, LoqResource, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
+import type { Cinematic, CinematicJiraSyncState, CinematicRelatedIssue, DependencyTemplate, Discipline, JiraProjectConfig, Loq, LoqDependency, LoqResource, PlanningData, Period, Person, Project, ResourcePool, StructureOverrideKind } from '../domain/types';
 import { wouldCreateCycle } from '../domain/loqGraph';
 import { emptyPlanningData } from '../domain/types';
 import { applyStructureOverrides } from '../domain/overrides';
@@ -242,6 +244,20 @@ interface StoreState {
   createLoqDependency: (input: Omit<LoqDependency, 'id'>) => LoqDependency | null;
   updateLoqDependency: (dependency: LoqDependency) => void;
   deleteLoqDependency: (dependencyId: string) => void;
+
+  /** Dependency-flow templates — the global "classic" chains (e.g. Mocap Prep → Tech Anim → Anim)
+   * modelled once and materialized per cinematic as source='template' edges. Editing a template does
+   * not touch concrete edges on its own: push the change with applyDependencyFlowAll (the Settings
+   * "Apply" button) or by reopening a cinematic. */
+  createDependencyTemplate: (input: Omit<DependencyTemplate, 'id'>) => DependencyTemplate;
+  updateDependencyTemplate: (template: DependencyTemplate) => void;
+  deleteDependencyTemplate: (templateId: string) => void;
+  /** Re-materializes the flow into concrete source='template' edges for one cinematic. Idempotent —
+   * writes (and persists) only when the template-edge set actually changed, so it's safe to call on
+   * every cinematic/LOQ open. Pure-DB and Jira-independent, unlike refreshCinematicView. */
+  applyDependencyFlow: (cinematicId: string) => void;
+  /** Re-materializes the flow across every cinematic — backs the Settings "Apply flow now" button. */
+  applyDependencyFlowAll: () => void;
 
   setPoolDiscipline: (poolName: string, disciplineName: string) => void;
   setPersonPool: (personName: string, poolName: string) => void;
@@ -1158,6 +1174,7 @@ export const useStore = create<StoreState>((set, get) => {
       if (!db || selections.length === 0) return;
       const created = createDiscoveredLoqRows(db, selections.map((s) => ({ ...s, cinematicId })));
       if (created === 0) return;
+      materializeCinematicFlow(db, cinematicId); // newly-discovered LOQs may complete template chains
       persist();
       reload(db);
       // Re-run the on-open refresh so the new LOQs get their Jira snapshot and drop off the banner.
@@ -1170,6 +1187,7 @@ export const useStore = create<StoreState>((set, get) => {
       if (!db || selections.length === 0) return;
       const created = createDiscoveredLoqRows(db, selections);
       if (created === 0) return;
+      for (const cinematicId of new Set(selections.map((s) => s.cinematicId))) materializeCinematicFlow(db, cinematicId);
       persist();
       reload(db);
       // No per-Cinematic network refresh — the caller (Sync drawer) already holds the fetched batch and
@@ -1333,6 +1351,9 @@ export const useStore = create<StoreState>((set, get) => {
     createLoq: (input) => {
       const db = get().db!;
       const loq = repoCreateLoq(db, input);
+      // A new LOQ may complete a template's predecessor/successor pair — materialize before persist so
+      // the flow edges land in the same reload (auto-on-create, per the flow-editor decision).
+      materializeCinematicFlow(db, loq.cinematicId);
       persist();
       if (loq.jiraKey) void liveRefreshBoundIssue('loq', loq.id, loq.jiraKey);
       return loq;
@@ -1436,6 +1457,42 @@ export const useStore = create<StoreState>((set, get) => {
       const db = get().db!;
       repoDeleteLoqDependency(db, dependencyId);
       persist();
+    },
+
+    createDependencyTemplate: (input) => {
+      const db = get().db!;
+      const template = repoCreateDependencyTemplate(db, input);
+      persist();
+      return template;
+    },
+    updateDependencyTemplate: (template) => {
+      const db = get().db!;
+      repoUpdateDependencyTemplate(db, template);
+      persist();
+    },
+    deleteDependencyTemplate: (templateId) => {
+      const db = get().db!;
+      repoDeleteDependencyTemplate(db, templateId);
+      persist();
+    },
+    applyDependencyFlow: (cinematicId) => {
+      const db = get().db;
+      if (!db) return;
+      // Only persist when something actually changed — this runs on every cinematic/LOQ open and must
+      // not dirty the plan (or churn edge ids) when the flow is already materialized.
+      if (materializeCinematicFlow(db, cinematicId).changed) persist();
+    },
+    applyDependencyFlowAll: () => {
+      const db = get().db;
+      if (!db) return;
+      const { created, cinematicsChanged } = materializeAllFlow(db);
+      persist();
+      get().toast(
+        'success',
+        cinematicsChanged === 0
+          ? 'Flow déjà à jour — aucune dépendance à matérialiser'
+          : `Flow appliqué : ${created} dépendance${created === 1 ? '' : 's'} sur ${cinematicsChanged} cinématique${cinematicsChanged === 1 ? '' : 's'}`,
+      );
     },
 
     setRequirement: (projectId, poolId, period, fte) => {

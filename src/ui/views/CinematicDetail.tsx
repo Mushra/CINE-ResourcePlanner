@@ -114,6 +114,7 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   const deleteLoq = useStore((s) => s.deleteLoq);
   const relatedIssues = useStore((s) => s.data.cinematicRelatedIssues);
   const refreshCinematicView = useStore((s) => s.refreshCinematicView);
+  const applyDependencyFlow = useStore((s) => s.applyDependencyFlow);
   const addDiscoveredLoqs = useStore((s) => s.addDiscoveredLoqs);
   const bindDiscoveredDepartment = useStore((s) => s.bindDiscoveredDepartment);
   // Select the stored entry (a stable reference, or undefined) — never a fresh [] inside the
@@ -148,8 +149,9 @@ export function CinematicDetail({ cinematicId }: { cinematicId: string }) {
   // plus the Hotline/QA-bug widgets (with discovery of newly-tagged ones) — so the page is current
   // without a full project sync. Toasts only when something changed; guarded/silent in a browser tab.
   useEffect(() => {
+    applyDependencyFlow(cinematicId); // re-materialize the dependency flow (pure-DB, no-op when current)
     void refreshCinematicView(cinematicId);
-  }, [cinematicId, refreshCinematicView]);
+  }, [cinematicId, applyDependencyFlow, refreshCinematicView]);
 
   if (!cinematic) {
     return (

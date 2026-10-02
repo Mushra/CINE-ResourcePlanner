@@ -6,6 +6,7 @@ import type { JiraProjectConfig } from '../../domain/types';
 import { DEFAULT_JIRA_STATUS_MAPPING } from '../../domain/jiraStatusMap';
 import { DEFAULT_HOTLINE_LABEL } from '../../domain/relatedIssues';
 import { JiraStatusMappingEditor } from '../components/JiraStatusMappingEditor';
+import { DependencyFlowEditor } from '../components/DependencyFlowEditor';
 import { disciplineKey, resolveDiscoveryKeywords } from '../../domain/loqDiscovery';
 
 const DEFAULT_CINEMATICS_LIST_FIELD = 'customfield_10420';
@@ -343,6 +344,21 @@ export function SettingsView() {
             </div>
           </>
         )}
+      </div>
+
+      <div className="card settings-card">
+        <div className="panel-header">
+          <h2>Dependency flow</h2>
+          <span className="panel-sub">Global — shared across projects</span>
+        </div>
+        <p className="field-hint">
+          Models the "classic" dependency chains between LOQs — a prerequisite (discipline + level) that must finish before a dependent
+          LOQ can start, e.g. <code>CIN Design L0 → Tech Anim L0 → Anim L0</code>. The flow is materialized per cinematic as read-only
+          <strong> template</strong> edges whenever LOQs are created or discovered and when you open a cinematic; manual, MS&nbsp;Project
+          and Jira edges always win and are never overwritten. Edit a row, then <strong>Apply</strong> to push the change into every
+          cinematic now (reopening a cinematic also re-materializes it). Levels are matched case-insensitively against each LOQ's type.
+        </p>
+        <DependencyFlowEditor />
       </div>
     </div>
   );
