@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getCinematicDisciplineRollup, loqDemandPeriods } from '../src/engine/loqRollup';
+import { getCinematicDisciplineRollup, loqDemandPeriods, loqEffectiveFinish } from '../src/engine/loqRollup';
 import { discipline, loq, loqResource } from './fixtures';
 
 const CINE = 'cine-1';
@@ -167,6 +167,82 @@ describe('loqDemandPeriods', () => {
     const l1 = loq({ committedStart: '2026-10-01', committedFinish: '2026-10-31', estimateDays: 20 });
     const l2 = loq({ committedStart: '2026-09-15', committedFinish: '2026-10-15', estimateDays: 20 });
     expect(loqDemandPeriods([l1, l2])).toEqual(['2026-09', '2026-10']);
+  });
+});
+
+describe('loqEffectiveFinish — implicit finish from a (possibly fractional) estimate', () => {
+  // 2026-09-07 is a Monday, 2026-09-04 a Friday, 2026-09-05/06 the weekend.
+  const finishOf = (committedStart: string, estimateDays: number) =>
+    loqEffectiveFinish(loq({ committedStart, committedFinish: null, estimateDays }));
+
+  it('rounds a fractional estimate up to the working day that contains the finish', () => {
+    expect(finishOf('2026-09-07', 0.5)).toBe('2026-09-07'); // 0.5d Mon → Mon
+    expect(finishOf('2026-09-07', 1.5)).toBe('2026-09-08'); // 1.5d Mon → Tue
+    expect(finishOf('2026-09-04', 1.5)).toBe('2026-09-07'); // 1.5d Fri → Mon (skips the weekend)
+  });
+
+  it('keeps the integer-estimate behaviour (start inclusive, Mon–Fri)', () => {
+    expect(finishOf('2026-09-07', 1)).toBe('2026-09-07');  // 1d Mon → Mon
+    expect(finishOf('2026-09-07', 5)).toBe('2026-09-11');  // 5d Mon → Fri
+    expect(finishOf('2026-09-07', 10)).toBe('2026-09-18'); // 10d Mon → Fri of the next week
+  });
+
+  it('starts counting on the Monday after a weekend start with a positive duration', () => {
+    expect(finishOf('2026-09-05', 0.5)).toBe('2026-09-07'); // Sat + 0.5d → Mon
+    expect(finishOf('2026-09-05', 1)).toBe('2026-09-07');   // Sat + 1d   → Mon
+    expect(finishOf('2026-09-05', 1.5)).toBe('2026-09-08'); // Sat + 1.5d → Tue
+    expect(finishOf('2026-09-06', 1)).toBe('2026-09-07');   // Sun + 1d   → Mon
+  });
+
+  it('keeps the start date for a zero estimate (even on a weekend)', () => {
+    expect(finishOf('2026-09-07', 0)).toBe('2026-09-07');
+    expect(finishOf('2026-09-05', 0)).toBe('2026-09-05');
+  });
+
+  it('yields null — not a hang or a throw — for negative, NaN, Infinity and absurdly large estimates', () => {
+    expect(finishOf('2026-09-07', -3)).toBeNull();
+    expect(finishOf('2026-09-07', Number.NaN)).toBeNull();
+    expect(finishOf('2026-09-07', Number.POSITIVE_INFINITY)).toBeNull();
+    expect(finishOf('2026-09-07', 1e9)).toBeNull(); // overflows the Date range → no usable finish
+    expect(finishOf('2026-09-07', Number.MAX_VALUE)).toBeNull();
+  });
+
+  it('yields null for an invalid or impossible start date', () => {
+    expect(finishOf('not-a-date', 5)).toBeNull();
+    expect(finishOf('2026-13-45', 5)).toBeNull();
+    expect(finishOf('2026-02-30', 1.5)).toBeNull();
+  });
+
+  it('still honours an explicit committedFinish over the estimate', () => {
+    expect(loqEffectiveFinish(loq({ committedStart: '2026-09-07', committedFinish: '2026-09-30', estimateDays: 1.5 }))).toBe('2026-09-30');
+  });
+
+  it('terminates at once on a fractional estimate (the old integer loop never reached count === 1.5)', () => {
+    const start = Date.now();
+    expect(finishOf('2026-09-07', 1.5)).toBe('2026-09-08');
+    expect(Date.now() - start).toBeLessThan(1000);
+  });
+});
+
+describe('getCinematicDisciplineRollup — fractional estimate, implicit finish', () => {
+  it('preserves the fractional estimate in the demand intensity (1.5 over a 2-day window → 0.75, not 1)', () => {
+    const anim = discipline({ name: 'Animation' });
+    // Mon 2026-09-07 + 1.5 working days → Tue 2026-09-08; 2 working days in [Mon,Tue] → 1.5 / 2.
+    const l = loq({ cinematicId: CINE, disciplineId: anim.id, committedStart: '2026-09-07', committedFinish: null, estimateDays: 1.5 });
+    const sep = getCinematicDisciplineRollup(CINE, [l], [], [anim], '2026-09');
+    expect(find(sep, anim.id)?.demand).toBe(0.75);
+  });
+
+  it('contributes no demand when the estimate yields no derivable finish', () => {
+    const anim = discipline({ name: 'Animation' });
+    const l = loq({ cinematicId: CINE, disciplineId: anim.id, committedStart: '2026-09-07', committedFinish: null, estimateDays: -4 });
+    const sep = getCinematicDisciplineRollup(CINE, [l], [], [anim], '2026-09');
+    expect(find(sep, anim.id)?.demand).toBe(0);
+  });
+
+  it('loqDemandPeriods terminates and returns the touched month for a fractional, finish-less LOQ', () => {
+    const l = loq({ committedStart: '2026-09-07', committedFinish: null, estimateDays: 1.5 });
+    expect(loqDemandPeriods([l])).toEqual(['2026-09']);
   });
 });
 

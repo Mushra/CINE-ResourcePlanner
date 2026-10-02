@@ -23,10 +23,14 @@ export interface LoqDisciplineRollupLine {
   assigned: number;
 }
 
-/** Inclusive Mon-Fri count between two ISO dates. UTC-based so it's immune to local timezone DST. */
+/** Inclusive Mon-Fri count between two ISO dates. UTC-based so it's immune to local timezone DST.
+ * Returns 0 for an unparseable endpoint (never spins on a NaN timestamp). */
 function workingDaysBetween(startIso: string, finishIso: string): number {
-  const start = Date.UTC(...parseIso(startIso));
-  const finish = Date.UTC(...parseIso(finishIso));
+  const s = parseIso(startIso);
+  const f = parseIso(finishIso);
+  if (!s || !f) return 0;
+  const start = Date.UTC(...s);
+  const finish = Date.UTC(...f);
   if (finish < start) return 0;
   let count = 0;
   for (let t = start; t <= finish; t += 86_400_000) {
@@ -37,25 +41,46 @@ function workingDaysBetween(startIso: string, finishIso: string): number {
 }
 
 /**
- * The date of the nth working day (Mon-Fri) counting forward from startIso, where startIso itself
- * is day 1 if it's a working day (matching "a 1-working-day task starting Monday finishes Monday").
- * If startIso falls on a weekend, counting begins at the next working day. n <= 0 returns startIso.
+ * The ISO date (yyyy-mm-dd) a task starting at startIso and lasting n working days finishes on, or
+ * null when there is no derivable finish. startIso is working day 1 when it's a weekday; a weekend
+ * start with a positive duration begins counting on the following Monday. A fractional n is rounded
+ * UP to the whole working day that contains the finish — 0.5d from Monday finishes Monday, 1.5d from
+ * Monday finishes Tuesday, 1.5d from Friday finishes Monday — while callers keep the exact fractional
+ * n for load math (we never round the estimate itself). n === 0 keeps the start date; negative, NaN,
+ * Infinity, an unparseable start, or a duration so large it overflows the Date range all yield null
+ * (no usable window). Computed arithmetically — no per-day loop — so even an absurd n returns at once
+ * rather than spinning (the integer-loop version froze on any fractional n, since count === n never
+ * held for, say, n = 1.5).
  */
-function addWorkingDays(startIso: string, n: number): string {
-  if (n <= 0) return startIso;
-  let t = Date.UTC(...parseIso(startIso));
-  let count = 0;
-  for (;;) {
-    const day = new Date(t).getUTCDay();
-    if (day !== 0 && day !== 6) count += 1;
-    if (count === n) return new Date(t).toISOString().slice(0, 10);
-    t += 86_400_000;
-  }
+function addWorkingDays(startIso: string, n: number): string | null {
+  const parsed = parseIso(startIso);
+  if (!parsed) return null;
+  if (n === 0) return startIso;
+  if (!Number.isFinite(n) || n < 0) return null;
+  const workingDays = Math.ceil(n); // the whole working day containing the fractional finish
+  const DAY = 86_400_000;
+  let t = Date.UTC(...parsed);
+  let dow = new Date(t).getUTCDay();
+  // A weekend start rolls forward to Monday before counting (Monday is then working day 1).
+  if (dow === 6) { t += 2 * DAY; dow = 1; } else if (dow === 0) { t += 1 * DAY; dow = 1; }
+  const remaining = workingDays - 1; // the effective start already is working day 1
+  const extraDays = Math.floor(remaining / 5) * 7 + ((dow + (remaining % 5) > 5) ? (remaining % 5) + 2 : (remaining % 5));
+  const finish = new Date(t + extraDays * DAY);
+  return Number.isNaN(finish.getTime()) ? null : finish.toISOString().slice(0, 10);
 }
 
-function parseIso(iso: string): [number, number, number] {
-  const [y, m, d] = iso.split('-').map(Number);
-  return [y, m - 1, d];
+/** Parses yyyy-mm-dd into a UTC [year, monthIndex, day] tuple, or null when the string is not a real
+ * calendar date (wrong shape, non-numeric, or an impossible day such as 2026-02-30 or 2026-13-45) —
+ * so a bad date degrades to "no window" instead of a NaN timestamp. */
+function parseIso(iso: string): [number, number, number] | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!match) return null;
+  const y = Number(match[1]);
+  const month = Number(match[2]);
+  const d = Number(match[3]);
+  const probe = new Date(Date.UTC(y, month - 1, d));
+  if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== month - 1 || probe.getUTCDate() !== d) return null;
+  return [y, month - 1, d];
 }
 
 /** Whether period P falls within [startIso, finishIso] inclusive (by month, not day). */
@@ -70,6 +95,7 @@ function periodWithinWindow(period: Period, startIso: string | null, finishIso: 
 function loqDemandIntensity(loq: Loq): number {
   if (!loq.committedStart || loq.estimateDays == null) return 0;
   const finish = loq.committedFinish ?? addWorkingDays(loq.committedStart, loq.estimateDays);
+  if (!finish) return 0; // no derivable finish (negative/absurd estimate, bad start) → no demand
   const days = workingDaysBetween(loq.committedStart, finish);
   if (days <= 0) return 0;
   return loq.estimateDays / days;
