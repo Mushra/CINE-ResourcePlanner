@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { PlanningEngine } from '../src/engine/planning';
 import {
   buildEffectiveStatusMap,
+  cellBlockedLoqs,
+  cellHealth,
+  cinematicHealth,
   cinematicStatus,
   deriveLoqHealth,
   isTerminalStatus,
+  representativeLoq,
   statusResolverFrom,
 } from '../src/engine/watchtower';
 import type { LoqForecast } from '../src/engine/loqForecast';
@@ -119,5 +123,75 @@ describe('cinematicStatus priority rollup', () => {
 
   it('returns null for a Cinematic with no LOQs', () => {
     expect(rollup([])).toBeNull();
+  });
+
+  it('A06: a BLOCKED sibling hidden behind an in-progress representative still rolls up to BLOCKED', () => {
+    const rep = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'IN_PROGRESS', committedStart: '2026-10-01' });
+    const blocked = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'BLOCKED', committedStart: '2026-11-01' });
+    // Same cell: the representative is the in-progress one, yet the block must not be masked.
+    expect(representativeLoq([rep, blocked], cine.id, animation.id)?.id).toBe(rep.id);
+    expect(cinematicStatus(cine.id, [animation.id], [rep, blocked])).toBe('BLOCKED');
+  });
+
+  it('A06: a once-blocked sibling that is now DONE raises no false active block', () => {
+    const rep = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'IN_PROGRESS', committedStart: '2026-10-01' });
+    const finished = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'DONE', committedStart: '2026-09-01' });
+    expect(cinematicStatus(cine.id, [animation.id], [rep, finished])).toBe('IN_PROGRESS');
+  });
+});
+
+describe('cellBlockedLoqs (A06 masking)', () => {
+  const animation = discipline({ name: 'Animation' });
+  const cine = cinematic({});
+
+  it('returns involuntarily-blocked siblings, excluding terminal and paused ones', () => {
+    const inProgress = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'IN_PROGRESS' });
+    const blocked = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'BLOCKED' });
+    const blockedDone = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'DONE' });
+    const blockedPaused = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'BLOCKED', paused: true });
+    const result = cellBlockedLoqs([inProgress, blocked, blockedDone, blockedPaused], cine.id, animation.id);
+    expect(result.map((l) => l.id)).toEqual([blocked.id]);
+  });
+
+  it('scopes to the given (cinematic, discipline) cell only', () => {
+    const other = discipline({ name: 'Layout' });
+    const here = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'BLOCKED' });
+    const elsewhere = loq({ cinematicId: cine.id, disciplineId: other.id, status: 'BLOCKED' });
+    expect(cellBlockedLoqs([here, elsewhere], cine.id, animation.id).map((l) => l.id)).toEqual([here.id]);
+  });
+
+  it('honours the effective (Jira-mirrored) status via the resolver', () => {
+    const l1 = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'IN_PROGRESS' });
+    const resolver = statusResolverFrom(new Map([[l1.id, 'BLOCKED' as const]]));
+    expect(cellBlockedLoqs([l1], cine.id, animation.id, resolver).map((l) => l.id)).toEqual([l1.id]);
+  });
+});
+
+describe('cellHealth / cinematicHealth (A06 masking)', () => {
+  const animation = discipline({ name: 'Animation' });
+  const cine = cinematic({});
+  const forecasts = new Map<string, LoqForecast>();
+
+  it('raises an on-track cell to blocked when a sibling is blocked behind the representative', () => {
+    const rep = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'IN_PROGRESS', committedStart: '2026-10-01' });
+    const blocked = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'BLOCKED', committedStart: '2026-11-01' });
+    expect(deriveLoqHealth(rep, undefined, 'IN_PROGRESS')).toBe('on-track');
+    expect(cellHealth([rep, blocked], cine.id, animation.id, forecasts)).toBe('blocked');
+    expect(cinematicHealth(cine.id, [animation.id], [rep, blocked], forecasts)).toBe('blocked');
+  });
+
+  it('keeps the representative health when no sibling is blocked', () => {
+    const rep = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'IN_PROGRESS' });
+    expect(cellHealth([rep], cine.id, animation.id, forecasts)).toBe('on-track');
+  });
+
+  it('a once-blocked but now DONE sibling does not blacken the cell', () => {
+    const rep = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'IN_PROGRESS', committedStart: '2026-10-01' });
+    const finished = loq({ cinematicId: cine.id, disciplineId: animation.id, status: 'DONE', committedStart: '2026-09-01' });
+    expect(cellHealth([rep, finished], cine.id, animation.id, forecasts)).toBe('on-track');
+  });
+
+  it('returns null for an empty cell', () => {
+    expect(cellHealth([], cine.id, animation.id, forecasts)).toBeNull();
   });
 });

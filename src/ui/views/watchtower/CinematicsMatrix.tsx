@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { useStore } from '../../../store/useStore';
 import { useUiStore, type MatrixGroupBy } from '../../../store/useUiStore';
 import {
-  CINEMATIC_STATUS_LABEL, HEALTH_LABEL, HEALTH_ORDER, buildEffectiveStatusMap, cinematicHealth,
-  cinematicStatus, representativeLoq, statusResolverFrom, worstDiscipline, type CinematicOverallStatus,
+  CINEMATIC_STATUS_LABEL, HEALTH_LABEL, HEALTH_ORDER, buildEffectiveStatusMap, cellBlockedLoqs,
+  cinematicHealth, cinematicStatus, representativeLoq, statusResolverFrom, worstDiscipline,
+  type CinematicOverallStatus,
 } from '../../../engine/watchtower';
 import { CANONICAL_STATUS_LABEL, UNMAPPED, type EffectiveStatus } from '../../../domain/jiraStatusMap';
 import { Button } from '../../components/Button';
@@ -191,10 +192,23 @@ export function CinematicsMatrix({ project, checks }: { project: Project; checks
           const loq = representativeLoq(loqs, cinematic.id, disciplineId, statusOf);
           if (!loq) return <td key={disciplineId} className="mx-na">N/A</td>;
           const statusCell = loqStatusCell(loq, effectiveStatusMap.get(loq.id));
+          // A06: a blocked sibling the representative hides — surface it as an openable alert so the
+          // block is visible and the blocked LOQ reachable, without changing which LOQ the cell shows.
+          const maskedBlocked = cellBlockedLoqs(loqs, cinematic.id, disciplineId, statusOf).filter((b) => b.id !== loq.id);
           return (
             <td key={disciplineId} className="mx-cell" onClick={() => openLoq(loq.id, cinematic.id)}>
               <div className="mx-cell-level">{loq.type}</div>
               <div className={`mx-cell-status loq-status ${statusCell.className}`}>{statusCell.label}</div>
+              {maskedBlocked.length > 0 && (
+                <button
+                  type="button"
+                  className="mx-cell-blocked"
+                  title={`${maskedBlocked.length} blocked LOQ${maskedBlocked.length > 1 ? 's' : ''} behind this one — open`}
+                  onClick={(e) => { e.stopPropagation(); openLoq(maskedBlocked[0].id, cinematic.id); }}
+                >
+                  <Icon name="warning" size={11} /> {maskedBlocked.length} blocked
+                </button>
+              )}
             </td>
           );
         })}

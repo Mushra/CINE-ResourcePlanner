@@ -146,6 +146,52 @@ export function representativeLoq(
   return pickMostRecentlyDone(candidates);
 }
 
+/**
+ * Every involuntarily-BLOCKED LOQ in a (Cinematic, discipline) cell — the siblings a single
+ * representative LOQ can hide (bug A06: an in-progress representative masked a blocked sibling, so
+ * the cell read on-track and the block was neither visible nor openable). The representative stays
+ * whatever representativeLoq picks; this scans *all* milestones in the cell so blocking can be
+ * surfaced and the blocked LOQ opened directly. A voluntary pause is a calm hold, not an involuntary
+ * block (it reads `on-hold`, see deriveLoqHealth), so paused rows are excluded; a terminal
+ * (DONE/CUT) — or deleted — milestone never counts as an active block, so finished/removed work
+ * raises no false alarm.
+ */
+export function cellBlockedLoqs(
+  loqs: Loq[],
+  cinematicId: string,
+  disciplineId: string,
+  statusOf: StatusResolver = OWN_STATUS,
+): Loq[] {
+  return loqs.filter(
+    (l) =>
+      l.cinematicId === cinematicId &&
+      l.disciplineId === disciplineId &&
+      !l.paused &&
+      statusOf(l) === 'BLOCKED',
+  );
+}
+
+/**
+ * Health of a (Cinematic, discipline) cell: the representative LOQ's own health, raised to `blocked`
+ * when any sibling in the cell is involuntarily blocked (A06). This keeps the representative as the
+ * cell's displayed milestone while making the alert span *all* its milestones, so a block hidden
+ * behind an in-progress representative still colours the cell and rolls up. Null when the cell has no
+ * LOQ at all.
+ */
+export function cellHealth(
+  loqs: Loq[],
+  cinematicId: string,
+  disciplineId: string,
+  forecasts: ReadonlyMap<string, LoqForecast>,
+  statusOf: StatusResolver = OWN_STATUS,
+): WatchtowerHealth | null {
+  const rep = representativeLoq(loqs, cinematicId, disciplineId, statusOf);
+  if (!rep) return null;
+  const repHealth = deriveLoqHealth(rep, forecasts.get(rep.id), statusOf(rep));
+  if (cellBlockedLoqs(loqs, cinematicId, disciplineId, statusOf).length === 0) return repHealth;
+  return HEALTH_SEVERITY[repHealth] >= HEALTH_SEVERITY.blocked ? repHealth : 'blocked';
+}
+
 /** Worst health across every discipline that has a representative LOQ for this Cinematic. Null when
  * the Cinematic has no LOQs at all yet. */
 export function cinematicHealth(
@@ -157,9 +203,8 @@ export function cinematicHealth(
 ): WatchtowerHealth | null {
   let worst: WatchtowerHealth | null = null;
   for (const disciplineId of disciplineIds) {
-    const loq = representativeLoq(loqs, cinematicId, disciplineId, statusOf);
-    if (!loq) continue;
-    const health = deriveLoqHealth(loq, forecasts.get(loq.id), statusOf(loq));
+    const health = cellHealth(loqs, cinematicId, disciplineId, forecasts, statusOf);
+    if (health === null) continue;
     if (worst === null || HEALTH_SEVERITY[health] > HEALTH_SEVERITY[worst]) worst = health;
   }
   return worst;
@@ -189,6 +234,9 @@ export function cinematicStatus(
     .filter((loq): loq is Loq => loq !== null);
   if (active.length === 0) return null;
   const present = new Set<CinematicOverallStatus>(active.map((l) => (l.paused ? 'ON_HOLD' : statusOf(l))));
+  // A06: a BLOCKED sibling hidden behind an in-progress representative is still a real block — make
+  // it dominate the rollup (BLOCKED is top priority) rather than let the representative mask it.
+  if (disciplineIds.some((d) => cellBlockedLoqs(loqs, cinematicId, d, statusOf).length > 0)) present.add('BLOCKED');
   return CINEMATIC_STATUS_PRIORITY.find((s) => present.has(s)) ?? null;
 }
 
@@ -206,9 +254,8 @@ export function worstDiscipline(
   let worstId: string | null = null;
   let worstHealth: WatchtowerHealth | null = null;
   for (const disciplineId of disciplineIds) {
-    const loq = representativeLoq(loqs, cinematicId, disciplineId, statusOf);
-    if (!loq) continue;
-    const health = deriveLoqHealth(loq, forecasts.get(loq.id), statusOf(loq));
+    const health = cellHealth(loqs, cinematicId, disciplineId, forecasts, statusOf);
+    if (health === null) continue;
     if (worstHealth === null || HEALTH_SEVERITY[health] > HEALTH_SEVERITY[worstHealth]) {
       worstHealth = health;
       worstId = disciplineId;

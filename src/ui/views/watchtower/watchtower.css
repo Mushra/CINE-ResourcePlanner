@@ -146,6 +146,15 @@ table.mx-table th.mx-cin-col { background: var(--surface-1); z-index: 2; }
 .mx-cell { cursor: pointer; }
 .mx-cell-level { font-weight: 600; }
 .mx-cell-status { font-size: 10.5px; color: var(--text-tertiary); margin-top: 1px; }
+/* A06: an openable alert for a blocked LOQ the representative cell would otherwise hide. */
+.mx-cell-blocked {
+  display: inline-flex; align-items: center; gap: 3px; margin-top: 4px;
+  padding: 1px 6px; border-radius: 10px; cursor: pointer;
+  font-size: 10px; font-weight: 600;
+  color: var(--wt-blocked); background: var(--wt-blocked-bg);
+  border: 1px solid var(--wt-blocked-border);
+}
+.mx-cell-blocked:hover { background: var(--status-critical-bg); filter: brightness(1.05); }
 .mx-na { color: var(--text-tertiary); }
 .mx-group-row { cursor: pointer; background: var(--surface-1); }
 .mx-group-row td { font-weight: 600; font-size: 11.5px; color: var(--text-secondary); }
